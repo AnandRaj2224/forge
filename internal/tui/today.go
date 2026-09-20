@@ -108,13 +108,7 @@ func (s *TodayScreen) Reload() {
 		st := ComputeTaskStatus(ctx, s.app.DB, t.ID)
 		s.status[i] = st
 		s.bundles[i] = ResolveBundle(ctx, s.app.DB, t)
-		mark := "TODO"
-		if st == TaskActive {
-			mark = "ACTIVE"
-		} else if st == TaskCompleted {
-			mark = "DONE"
-		}
-		rows = append(rows, table.Row{fmt.Sprint(i + 1), string(t.Domain), t.Title, FormatDuration(t.PlannedSeconds), mark})
+		rows = append(rows, TodayTaskRow(i, t, st))
 	}
 	s.tbl.SetRows(rows)
 	if keepCursor != "" {
@@ -426,17 +420,51 @@ func (s *TodayScreen) detailView() string {
 			sb.WriteString("  " + thPrimary.Render(p.Topic) + "\n")
 		}
 	case len(b.DSA) > 0:
+		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+		var repeats, news []DSAItem
 		for _, d := range b.DSA {
-			sb.WriteString("  " + thPrimary.Render(d.Title) + "  " + thMeta.Render("["+string(d.Mode)+"]") + "\n")
-		}
-	case len(b.SWE) > 0:
-		for _, sw := range b.SWE {
-			if sw.Task != "" {
-				sb.WriteString(thSectionHead.Render(sw.Area) + "\n  " + thPrimary.Render(sw.Task) + "\n")
+			if d.Mode == db.DSAModeNew {
+				news = append(news, d)
 			} else {
-				sb.WriteString(thPrimary.Render(sw.Area) + "\n")
+				repeats = append(repeats, d)
 			}
 		}
+		if len(repeats) > 0 {
+			sb.WriteString(SectionHeader("REPEAT") + "\n")
+			for _, d := range repeats {
+				sb.WriteString("  " + thPrimary.Render(d.Title) + "\n")
+			}
+		}
+		if len(news) > 0 {
+			sb.WriteString(SectionHeader("NEW") + "\n")
+			for _, d := range news {
+				sb.WriteString("  " + thPrimary.Render(d.Title) + "\n")
+			}
+		}
+		sb.WriteString("\n" + MetaRow("Status", string(st), 8) + "\n\n")
+		sb.WriteString(s.startBtn.View())
+		if s.startBtn.Disabled {
+			sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
+		}
+		return sb.String()
+	case len(b.SWE) > 0:
+		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+		lastArea := ""
+		for _, sw := range b.SWE {
+			if sw.Area != lastArea {
+				sb.WriteString(thSectionHead.Render(sw.Area) + "\n")
+				lastArea = sw.Area
+			}
+			if sw.Task != "" {
+				sb.WriteString("  " + thPrimary.Render(sw.Task) + "\n")
+			}
+		}
+		sb.WriteString("\n" + MetaRow("Status", string(st), 8) + "\n\n")
+		sb.WriteString(s.startBtn.View())
+		if s.startBtn.Disabled {
+			sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
+		}
+		return sb.String()
 	default:
 		sb.WriteString(thPrimary.Render(t.Title) + "\n")
 	}

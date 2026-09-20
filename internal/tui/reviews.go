@@ -5,7 +5,6 @@ import (
 
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -13,19 +12,14 @@ import (
 
 type ReviewsScreen struct {
 	app      *App
-	weeks    list.Model
+	weeks    Navigator
 	reports  []db.WeeklyReview
 	selected *db.WeeklyReview
 	err      string
 }
 
 func NewReviewsScreen(a *App) *ReviewsScreen {
-	l := list.New(nil, list.NewDefaultDelegate(), 30, 14)
-	l.SetShowHelp(false)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	return &ReviewsScreen{app: a, weeks: l}
+	return &ReviewsScreen{app: a, weeks: NewNavigator()}
 }
 
 func (s *ReviewsScreen) Reload() {
@@ -36,22 +30,22 @@ func (s *ReviewsScreen) Reload() {
 	}
 	SortReviews(reps)
 	s.reports = reps
-	items := make([]list.Item, 0, len(reps))
+	items := make([]listItem, 0, len(reps))
 	for _, r := range reps {
 		items = append(items, listItem{id: r.ID, title: r.ID, desc: fmt.Sprintf("%s — %s", r.WeekStart, r.WeekEnd)})
 	}
-	s.weeks.SetItems(items)
+	s.weeks.SetItems(wrapItems(items))
 	s.syncSelected()
 }
 
 func (s *ReviewsScreen) syncSelected() {
-	it, ok := s.weeks.SelectedItem().(listItem)
-	if !ok {
+	id := s.weeks.SelectedID()
+	if id == "" {
 		s.selected = nil
 		return
 	}
 	for i, r := range s.reports {
-		if r.ID == it.id {
+		if r.ID == id {
 			s.selected = &s.reports[i]
 			return
 		}
@@ -62,27 +56,21 @@ func (s *ReviewsScreen) syncSelected() {
 func (s *ReviewsScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyMsg); ok && (k.String() == "j" || k.String() == "k" || k.String() == "down" || k.String() == "up") {
 		down := k.String() == "j" || k.String() == "down"
-		prev := ""
-		if it, ok := s.weeks.SelectedItem().(listItem); ok {
-			prev = it.id
-		}
+		prev := s.weeks.SelectedID()
 		if down {
-			s.weeks.CursorDown()
+			s.weeks.List.CursorDown()
 		} else {
-			s.weeks.CursorUp()
+			s.weeks.List.CursorUp()
 		}
-		if it, ok := s.weeks.SelectedItem().(listItem); ok && it.id != prev {
+		if s.weeks.SelectedID() != prev {
 			s.syncSelected()
 		}
 		return nil
 	}
-	prev := ""
-	if it, ok := s.weeks.SelectedItem().(listItem); ok {
-		prev = it.id
-	}
+	prev := s.weeks.SelectedID()
 	var c tea.Cmd
-	s.weeks, c = s.weeks.Update(msg)
-	if it, ok := s.weeks.SelectedItem().(listItem); ok && it.id != prev {
+	s.weeks.List, c = s.weeks.List.Update(msg)
+	if s.weeks.SelectedID() != prev {
 		s.syncSelected()
 	}
 	return c
@@ -95,9 +83,9 @@ func (s *ReviewsScreen) View() string {
 	if listH < 8 {
 		listH = 8
 	}
-	s.weeks.SetWidth(lw - 4)
-	s.weeks.SetHeight(fitListHeight(len(s.weeks.Items()), listH))
-	return lipglossJoin(Panel("REVIEWS", s.weeks.View(), lw, true), Panel("WEEKLY REPORT", s.reportView(), rw, false))
+	s.weeks.List.SetWidth(lw - 4)
+	s.weeks.FitHeight(listH)
+	return lipglossJoin(Panel("REVIEWS", s.weeks.List.View(), lw, true), Panel("WEEKLY REPORT", s.reportView(), rw, false))
 }
 
 func (s *ReviewsScreen) reportView() string {

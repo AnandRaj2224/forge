@@ -132,6 +132,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.reloadCurrent()
 		return a, nil
 	case tea.KeyMsg:
+		// While the in-place evidence form owns focus, it owns every key
+		// except Quit and Back. In particular digits (1-5), r and x must
+		// reach text inputs instead of triggering global navigation.
+		inForm := a.tab == TabToday && a.today.zone == tzRight && a.today.right == "result"
+		if inForm && m.String() != "q" && m.String() != "ctrl+c" && m.String() != "esc" {
+			break
+		}
 		switch m.String() {
 		case "q", "ctrl+c":
 			return a, tea.Quit
@@ -328,16 +335,21 @@ func (a *App) footerView(w int) string {
 			parts = append(parts, thFootDesc.Render(g[1]))
 			continue
 		}
-		parts = append(parts, thFootKey.Render(g[0])+thFootDesc.Render("  "+g[1]))
+		parts = append(parts, footChip(g[0])+thFootDesc.Render("  "+g[1]))
 	}
 	line := strings.Join(parts, "     ")
 	if lipgloss.Width(line) > w-2 {
-		// Narrow terminals: keep primary groups only.
+		// Narrow terminals: plain keys, primary groups only.
 		line = thFootKey.Render("q") + thFootDesc.Render("  Quit") + "     " +
 			thFootKey.Render("Enter") + thFootDesc.Render("  Select") + "     " +
 			thFootKey.Render("Esc") + thFootDesc.Render("  Back")
 	}
 	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true, false, false, false).BorderForeground(cDimLine).Width(w).Render(line)
+}
+
+// footChip renders a key badge for the action bar.
+func footChip(key string) string {
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cDimLine).Padding(0, 1).Render(thFootKey.Render(key))
 }
 
 func (a *App) screenHints() (string, bool) {

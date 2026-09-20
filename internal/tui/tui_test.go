@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	db "forge/internal/db"
@@ -109,5 +110,37 @@ func TestButtonDisabledView(t *testing.T) {
 	c := Checkbox{Label: "x"}
 	if c.Checked {
 		t.Fatal("checkbox must start unchecked")
+	}
+}
+
+// Radio selection and focus markers must stay visible across YES->NO->YES.
+func TestRadioRoundTripMarkers(t *testing.T) {
+	r := NewRadio([]string{"YES", "NO"})
+	r.Focused = true
+	seen := map[int]bool{}
+	for _, want := range []int{0, 1, 0} {
+		for r.Cursor != want {
+			r.Move(1)
+		}
+		r.Choose()
+		v := r.View()
+		if strings.Count(v, "◉") != 1 {
+			t.Fatalf("exactly one ◉ required, got:\n%s", v)
+		}
+		if !strings.Contains(v, "▸") {
+			t.Fatalf("focus marker missing:\n%s", v)
+		}
+		if !strings.Contains(v, "◉  "+r.Options[want]) {
+			t.Fatalf("selection not on %q:\n%s", r.Options[want], v)
+		}
+		seen[want] = true
+	}
+	if !seen[0] || !seen[1] {
+		t.Fatal("round trip must visit both options")
+	}
+	// Unfocused radio keeps selection visible without focus marker.
+	r.Focused = false
+	if v := r.View(); strings.Count(v, "◉") != 1 {
+		t.Fatalf("selection must persist unfocused:\n%s", v)
 	}
 }

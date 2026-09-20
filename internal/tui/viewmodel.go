@@ -155,13 +155,18 @@ func ResolveBundle(ctx context.Context, q db.DBTX, t db.TodayTask) Bundle {
 			b.RawNote = "invalid DSA target"
 			return b
 		}
-		di := DSAItem{ProblemID: dt.ProblemID, Mode: dt.Mode}
-		if p, err := catalog.GetDSAProblem(ctx, q, dt.ProblemID); err == nil {
-			di.Title, di.Pattern = p.Title, p.Pattern
-		} else {
-			di.Title = string(dt.ProblemID)
+		for _, item := range dt.Items() {
+			di := DSAItem{ProblemID: item.ProblemID, Mode: item.Mode}
+			if p, err := catalog.GetDSAProblem(ctx, q, item.ProblemID); err == nil {
+				di.Title, di.Pattern = p.Title, p.Pattern
+			} else {
+				di.Title = string(item.ProblemID)
+			}
+			b.DSA = append(b.DSA, di)
 		}
-		b.DSA = []DSAItem{di}
+		if len(b.DSA) == 0 {
+			b.RawNote = "empty DSA target"
+		}
 		return b
 	case db.DomainSWE:
 		st, err := db.UnmarshalSWETarget(raw)
@@ -169,28 +174,33 @@ func ResolveBundle(ctx context.Context, q db.DBTX, t db.TodayTask) Bundle {
 			b.RawNote = "invalid SWE target"
 			return b
 		}
-		si := SWEItem{AreaID: st.AreaID, TaskID: st.TaskID}
 		areas, _ := catalog.GetSWEAreas(ctx, q)
-		for _, a := range areas {
-			if a.ID == st.AreaID {
-				si.Area = a.Name
-			}
-		}
-		if si.Area == "" {
-			si.Area = string(st.AreaID)
-		}
-		if st.TaskID != nil {
-			tasks, _ := catalog.GetSWETasks(ctx, q, st.AreaID)
-			for _, tk := range tasks {
-				if tk.ID == *st.TaskID {
-					si.Task = tk.Title
+		areaName := func(id db.ID) string {
+			for _, a := range areas {
+				if a.ID == id {
+					return a.Name
 				}
 			}
-			if si.Task == "" {
-				si.Task = string(*st.TaskID)
-			}
+			return string(id)
 		}
-		b.SWE = []SWEItem{si}
+		for _, item := range st.Items() {
+			si := SWEItem{AreaID: item.AreaID, TaskID: item.TaskID, Area: areaName(item.AreaID)}
+			if item.TaskID != nil {
+				tasks, _ := catalog.GetSWETasks(ctx, q, item.AreaID)
+				for _, tk := range tasks {
+					if tk.ID == *item.TaskID {
+						si.Task = tk.Title
+					}
+				}
+				if si.Task == "" {
+					si.Task = string(*item.TaskID)
+				}
+			}
+			b.SWE = append(b.SWE, si)
+		}
+		if len(b.SWE) == 0 {
+			b.RawNote = "empty SWE target"
+		}
 		return b
 	}
 	b.RawNote = "unknown domain"

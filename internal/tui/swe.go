@@ -7,7 +7,6 @@ import (
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -23,8 +22,8 @@ type SWETaskDetail struct {
 type SWEScreen struct {
 	app      *App
 	areas    []db.SWEArea
-	areaList list.Model
-	taskList list.Model
+	areaList Navigator
+	taskList Navigator
 	focusR   bool
 	detail   *SWETaskDetail
 	showing  string // "area" or "task"
@@ -32,15 +31,7 @@ type SWEScreen struct {
 }
 
 func NewSWEScreen(a *App) *SWEScreen {
-	mk := func() list.Model {
-		l := list.New(nil, list.NewDefaultDelegate(), 28, 14)
-		l.SetShowHelp(false)
-		l.SetShowTitle(false)
-		l.SetShowStatusBar(false)
-		l.SetFilteringEnabled(false)
-		return l
-	}
-	return &SWEScreen{app: a, areaList: mk(), taskList: mk(), showing: "area"}
+	return &SWEScreen{app: a, areaList: NewNavigator(), taskList: NewNavigator(), showing: "area"}
 }
 
 func (s *SWEScreen) Reload() {
@@ -51,22 +42,22 @@ func (s *SWEScreen) Reload() {
 		return
 	}
 	s.areas = areas
-	items := make([]list.Item, 0, len(areas))
+	items := make([]listItem, 0, len(areas))
 	for _, a := range areas {
 		items = append(items, listItem{id: string(a.ID), title: a.Name})
 	}
-	s.areaList.SetItems(items)
+	s.areaList.SetItems(wrapItems(items))
 	s.showing = "area"
 	s.reloadTasks()
 }
 
 func (s *SWEScreen) selArea() *db.SWEArea {
-	it, ok := s.areaList.SelectedItem().(listItem)
-	if !ok {
+	id := s.areaList.SelectedID()
+	if id == "" {
 		return nil
 	}
 	for i, a := range s.areas {
-		if string(a.ID) == it.id {
+		if string(a.ID) == id {
 			return &s.areas[i]
 		}
 	}
@@ -85,7 +76,7 @@ func (s *SWEScreen) reloadTasks() {
 		s.err = err.Error()
 		return
 	}
-	items := make([]list.Item, 0, len(tasks))
+	items := make([]listItem, 0, len(tasks))
 	for _, t := range tasks {
 		done, _ := runtime.IsSWETaskComplete(ctx, s.app.DB, t.ID)
 		mark := "○"
@@ -94,7 +85,7 @@ func (s *SWEScreen) reloadTasks() {
 		}
 		items = append(items, listItem{id: string(t.ID), title: mark + "  " + t.Title})
 	}
-	s.taskList.SetItems(items)
+	s.taskList.SetItems(wrapItems(items))
 }
 
 func (s *SWEScreen) openTask(areaID, taskID string) {
@@ -156,8 +147,8 @@ func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 			}
 			if s.focusR {
 				area := s.selArea()
-				if it, ok := s.taskList.SelectedItem().(listItem); ok && it.id != "" && area != nil {
-					s.openTask(string(area.ID), it.id)
+				if id := s.taskList.SelectedID(); id != "" && area != nil {
+					s.openTask(string(area.ID), id)
 				}
 				return nil
 			}
@@ -167,22 +158,19 @@ func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 			down := k.String() == "j" || k.String() == "down"
 			if s.focusR {
 				if down {
-					s.taskList.CursorDown()
+					s.taskList.List.CursorDown()
 				} else {
-					s.taskList.CursorUp()
+					s.taskList.List.CursorUp()
 				}
 				return nil
 			}
-			prev := ""
-			if it, ok := s.areaList.SelectedItem().(listItem); ok {
-				prev = it.id
-			}
+			prev := s.areaList.SelectedID()
 			if down {
-				s.areaList.CursorDown()
+				s.areaList.List.CursorDown()
 			} else {
-				s.areaList.CursorUp()
+				s.areaList.List.CursorUp()
 			}
-			if it, ok := s.areaList.SelectedItem().(listItem); ok && it.id != prev {
+			if s.areaList.SelectedID() != prev {
 				s.reloadTasks()
 			}
 			return nil
@@ -190,16 +178,13 @@ func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 	}
 	if s.focusR {
 		var c tea.Cmd
-		s.taskList, c = s.taskList.Update(msg)
+		s.taskList.List, c = s.taskList.List.Update(msg)
 		return c
 	}
-	prev := ""
-	if it, ok := s.areaList.SelectedItem().(listItem); ok {
-		prev = it.id
-	}
+	prev := s.areaList.SelectedID()
 	var c tea.Cmd
-	s.areaList, c = s.areaList.Update(msg)
-	if it, ok := s.areaList.SelectedItem().(listItem); ok && it.id != prev {
+	s.areaList.List, c = s.areaList.List.Update(msg)
+	if s.areaList.SelectedID() != prev {
 		s.reloadTasks()
 	}
 	return c
@@ -212,10 +197,10 @@ func (s *SWEScreen) View() string {
 	if listH < 8 {
 		listH = 8
 	}
-	s.areaList.SetWidth(lw - 4)
-	s.taskList.SetWidth(rw - 4)
-	s.areaList.SetHeight(fitListHeight(len(s.areaList.Items()), listH))
-	s.taskList.SetHeight(fitListHeight(len(s.taskList.Items()), listH-8))
+	s.areaList.List.SetWidth(lw - 4)
+	s.taskList.List.SetWidth(rw - 4)
+	s.areaList.FitHeight(listH)
+	s.taskList.FitHeight(listH - 8)
 	var right string
 	if s.showing == "task" {
 		right = Panel("TASK", s.taskBody(), rw, true)
@@ -229,18 +214,18 @@ func (s *SWEScreen) View() string {
 			SectionHeader("PROGRESS") + "\n" +
 			ProgressBar{Ratio: r, Width: 26, ShowPct: true}.View() + "\n" +
 			thMeta.Render(fmt.Sprintf("%d / %d", pr.Done, pr.Total)) + "\n\n" +
-			SectionHeader("TASKS") + "\n" + s.taskList.View()
+			SectionHeader("TASKS") + "\n" + s.taskList.List.View()
 		right = Panel("AREA", body, rw, s.focusR)
 	} else {
-		right = Panel("AREA", thMeta.Render("Select an area."), rw, s.focusR)
+		right = Panel("AREA", EmptyState("Select an area."), rw, s.focusR)
 	}
-	return lipglossJoin(Panel("AREAS", s.areaList.View(), lw, !s.focusR), right)
+	return lipglossJoin(Panel("AREAS", s.areaList.List.View(), lw, !s.focusR), right)
 }
 
 func (s *SWEScreen) taskBody() string {
 	d := s.detail
 	if d == nil {
-		return thMeta.Render("Task not found: " + s.err)
+		return EmptyState("Task not found: " + s.err)
 	}
 	var sb string
 	sb += thScreenTitle.Render(d.Task.Title) + "\n"

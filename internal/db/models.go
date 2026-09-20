@@ -301,13 +301,53 @@ type GovPracticeTarget struct {
 }
 
 type DSATarget struct {
+	// Legacy singular block assignment.
+	ProblemID ID      `json:"problem_id,omitempty"`
+	Mode      DSAMode `json:"mode,omitempty"`
+	// Bundle block assignment: 2 repeat + 1 new problems.
+	Problems []DSAProblemTarget `json:"problems,omitempty"`
+}
+
+// DSAProblemTarget is one problem inside a DSA block bundle.
+type DSAProblemTarget struct {
 	ProblemID ID      `json:"problem_id"`
 	Mode      DSAMode `json:"mode"`
 }
 
+// Items normalizes legacy singular and bundle shapes into one list.
+func (t DSATarget) Items() []DSAProblemTarget {
+	if len(t.Problems) > 0 {
+		return t.Problems
+	}
+	if t.ProblemID != "" {
+		return []DSAProblemTarget{{ProblemID: t.ProblemID, Mode: t.Mode}}
+	}
+	return nil
+}
+
 type SWETarget struct {
+	// Legacy singular task assignment.
+	AreaID ID  `json:"area_id,omitempty"`
+	TaskID *ID `json:"task_id,omitempty"`
+	// Bundle assignment: the daily task combination.
+	Tasks []SWETaskTarget `json:"tasks,omitempty"`
+}
+
+// SWETaskTarget is one task inside a SWE block bundle.
+type SWETaskTarget struct {
 	AreaID ID  `json:"area_id"`
 	TaskID *ID `json:"task_id,omitempty"`
+}
+
+// Items normalizes legacy singular and bundle shapes into one list.
+func (t SWETarget) Items() []SWETaskTarget {
+	if len(t.Tasks) > 0 {
+		return t.Tasks
+	}
+	if t.AreaID != "" {
+		return []SWETaskTarget{{AreaID: t.AreaID, TaskID: t.TaskID}}
+	}
+	return nil
 }
 
 // MarshalTarget marshals a typed target payload strictly.

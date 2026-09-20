@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	db "forge/internal/db"
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -217,4 +220,122 @@ func IsBack(msg tea.KeyMsg) bool { return msg.String() == "esc" }
 // lipglossJoin places two panels side by side with a gap.
 func lipglossJoin(left, right string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left+" ", right)
+}
+
+// Navigator is the shared Forge list wrapper: no duplicated list chrome,
+// content-fitted height, single focus convention. All master navigators
+// (exams, subjects, patterns, areas, weeks) build on it.
+type Navigator struct {
+	List list.Model
+}
+
+// NewNavigator returns a chrome-free selectable list.
+func NewNavigator() Navigator {
+	l := list.New(nil, list.NewDefaultDelegate(), 28, 12)
+	l.SetShowHelp(false)
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	return Navigator{List: l}
+}
+
+// SetItems replaces rows.
+func (n *Navigator) SetItems(items []list.Item) { n.List.SetItems(items) }
+
+// FitHeight sizes the viewport to content so panels never float in padding.
+func (n *Navigator) FitHeight(maxH int) {
+	h := len(n.List.Items())*2 + 1
+	if h < 4 {
+		h = 4
+	}
+	if h > maxH {
+		h = maxH
+	}
+	n.List.SetHeight(h)
+}
+
+// SelectedID returns the selected row id for listItem rows.
+func (n Navigator) SelectedID() string {
+	if it, ok := n.List.SelectedItem().(listItem); ok {
+		return it.id
+	}
+	return ""
+}
+
+// wrapItems converts typed rows to list items.
+func wrapItems(in []listItem) []list.Item {
+	out := make([]list.Item, 0, len(in))
+	for _, it := range in {
+		out = append(out, it)
+	}
+	return out
+}
+
+// ExamCard is a real selectable bento card for the GOV exam dashboard.
+type ExamCard struct {
+	Name     string
+	Done     int
+	Total    int
+	Focused  bool
+	Selected bool
+	Width    int
+}
+
+func (c ExamCard) Percent() float64 {
+	if c.Total == 0 {
+		return 0
+	}
+	return float64(c.Done) / float64(c.Total)
+}
+
+// View renders the card (7 content lines + border). Keep in sync with
+// examCardHeight: dashboard grid math depends on uniform card height.
+func (c ExamCard) View() string {
+	w := c.Width
+	if w < 28 {
+		w = 28
+	}
+	var sb strings.Builder
+	sb.WriteString(thScreenTitle.Render(c.Name) + "\n")
+	sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
+	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: 20, ShowPct: true}.View() + "\n")
+	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
+	sb.WriteString(SectionHeader("PRACTICE READINESS") + "\n")
+	sb.WriteString(thHelp.Render("not yet calculated") + "\n")
+	// Pad to exactly 7 content lines so grid rows stay uniform.
+	lines := strings.Split(strings.TrimRight(sb.String(), "\n"), "\n")
+	for len(lines) < 7 {
+		lines = append(lines, "")
+	}
+	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cDimLine).Padding(0, 1).Width(w)
+	if c.Focused {
+		style = style.BorderForeground(cPrimary)
+	}
+	return style.Render(strings.Join(lines, "\n"))
+}
+
+// examCardHeight is the rendered ExamCard height including borders.
+const examCardHeight = 9
+
+// EmptyState renders a consistent placeholder for empty content.
+func EmptyState(text string) string { return thHelp.Render(text) }
+
+// ValidationMessage renders a form error, or nothing when valid.
+func ValidationMessage(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	return thError.Render(msg)
+}
+
+// TodayTaskRow builds one aligned Today table row with domain badge text
+// and status pill text. The table owns column alignment; this owns content.
+func TodayTaskRow(i int, t db.TodayTask, st TaskStatus) table.Row {
+	status := "TODO"
+	if st == TaskActive {
+		status = "ACTIVE"
+	} else if st == TaskCompleted {
+		status = "DONE"
+	}
+	return table.Row{fmt.Sprint(i + 1), string(t.Domain), t.Title, FormatDuration(t.PlannedSeconds), status}
 }

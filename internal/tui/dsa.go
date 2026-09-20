@@ -7,7 +7,6 @@ import (
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -23,8 +22,8 @@ type DSAProblemDetail struct {
 type DSAScreen struct {
 	app      *App
 	patterns []DSAPattern
-	patList  list.Model
-	qList    list.Model
+	patList  Navigator
+	qList    Navigator
 	focusR   bool
 	detail   *DSAProblemDetail
 	showing  string // "pattern" or "problem"
@@ -32,15 +31,7 @@ type DSAScreen struct {
 }
 
 func NewDSAScreen(a *App) *DSAScreen {
-	mk := func() list.Model {
-		l := list.New(nil, list.NewDefaultDelegate(), 28, 14)
-		l.SetShowHelp(false)
-		l.SetShowTitle(false)
-		l.SetShowStatusBar(false)
-		l.SetFilteringEnabled(false)
-		return l
-	}
-	return &DSAScreen{app: a, patList: mk(), qList: mk(), showing: "pattern"}
+	return &DSAScreen{app: a, patList: NewNavigator(), qList: NewNavigator(), showing: "pattern"}
 }
 
 func (s *DSAScreen) Reload() {
@@ -51,22 +42,22 @@ func (s *DSAScreen) Reload() {
 		return
 	}
 	s.patterns = GroupDSAPatterns(probs)
-	items := make([]list.Item, 0, len(s.patterns))
+	items := make([]listItem, 0, len(s.patterns))
 	for _, p := range s.patterns {
 		items = append(items, listItem{id: p.Name, title: p.Name, desc: fmt.Sprintf("%d questions", len(p.Problems))})
 	}
-	s.patList.SetItems(items)
+	s.patList.SetItems(wrapItems(items))
 	s.showing = "pattern"
 	s.reloadQuestions()
 }
 
 func (s *DSAScreen) selPattern() *DSAPattern {
-	it, ok := s.patList.SelectedItem().(listItem)
-	if !ok {
+	id := s.patList.SelectedID()
+	if id == "" {
 		return nil
 	}
 	for i, p := range s.patterns {
-		if p.Name == it.id {
+		if p.Name == id {
 			return &s.patterns[i]
 		}
 	}
@@ -80,7 +71,7 @@ func (s *DSAScreen) reloadQuestions() {
 		s.qList.SetItems(nil)
 		return
 	}
-	items := make([]list.Item, 0, len(p.Problems))
+	items := make([]listItem, 0, len(p.Problems))
 	for _, q := range p.Problems {
 		att, _ := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID)
 		mark := "○"
@@ -89,7 +80,7 @@ func (s *DSAScreen) reloadQuestions() {
 		}
 		items = append(items, listItem{id: string(q.ID), title: mark + "  " + q.Title, desc: q.Difficulty})
 	}
-	s.qList.SetItems(items)
+	s.qList.SetItems(wrapItems(items))
 }
 
 func (s *DSAScreen) openProblem(pid string) {
@@ -143,8 +134,8 @@ func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			if s.focusR {
-				if it, ok := s.qList.SelectedItem().(listItem); ok && it.id != "" {
-					s.openProblem(it.id)
+				if id := s.qList.SelectedID(); id != "" {
+					s.openProblem(id)
 				}
 				return nil
 			}
@@ -154,22 +145,19 @@ func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 			down := k.String() == "j" || k.String() == "down"
 			if s.focusR {
 				if down {
-					s.qList.CursorDown()
+					s.qList.List.CursorDown()
 				} else {
-					s.qList.CursorUp()
+					s.qList.List.CursorUp()
 				}
 				return nil
 			}
-			prev := ""
-			if it, ok := s.patList.SelectedItem().(listItem); ok {
-				prev = it.id
-			}
+			prev := s.patList.SelectedID()
 			if down {
-				s.patList.CursorDown()
+				s.patList.List.CursorDown()
 			} else {
-				s.patList.CursorUp()
+				s.patList.List.CursorUp()
 			}
-			if it, ok := s.patList.SelectedItem().(listItem); ok && it.id != prev {
+			if s.patList.SelectedID() != prev {
 				s.reloadQuestions()
 			}
 			return nil
@@ -177,16 +165,13 @@ func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 	}
 	if s.focusR {
 		var c tea.Cmd
-		s.qList, c = s.qList.Update(msg)
+		s.qList.List, c = s.qList.List.Update(msg)
 		return c
 	}
-	prev := ""
-	if it, ok := s.patList.SelectedItem().(listItem); ok {
-		prev = it.id
-	}
+	prev := s.patList.SelectedID()
 	var c tea.Cmd
-	s.patList, c = s.patList.Update(msg)
-	if it, ok := s.patList.SelectedItem().(listItem); ok && it.id != prev {
+	s.patList.List, c = s.patList.List.Update(msg)
+	if s.patList.SelectedID() != prev {
 		s.reloadQuestions()
 	}
 	return c
@@ -199,10 +184,10 @@ func (s *DSAScreen) View() string {
 	if listH < 8 {
 		listH = 8
 	}
-	s.patList.SetWidth(lw - 4)
-	s.qList.SetWidth(rw - 4)
-	s.patList.SetHeight(fitListHeight(len(s.patList.Items()), listH))
-	s.qList.SetHeight(fitListHeight(len(s.qList.Items()), listH-8))
+	s.patList.List.SetWidth(lw - 4)
+	s.qList.List.SetWidth(rw - 4)
+	s.patList.FitHeight(listH)
+	s.qList.FitHeight(listH - 8)
 	p := s.selPattern()
 	var right string
 	if s.showing == "problem" {
@@ -217,18 +202,18 @@ func (s *DSAScreen) View() string {
 			SectionHeader("PROGRESSION") + "\n" +
 			ProgressBar{Ratio: r, Width: 26, ShowPct: true}.View() + "\n" +
 			thMeta.Render(fmt.Sprintf("%d / %d", done, total)) + "\n\n" +
-			SectionHeader("QUESTIONS") + "\n" + s.qList.View()
+			SectionHeader("QUESTIONS") + "\n" + s.qList.List.View()
 		right = Panel("PATTERN", body, rw, s.focusR)
 	} else {
-		right = Panel("PATTERN", thMeta.Render("Select a pattern."), rw, s.focusR)
+		right = Panel("PATTERN", EmptyState("Select a pattern."), rw, s.focusR)
 	}
-	return lipglossJoin(Panel("PATTERNS", s.patList.View(), lw, !s.focusR), right)
+	return lipglossJoin(Panel("PATTERNS", s.patList.List.View(), lw, !s.focusR), right)
 }
 
 func (s *DSAScreen) problemBody() string {
 	d := s.detail
 	if d == nil {
-		return thMeta.Render("Problem not found.")
+		return EmptyState("Problem not found.")
 	}
 	var sb string
 	sb += thScreenTitle.Render(d.Problem.Title) + "\n"

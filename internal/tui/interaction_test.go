@@ -99,6 +99,83 @@ func TestTodayWorkspaceFlow(t *testing.T) {
 	}
 }
 
+// GOV: dashboard cards -> exam workspace -> topic detail, context kept.
+func TestGovDashboardFlow(t *testing.T) {
+	app := NewApp(seedFlowDB(t))
+	app.width, app.height = 140, 40
+	app.goTab(TabGOV)
+	if app.gov.level != govDashboard {
+		t.Fatalf("GOV must open on the exam dashboard, got %q", app.gov.level)
+	}
+	testSend(app, "enter")
+	if app.gov.level != govExam {
+		t.Fatalf("Enter must open the exam workspace, got %q", app.gov.level)
+	}
+	if app.gov.coverage == nil || app.gov.coverage.Exam != "SBI Clerk" {
+		t.Fatalf("workspace must show the selected exam, got %+v", app.gov.coverage)
+	}
+	for _, sc := range app.gov.coverage.Subjects {
+		if sc.SubjectID != "subj-quant" {
+			t.Fatalf("exam workspace must list only mapped subjects, got %q", sc.Subject)
+		}
+	}
+	testSend(app, "tab")   // focus topics
+	testSend(app, "enter") // open the topic in the right panel
+	if app.gov.level != govTopic {
+		t.Fatalf("topic must open in-panel, got %q", app.gov.level)
+	}
+	if app.gov.detail == nil || app.gov.detail.Topic.ID != "topic-a" {
+		t.Fatalf("wrong topic detail: %+v", app.gov.detail)
+	}
+	testSend(app, "esc")
+	if app.gov.level != govExam {
+		t.Fatalf("Esc must return to the exam workspace, got %q", app.gov.level)
+	}
+	testSend(app, "esc")
+	if app.gov.level != govDashboard {
+		t.Fatalf("Esc must return to the dashboard, got %q", app.gov.level)
+	}
+}
+
+// Practice form: digits reach inputs (not global 1-5 tab shortcuts),
+// every bundled topic validates, SAVE persists all rows.
+func TestPracticeFormTypingAndSave(t *testing.T) {
+	app := NewApp(seedFlowDB(t))
+	app.width, app.height = 120, 36
+	app.reloadCurrent()
+	testSend(app, "j") // task2 = practice
+	testSend(app, "s")
+	testSend(app, "x")
+	if app.today.right != "result" {
+		t.Fatalf("expected practice form, got %q", app.today.right)
+	}
+	typeKeys := []string{"1", "2", "0", "0", "tab", "1", "5", "tab", "1", "2", "tab", "1", "8", ".", "5", "tab",
+		"9", "0", "0", "tab", "1", "0", "tab", "8", "tab", "2", "0", "tab"}
+	for _, k := range typeKeys {
+		testSend(app, k)
+	}
+	if app.tab != TabToday {
+		t.Fatalf("typing digits must not switch tabs, tab=%v", app.tab)
+	}
+	if got := app.today.result.prows[0].Time.Input.Value(); got != "1200" {
+		t.Fatalf("time field = %q, want 1200", got)
+	}
+	testSend(app, "enter")
+	if app.today.right != "detail" {
+		t.Fatalf("practice save failed: %s", app.today.result.err)
+	}
+	n, err := countRows(app, `SELECT COUNT(*) FROM gov_practice_records`)
+	if err != nil || n != 2 {
+		t.Fatalf("expected 2 practice rows, got %d (%v)", n, err)
+	}
+}
+
+func countRows(app *App, q string) (int, error) {
+	var n int
+	err := app.DB.QueryRowContext(app.ctx(), q).Scan(&n)
+	return n, err
+}
+
 // Every top-level workspace renders at desktop and narrow widths with no
 // row exceeding the viewport and no fake-text controls.
 func TestWorkspacesFitViewport(t *testing.T) {
