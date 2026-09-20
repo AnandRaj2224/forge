@@ -1,0 +1,137 @@
+package tui
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	db "forge/internal/db"
+	"forge/internal/db/catalog"
+	"forge/internal/db/runtime"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+func testKey(s string) tea.KeyMsg {
+	switch s {
+	case "tab":
+		return tea.KeyMsg{Type: tea.KeyTab}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+	}
+}
+
+func testSend(a *App, k string) {
+	_, _ = a.Update(testKey(k))
+}
+
+func seedFlowDB(t *testing.T) *db.DB {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "flow.db")
+	database, err := db.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	_ = catalog.UpsertSettings(ctx, database, db.ForgeSettings{ID: 1, Timezone: "Asia/Kolkata", DayStartMinute: 600, CreatedAt: now})
+	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "subj-quant", Name: "Quant", SortOrder: 1})
+	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "subj-reasoning", Name: "Reasoning", SortOrder: 2})
+	_ = catalog.InsertGovTopic(ctx, database, db.GovTopic{ID: "topic-a", SubjectID: "subj-quant", Name: "Number System", SortOrder: 1})
+	_ = catalog.InsertGovTopic(ctx, database, db.GovTopic{ID: "topic-b", SubjectID: "subj-quant", Name: "Percentage", SortOrder: 2})
+	_ = catalog.InsertGovLecture(ctx, database, db.GovLecture{ID: "lec-a", TopicID: "topic-a", Title: "Core Concepts", SortOrder: 1})
+	_ = catalog.InsertGovExam(ctx, database, db.GovExam{ID: "exam-sbi", Name: "SBI Clerk", SortOrder: 1})
+	_ = catalog.InsertGovExamSyllabus(ctx, database, db.GovExamSyllabus{ExamID: "exam-sbi", TopicID: "topic-a", SortOrder: 1})
+	_ = catalog.InsertDSAProblem(ctx, database, db.DSAProblem{ID: "dsa-1", Title: "Two Sum", Pattern: "Hash Map", Difficulty: "EASY", SortOrder: 1})
+	_ = catalog.InsertSWEArea(ctx, database, db.SWEArea{ID: "area-go", Name: "Go", SortOrder: 1})
+	_ = catalog.InsertSWETask(ctx, database, db.SWETask{ID: "task-go-1", AreaID: "area-go", Title: "Slices", SortOrder: 1})
+	_ = runtime.CreateTodaySnapshot(ctx, database, db.TodaySnapshot{ID: "snap1", LocalDate: "2026-09-20", Revision: 1, GeneratedAt: now})
+	lec, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: "subj-quant", TopicID: "topic-a", LectureID: "lec-a"})
+	prac, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-a", "topic-b"}})
+	_ = runtime.InsertTodayTask(ctx, database, db.TodayTask{ID: "task1", SnapshotID: "snap1", Position: 1, Domain: db.DomainGOV, Kind: db.SessionKindLecture, Title: "Quant lecture", PlannedSeconds: 3600, TargetJSON: &lec})
+	_ = runtime.InsertTodayTask(ctx, database, db.TodayTask{ID: "task2", SnapshotID: "snap1", Position: 2, Domain: db.DomainGOV, Kind: db.SessionKindPractice, Title: "Quant practice", PlannedSeconds: 3600, TargetJSON: &prac})
+	_ = runtime.UpsertWeeklyReview(ctx, database, db.WeeklyReview{ID: "2026-W38", WeekStart: "2026-09-14", WeekEnd: "2026-09-20", GeneratedAt: now, UpdatedAt: now, PlannedSeconds: 3600, ElapsedSeconds: 3000, OverrunSeconds: -600, ReportJSON: "{}"})
+	t.Cleanup(func() { database.Close() })
+	return database
+}
+
+// Today workspace: selection drives detail, start/stop/result stay in place.
+func TestTodayWorkspaceFlow(t *testing.T) {
+	app := NewApp(seedFlowDB(t))
+	app.width, app.height = 120, 36
+	app.reloadCurrent()
+
+	before := app.today.detailView()
+	testSend(app, "j")
+	if after := app.today.detailView(); before == after {
+		t.Fatal("selected-task detail did not auto-update on selection move")
+	}
+	testSend(app, "k")
+	testSend(app, "s")
+	if app.today.active == nil {
+		t.Fatalf("start failed: %s", app.err)
+	}
+	if app.today.right != "detail" {
+		t.Fatal("start must stay inside Today")
+	}
+	testSend(app, "x")
+	if app.today.right != "result" {
+		t.Fatal("stop must swap the right-bottom panel to the result form in place")
+	}
+	// Lecture form: choose YES, advance to SAVE, save.
+	testSend(app, " ")
+	testSend(app, "tab")
+	testSend(app, "enter")
+	if app.today.right != "detail" {
+		t.Fatalf("save did not complete: %s", app.today.result.err)
+	}
+	if st := ComputeTaskStatus(app.ctx(), app.DB, "task1"); st != TaskCompleted {
+		t.Fatalf("expected task COMPLETED after YES save, got %s", st)
+	}
+}
+
+// Every top-level workspace renders at desktop and narrow widths with no
+// row exceeding the viewport and no fake-text controls.
+func TestWorkspacesFitViewport(t *testing.T) {
+	app := NewApp(seedFlowDB(t))
+	fakes := []string{"[ START SESSION ]", "[ STOP SESSION ]", "[ SAVE ]", "[ YES ] [ NO ]", "1:TODAY", "EXAMS (tab:"}
+	for _, size := range [][2]int{{120, 36}, {70, 24}} {
+		app.width, app.height = size[0], size[1]
+		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {
+			app.goTab(tab)
+			view := app.View()
+			for _, line := range strings.Split(view, "\n") {
+				if lipgloss.Width(line) > size[0] {
+					t.Fatalf("tab %v %dx%d: row width %d exceeds viewport: %q", tab, size[0], size[1], lipgloss.Width(line), line)
+				}
+			}
+			for _, bad := range fakes {
+				if strings.Contains(view, bad) {
+					t.Fatalf("tab %v contains fake control %q", tab, bad)
+				}
+			}
+		}
+	}
+	for _, want := range []string{"ACTIVE SESSION", "SELECTED TASK", "SYLLABUS COVERAGE", "PRACTICE READINESS", "PATTERNS", "AREAS", "WEEKLY REPORT"} {
+		found := false
+		app.width, app.height = 140, 40
+		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {
+			app.goTab(tab)
+			if strings.Contains(app.View(), want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("no workspace renders %q", want)
+		}
+	}
+}
