@@ -140,7 +140,7 @@ func TestMocksScreenDetail(t *testing.T) {
 	app.width, app.height = 150, 40
 	app.goTab(TabMocks)
 	view := app.View().Content
-	for _, want := range []string{"AFCAT Mock 07", "2026-09-18", "AFCAT", "Self", "SCORE", "72 / 100", "RANK", "1842", "PERCENTILE", "84.3", "ACCURACY", "81.2%", "ATTEMPTED", "87 / 100", "CORRECT", "71", "INCORRECT", "16", "UNATTEMPTED", "13", "QUANT", "Percentage", "Ratio"} {
+	for _, want := range []string{"AFCAT Mock 07", "18 Sep 2026", "AFCAT", "Self", "SCORE", "72 / 100", "RANK", "1842", "PERCENTILE", "84.3", "ACCURACY", "81.2%", "ATTEMPTED", "87 / 100", "CORRECT", "71", "INCORRECT", "16", "UNATTEMPTED", "13", "QUANT", "Percentage", "Ratio"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("mock detail missing %q:\n%s", want, view)
 		}
@@ -176,5 +176,44 @@ func TestRadioRoundTripStillVisible(t *testing.T) {
 		if strings.Count(v, "◉") != 1 || !strings.Contains(v, "▶") {
 			t.Fatalf("radio marker missing at %d:\n%s", want, v)
 		}
+	}
+}
+
+// TestMockSectionEnterFlow guards Enter-driven section/weak-topic editing:
+// no a/w shortcuts; the "+ New section" row opens the section form, Enter
+// on a section opens the weak-topic editor.
+func TestMockSectionEnterFlow(t *testing.T) {
+	database := seedMockHistoryDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	score, total := 72, 100
+	_ = runtime.CreateMock(ctx, database, db.Mock{ID: "mock-1", ExamID: "exam-afcat", Name: "AFCAT Mock 07", MockDate: "2026-09-18", Platform: "Self", Score: &score, TotalScore: &total, CreatedAt: now})
+	_ = runtime.CreateMockSection(ctx, database, db.MockSection{ID: "sec-q", MockID: "mock-1", Name: "QUANT", SortOrder: 1})
+	app := NewApp(database)
+	app.width, app.height = 150, 40
+	app.goTab(TabMocks)
+	if v := stripANSIForTest(app.View().Content); !strings.Contains(v, "New section") {
+		t.Fatalf("new-section row missing")
+	}
+	testSend(app, "l")
+	testSend(app, "j")
+	if app.mocks.secCur != 1 {
+		t.Fatalf("secCur=%d want 1 (new-section row)", app.mocks.secCur)
+	}
+	testSend(app, "enter")
+	if app.mocks.mode != "section" {
+		t.Fatalf("mode=%q want section", app.mocks.mode)
+	}
+	for _, k := range []string{"V", "E", "R", "B", "A", "L"} {
+		testSend(app, k)
+	}
+	testSend(app, "enter")
+	if app.mocks.mode != "browse" || len(app.mocks.sections) != 2 {
+		t.Fatalf("section not saved: mode=%q sections=%d", app.mocks.mode, len(app.mocks.sections))
+	}
+	testSend(app, "k")
+	testSend(app, "enter")
+	if app.mocks.mode != "weak" {
+		t.Fatalf("mode=%q want weak", app.mocks.mode)
 	}
 }

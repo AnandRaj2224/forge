@@ -263,22 +263,6 @@ func (s *GovScreen) onBack() bool {
 func (s *GovScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
-		case "tab":
-			switch s.level {
-			case govExam:
-				if s.zone == gzLeft {
-					s.zone = gzRight
-				} else {
-					s.zone = gzLeft
-				}
-			case govSubjects:
-				if s.subZone == gzLeft {
-					s.subZone = gzRight
-				} else {
-					s.subZone = gzLeft
-				}
-			}
-			return nil
 		case "enter":
 			return s.pressEnter()
 		case "j", "down", "k", "up", "h", "left", "l", "right":
@@ -684,15 +668,6 @@ func (s *GovScreen) topicBody(inner int) string {
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("USED BY") + "\n" + thMeta.Render(strings.Join(v.UsedBy, "  ·  ")))
 	return sb.String()
-}
-
-func (s *GovScreen) Hints() string {
-	switch s.level {
-	case govDashboard:
-		return "h/j/k/l Move   Enter Open"
-	default:
-		return "Tab Focus   j/k Move   Enter Open   Esc Back"
-	}
 }
 
 func ratio(a, b int) float64 {

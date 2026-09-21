@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -332,11 +331,18 @@ type FormField struct {
 	Error string
 }
 
-func NewField(label, placeholder string) FormField {
+// NewField builds an aligned form field with an explicit input width.
+// The width is required: a zero-width input collapses to its content and
+// breaks form alignment.
+func NewField(label, placeholder string, width int) FormField {
 	ti := textinput.New()
 	ti.Placeholder = placeholder
-	ti.CharLimit = 16
+	ti.CharLimit = 32
 	ti.Prompt = "│ "
+	if width < 6 {
+		width = 6
+	}
+	ti.SetWidth(width)
 	return FormField{Label: label, Input: ti}
 }
 
@@ -357,9 +363,6 @@ func (f FormField) View(focused bool, labelWidth int) string {
 func KeyBadge(key string) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary).Background(lipgloss.Color("#23232E")).Padding(0, 1).Render(key)
 }
-
-// KeyMsg helpers shared by screens.
-func IsBack(msg tea.KeyPressMsg) bool { return msg.String() == "esc" }
 
 // lipglossJoin places two panels side by side with a gap.
 func lipglossJoin(left, right string) string {
@@ -508,10 +511,11 @@ const examCardHeight = 10
 // Used for PLANNED/ACTUAL/COMPLETION/SESSIONS/TASKS/OVER-UNDER, mock
 // scores, history summaries. Fixed 3-line body keeps grids uniform.
 type MetricCard struct {
-	Label string
-	Value string
-	Sub   string
-	Width int
+	Label  string
+	Value  string
+	Sub    string
+	Width  int
+	Accent color.Color // optional label accent (domain cards); nil = neutral
 }
 
 func (c MetricCard) View() string {
@@ -524,6 +528,9 @@ func (c MetricCard) View() string {
 		inner = 8
 	}
 	label := SectionHeader(TruncateToWidth(c.Label, inner))
+	if c.Accent != nil {
+		label = lipgloss.NewStyle().Bold(true).Foreground(c.Accent).Render(TruncateToWidth(c.Label, inner))
+	}
 	value := thScreenTitle.Render(TruncateToWidth(c.Value, inner))
 	sub := thMeta.Render(TruncateToWidth(c.Sub, inner))
 	if c.Sub == "" {
@@ -593,6 +600,24 @@ func MetricGrid(cards []MetricCard, inner int) string {
 		rendered = append(rendered, c.View())
 	}
 	return BentoGrid(rendered, cols, " ")
+}
+
+// StatPair is one labeled value inside an evidence row.
+type StatPair struct {
+	Label string
+	Value string
+}
+
+// EvidenceRow renders one domain evidence row: a domain-colored label plus
+// aligned full-word stat pairs (Lectures, Questions, Accuracy — never
+// lect/q/acc shorthand).
+func EvidenceRow(domain string, pairs []StatPair) string {
+	var sb strings.Builder
+	sb.WriteString(DomainLabel(domain, 5))
+	for _, pr := range pairs {
+		sb.WriteString("   " + thMeta.Render(padRight(pr.Label, 9)) + " " + thPrimary.Render(pr.Value))
+	}
+	return sb.String()
 }
 
 // EmptyState renders a consistent placeholder for empty content.

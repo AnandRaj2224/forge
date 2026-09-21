@@ -107,7 +107,7 @@ func TestTodayWorkspaceFlow(t *testing.T) {
 	}
 	// Lecture form: choose YES, advance to SAVE, save.
 	testSend(app, " ")
-	testSend(app, "tab")
+	testSend(app, "down")
 	testSend(app, "enter")
 	if app.today.right != "detail" {
 		t.Fatalf("save did not complete: %s", app.today.result.err)
@@ -137,7 +137,7 @@ func TestGovDashboardFlow(t *testing.T) {
 			t.Fatalf("exam workspace must list only mapped subjects, got %q", sc.Subject)
 		}
 	}
-	testSend(app, "tab")   // focus topics
+	testSend(app, "l")     // focus topics
 	testSend(app, "enter") // open the topic in the right panel
 	if app.gov.level != govTopic {
 		t.Fatalf("topic must open in-panel, got %q", app.gov.level)
@@ -145,11 +145,11 @@ func TestGovDashboardFlow(t *testing.T) {
 	if app.gov.detail == nil || app.gov.detail.Topic.ID != "topic-a" {
 		t.Fatalf("wrong topic detail: %+v", app.gov.detail)
 	}
-	testSend(app, "esc")
+	testSend(app, "q")
 	if app.gov.level != govExam {
 		t.Fatalf("Esc must return to the exam workspace, got %q", app.gov.level)
 	}
-	testSend(app, "esc")
+	testSend(app, "q")
 	if app.gov.level != govDashboard {
 		t.Fatalf("Esc must return to the dashboard, got %q", app.gov.level)
 	}
@@ -167,8 +167,8 @@ func TestPracticeFormTypingAndSave(t *testing.T) {
 	if app.today.right != "result" {
 		t.Fatalf("expected practice form, got %q", app.today.right)
 	}
-	typeKeys := []string{"1", "2", "0", "0", "tab", "1", "5", "tab", "1", "2", "tab", "1", "8", ".", "5", "tab",
-		"9", "0", "0", "tab", "1", "0", "tab", "8", "tab", "2", "0", "tab"}
+	typeKeys := []string{"1", "2", "0", "0", "down", "1", "5", "down", "1", "2", "down", "1", "8", ".", "5", "down",
+		"9", "0", "0", "down", "1", "0", "down", "8", "down", "2", "0", "down"}
 	for _, k := range typeKeys {
 		testSend(app, k)
 	}
@@ -228,5 +228,67 @@ func TestWorkspacesFitViewport(t *testing.T) {
 		if !found {
 			t.Fatalf("no workspace renders %q", want)
 		}
+	}
+}
+
+// TestGlobalFooterAndColumns guards the unified shell: one identical footer
+// on every tab, structured Today columns, no bullet composites.
+func TestGlobalFooterAndColumns(t *testing.T) {
+	for _, size := range [][2]int{{170, 44}, {120, 36}} {
+		w, h := size[0], size[1]
+		app := NewApp(seedFlowDB(t))
+		app.width, app.height = w, h
+		var footerRef string
+		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabMocks, TabHistory, TabReviews} {
+			app.goTab(tab)
+			view := app.View().Content
+			for i, ln := range strings.Split(view, "\n") {
+				if lipgloss.Width(ln) > w {
+					t.Fatalf("%dx%d tab %v line %d overflow", w, h, tab, i)
+				}
+			}
+			plain := stripANSIForTest(view)
+			fl := strings.Split(plain, "\n")
+			foot := fl[len(fl)-2] + "\n" + fl[len(fl)-1]
+			if tab == TabToday {
+				footerRef = foot
+				for _, want := range []string{"ESC", "Q", "J/K", "ENTER", "S", "X", "Quit", "Back", "Move", "Select", "Start", "Stop"} {
+					if !strings.Contains(foot, want) {
+						t.Fatalf("%dx%d footer missing %q", w, h, want)
+					}
+				}
+				for _, bad := range []string{"r Refresh", "Tab", "rev ", "2026-"} {
+					if strings.Contains(foot, bad) {
+						t.Fatalf("%dx%d footer has %q", w, h, bad)
+					}
+				}
+			} else if foot != footerRef {
+				t.Fatalf("%dx%d tab %v footer differs", w, h, tab)
+			}
+			if !strings.Contains(plain, "Everyone sees") || !strings.Contains(plain, "Machiavelli") {
+				t.Fatalf("%dx%d tab %v quote broken", w, h, tab)
+			}
+		}
+	}
+	app := NewApp(seedFlowDB(t))
+	app.width, app.height = 170, 44
+	app.goTab(TabToday)
+	v := stripANSIForTest(app.View().Content)
+	for _, want := range []string{"DOMAIN", "AREA", "TYPE", "TASK", "DUR", "STATUS", "Lecture", "Practice", "Quant", "Number System"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("today missing %q", want)
+		}
+	}
+	if strings.Contains(v, "Quant •") {
+		t.Fatalf("today still has bullet composite")
+	}
+	// Shared row MetaSub path (actual + planned metrics).
+	var rl RowList
+	rl.SetWidth(46)
+	rl.SetHeight(2)
+	rl.SetItems([]RowItem{{ID: "d", Title: "Mon · 21 Sep 2026", Meta: "15h 41m", MetaSub: "PLAN 7h 30m", Mark: "•"}})
+	rv := stripANSIForTest(rl.View())
+	if !strings.Contains(rv, "15h 41m") || !strings.Contains(rv, "PLAN 7h 30m") {
+		t.Fatalf("row metrics broken:\n%s", rv)
 	}
 }

@@ -141,9 +141,6 @@ func (s *SWEScreen) onBack() bool {
 func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
-		case "tab":
-			s.focusR = !s.focusR
-			return nil
 		case "enter":
 			if s.showing == "task" {
 				return nil
@@ -282,4 +279,3 @@ func (s *SWEScreen) taskBody(inner int) string {
 	return sb.String()
 }
 
-func (s *SWEScreen) Hints() string { return "Tab Focus   Enter Open" }

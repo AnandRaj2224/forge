@@ -110,7 +110,7 @@ func (s *TodayScreen) Reload() {
 		s.status[i] = st
 		s.bundles[i] = ResolveBundle(ctx, s.app.DB, t)
 	}
-	s.tbl.SetData(s.tasks, s.status)
+	s.tbl.SetData(s.tasks, s.status, s.bundles)
 	if keepCursor != "" {
 		for i, t := range tasks {
 			if string(t.ID) == keepCursor {
@@ -206,8 +206,9 @@ func (s *TodayScreen) stopActive() {
 func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		// While the in-place result form owns the right panel, it owns
-		// Tab/Up/Down/Space/typing. Esc backs out (handled by the app).
-		if s.zone == tzRight && s.right == "result" && s.result != nil && k.String() != "x" {
+		// field keys and typing. Esc quits and q backs out globally
+		// (handled by the app); s/x start/stop are also global there.
+		if s.zone == tzRight && s.right == "result" && s.result != nil {
 			if k.String() == "enter" {
 				if s.result.focus == s.result.nFocus()-1 {
 					if ok, _ := s.result.TrySave(); ok {
@@ -224,30 +225,15 @@ func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 			if cmd, handled := s.result.HandleKey(k); handled {
 				return cmd
 			}
-			// Unhandled keys (e.g. s) are ignored while recording evidence.
+			// Unhandled keys while recording evidence are ignored.
 			return nil
 		}
 		switch k.String() {
-		case "tab":
-			s.zone = (s.zone + 1) % 3
-			if s.zone == tzActive && s.active == nil {
-				s.zone = tzRight
-			}
-			if s.result == nil && s.right == "result" {
-				s.right = "detail"
-			}
-			s.syncButtons()
-			if s.right == "result" && s.result != nil {
-				s.result.updateFocusVisual()
-			}
+		case "h", "left":
+			s.stepZone(-1)
 			return nil
-		case "s":
-			if s.right == "detail" {
-				s.startSelected()
-			}
-			return nil
-		case "x":
-			s.stopActive()
+		case "l", "right":
+			s.stepZone(1)
 			return nil
 		case "enter":
 			return s.pressEnter()
@@ -271,11 +257,8 @@ func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 		// Typing into result inputs.
 		if s.zone == tzRight && s.right == "result" && s.result != nil {
 			if k, ok := msg.(tea.KeyPressMsg); ok {
-				ks := k.String()
-				if ks != "tab" && ks != "shift+tab" {
-					if cmd, handled := s.result.HandleKey(k); handled {
-						return cmd
-					}
+				if cmd, handled := s.result.HandleKey(k); handled {
+					return cmd
 				}
 			}
 		}
@@ -544,7 +527,26 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (s *TodayScreen) Hints() string { return "Tab Focus   s Start   x Stop" }
+// stepZone moves pane focus left/right across tasks, session, detail.
+// The session pane is skipped when no session is active.
+func (s *TodayScreen) stepZone(d int) {
+	z := s.zone + d
+	if z < tzTasks {
+		z = tzTasks
+	}
+	if z > tzRight {
+		z = tzRight
+	}
+	if z == tzActive && s.active == nil {
+		if d > 0 {
+			z = tzRight
+		} else {
+			z = tzTasks
+		}
+	}
+	s.zone = z
+	s.syncButtons()
+}
 
 // bundleRow renders one bundled work item with the global row language:
 // visible number, deliberate padding, thin divider owned by the caller.

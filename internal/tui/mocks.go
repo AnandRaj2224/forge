@@ -80,7 +80,7 @@ func (s *MocksScreen) Reload() {
 	items := make([]RowItem, 0, len(mocks))
 	for _, m := range mocks {
 		ex := s.examName[string(m.ExamID)]
-		items = append(items, RowItem{ID: string(m.ID), Title: m.Name, Meta: m.MockDate + "  ·  " + ex, Mark: "•"})
+		items = append(items, RowItem{ID: string(m.ID), Title: m.Name, Meta: FormatDateISO(m.MockDate) + "  ·  " + ex, Mark: "•"})
 	}
 	// Numbered rows: use global row system with numbers.
 	s.list.SetItems(items)
@@ -126,6 +126,20 @@ func (s *MocksScreen) syncDetail() {
 	}
 }
 
+// qBacksOut reports whether q should leave the form instead of typing.
+// Inside text inputs q always types; on selectors and buttons it backs out.
+func (s *MocksScreen) qBacksOut() bool {
+	switch s.mode {
+	case "create":
+		return s.cFocus == 0
+	case "weak":
+		return s.wFocus != 0
+	case "section":
+		return false
+	}
+	return true
+}
+
 func (s *MocksScreen) onBack() bool {
 	switch s.mode {
 	case "create", "weak", "section":
@@ -154,14 +168,9 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 	}
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
-		case "tab":
-			if s.selMock() != nil {
-				s.focusR = !s.focusR
-			}
-			return nil
 		case "j", "down":
 			if s.focusR {
-				if s.secCur < len(s.sections)-1 {
+				if s.secCur < len(s.sections) {
 					s.secCur++
 				}
 			} else {
@@ -195,19 +204,17 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		case "enter":
 			if s.focusR {
-				s.openWeakEditor()
+				if s.secCur >= len(s.sections) {
+					s.startSection()
+				} else {
+					s.openWeakEditor()
+				}
 				return nil
 			}
 			s.focusR = true
 			return nil
 		case "n":
 			s.startCreate()
-			return nil
-		case "a":
-			s.startSection()
-			return nil
-		case "w":
-			s.openWeakEditor()
 			return nil
 		case "D":
 			s.deleteSelected()
@@ -233,16 +240,17 @@ func (s *MocksScreen) deleteSelected() {
 func (s *MocksScreen) startCreate() {
 	s.mode = "create"
 	s.cExamCur = 0
-	s.cLabels = []string{"Name", "Date YYYY-MM-DD", "Platform", "Score", "Total", "Attempted", "TotalQ", "Correct", "Incorrect", "Unattempted", "Rank", "Percentile", "Accuracy", "AvgSpeed"}
+	s.cLabels = []string{"Name", "Date", "Platform", "Score", "Total Marks", "Attempted", "Total Questions", "Correct", "Incorrect", "Unattempted", "Rank", "Percentile", "Accuracy", "Average Speed"}
 	s.cInputs = make([]textinput.Model, len(s.cLabels))
 	for i, lb := range s.cLabels {
 		ti := textinput.New()
 		ti.Prompt = "│ "
 		ti.CharLimit = 32
 		ti.Placeholder = lb
-		if lb == "Date YYYY-MM-DD" {
-			ti.Placeholder = time.Now().UTC().Format("2006-01-02")
+		if lb == "Date" {
+			ti.Placeholder = "21 Sep 2026"
 		}
+		ti.SetWidth(20)
 		s.cInputs[i] = ti
 	}
 	s.cFocus = 0 // 0 = exam selector, 1..N inputs, N+1 = SAVE
@@ -273,11 +281,11 @@ func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	switch k.String() {
-	case "tab", "down":
+	case "down":
 		s.cFocus = (s.cFocus + 1) % s.nCreateFocus()
 		s.updateCreateFocus()
 		return nil
-	case "shift+tab", "up":
+	case "up":
 		s.cFocus = (s.cFocus - 1 + s.nCreateFocus()) % s.nCreateFocus()
 		s.updateCreateFocus()
 		return nil
@@ -354,10 +362,15 @@ func (s *MocksScreen) saveCreate() bool {
 		s.cErr = "name required"
 		return false
 	}
-	if _, err := time.Parse("2006-01-02", date); err != nil {
-		s.cErr = "date must be YYYY-MM-DD"
+	parsed, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		parsed, err = time.Parse("02 Jan 2006", date)
+	}
+	if err != nil {
+		s.cErr = "date as YYYY-MM-DD or 21 Sep 2026"
 		return false
 	}
+	date = parsed.Format("2006-01-02")
 	get := func(i int) string {
 		if i < len(s.cInputs) {
 			return s.cInputs[i].Value()
@@ -381,7 +394,7 @@ func (s *MocksScreen) saveCreate() bool {
 	}
 	totalQ, err := parseOptInt(get(6))
 	if err != nil {
-		s.cErr = "totalQ " + err.Error()
+		s.cErr = "total questions " + err.Error()
 		return false
 	}
 	correct, err := parseOptInt(get(7))
@@ -416,7 +429,7 @@ func (s *MocksScreen) saveCreate() bool {
 	}
 	avg, err := parseOptFloat(get(13))
 	if err != nil {
-		s.cErr = "avgSpeed " + err.Error()
+		s.cErr = "average speed " + err.Error()
 		return false
 	}
 	exam := s.exams[s.cExamCur%len(s.exams)]
@@ -444,6 +457,7 @@ func (s *MocksScreen) startSection() {
 	ti.Prompt = "│ "
 	ti.Placeholder = "Section name (e.g. QUANT)"
 	ti.CharLimit = 32
+	ti.SetWidth(24)
 	ti.Focus()
 	s.secInput = ti
 }
@@ -509,6 +523,7 @@ func (s *MocksScreen) openWeakEditor() {
 	ti.Prompt = "│ "
 	ti.Placeholder = "filter topics…"
 	ti.CharLimit = 32
+	ti.SetWidth(24)
 	ti.Focus()
 	s.wFilter = ti
 	s.wList = NewNavigator()
@@ -587,40 +602,49 @@ func (s *MocksScreen) updateWeak(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	switch k.String() {
-	case "tab":
-		s.wFocus = (s.wFocus + 1) % 3
-		if s.wFocus == 0 {
-			s.wFilter.Focus()
-		} else {
-			s.wFilter.Blur()
-		}
-		s.refreshWeakList()
-		return nil
-	case "shift+tab":
-		s.wFocus = (s.wFocus + 2) % 3
-		if s.wFocus == 0 {
-			s.wFilter.Focus()
-		} else {
-			s.wFilter.Blur()
-		}
-		s.refreshWeakList()
-		return nil
-	case "j", "down":
-		if s.wFocus == 1 {
-			s.wList.CursorDown()
-			return nil
-		}
+	case "down":
 		if s.wFocus == 0 {
 			s.wFocus = 1
 			s.wFilter.Blur()
 			s.refreshWeakList()
-			return nil
+		} else if s.wFocus == 1 {
+			s.wList.CursorDown()
 		}
 		return nil
-	case "k", "up":
+	case "up":
+		if s.wFocus == 2 {
+			s.wFocus = 1
+			s.refreshWeakList()
+		} else if s.wFocus == 1 {
+			s.wList.CursorUp()
+		}
+		return nil
+	case "l", "right":
+		if s.wFocus == 1 {
+			s.wFocus = 2
+			s.refreshWeakList()
+		}
+		return nil
+	case "h", "left":
+		if s.wFocus == 2 {
+			s.wFocus = 1
+			s.refreshWeakList()
+			return nil
+		}
+		if s.wFocus == 1 {
+			s.wFocus = 0
+			s.wFilter.Focus()
+			s.refreshWeakList()
+		}
+		return nil
+	case "j":
+		if s.wFocus == 1 {
+			s.wList.CursorDown()
+		}
+		return nil
+	case "k":
 		if s.wFocus == 1 {
 			s.wList.CursorUp()
-			return nil
 		}
 		return nil
 	case "enter", " ", "space":
@@ -693,9 +717,12 @@ func (s *MocksScreen) browseView() string {
 		innerH = 4
 	}
 	s.list.SetWidth(lw - 4)
-	s.list.FitHeight(innerH - 1)
+	s.list.FitHeight(innerH - 3)
 	s.list.SetFocused(!s.focusR)
-	left := PanelFixed("MOCKS", SectionHeader("MOCK LIST")+"\n"+s.list.View(), lw, bodyH, !s.focusR)
+	leftBody := SectionHeader("MOCK LIST") + "\n" + s.list.View() + "\n" +
+		RowDivider(lw-6) + "\n" +
+		KeyBadge("N") + thMeta.Render(" New mock   ") + KeyBadge("D") + thMeta.Render(" Delete")
+	left := PanelFixed("MOCKS", leftBody, lw, bodyH, !s.focusR)
 	right := PanelFixed("MOCK DETAIL", s.mockBody(rw-6), rw, bodyH, s.focusR)
 	out := lipglossJoin(left, right)
 	if s.err != "" {
@@ -732,7 +759,7 @@ func (s *MocksScreen) mockBody(inner int) string {
 	}
 	var sb strings.Builder
 	sb.WriteString(thScreenTitle.Render(TruncateToWidth(m.Name, inner)) + "\n")
-	sb.WriteString(thMeta.Render(TruncateToWidth(m.MockDate+"  ·  "+exam+"  ·  "+orDash(m.Platform), inner)) + "\n")
+	sb.WriteString(thMeta.Render(TruncateToWidth(FormatDateISO(m.MockDate)+"  ·  "+exam+"  ·  "+orDash(m.Platform), inner)) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	// Dense metric bento: responsive grid, never overflows.
 	scoreV := "—"
@@ -788,6 +815,17 @@ func (s *MocksScreen) mockBody(inner int) string {
 			sb.WriteString(RowDivider(inner) + "\n")
 		}
 	}
+	// Trailing "+ New section" row: Enter-driven, no shortcut to remember.
+	if len(s.sections) > 0 {
+		sb.WriteString(RowDivider(inner) + "\n")
+	}
+	newHead := thMeta.Render("+  New section")
+	if s.focusR && s.secCur == len(s.sections) {
+		newHead = thFocusMark.Render("▶ ") + thPrimary.Render("+  New section")
+	}
+	sb.WriteString(newHead + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(thHelp.Render("Enter weak topics"))
 	return sb.String()
 }
 
@@ -805,21 +843,22 @@ func (s *MocksScreen) createView() string {
 		if i == s.cExamCur {
 			mark = "◉"
 		}
-		line := mark + "  " + e.Name
+		// Names start at the same column as the form inputs (label 15).
+		arrow := "  "
 		if i == s.cExamCur && s.cFocus == 0 {
-			sb.WriteString(thFocusMark.Render("▶ ") + thPrimary.Render(line) + "\n")
-		} else {
-			sb.WriteString("  " + thPrimary.Render(line) + "\n")
+			arrow = thFocusMark.Render("▶ ")
 		}
+		sb.WriteString(arrow + padRight(mark, 13) + " " + thPrimary.Render(TruncateToWidth(e.Name, lw-24)) + "\n")
 	}
 	left := PanelFixed("EXAM", sb.String(), lw, bodyH, s.cFocus == 0)
 	var rb strings.Builder
 	rb.WriteString(SectionHeader("NEW MOCK") + "\n")
 	for i, lb := range s.cLabels {
 		focused := s.cFocus == i+1
-		// Reuse FormField view language via label + input.
+		// Fixed label column + fixed-width inputs: every input starts
+		// at the same column with the same usable width.
 		ff := FormField{Label: lb, Input: s.cInputs[i]}
-		rb.WriteString(ff.View(focused, 14) + "\n")
+		rb.WriteString(ff.View(focused, 15) + "\n")
 	}
 	rb.WriteString(RowDivider(rw-6) + "\n")
 	save := Button{Label: "SAVE", Focused: s.cFocus == s.nCreateFocus()-1}
@@ -827,7 +866,7 @@ func (s *MocksScreen) createView() string {
 	if s.cErr != "" {
 		rb.WriteString(thError.Render(s.cErr) + "\n")
 	}
-	rb.WriteString(thHelp.Render("Tab move · ←/→ exam · Enter SAVE · Esc back"))
+	rb.WriteString(thHelp.Render("↑/↓ move · H/L exam · Enter SAVE · Q back"))
 	right := PanelFixed("DETAILS", rb.String(), rw, bodyH, s.cFocus > 0)
 	return lipglossJoin(left, right)
 }
@@ -846,7 +885,7 @@ func (s *MocksScreen) sectionView() string {
 	}
 	left := PanelFixed("MOCK", thPrimary.Render(TruncateToWidth(name, lw-6)), lw, bodyH, false)
 	ff := FormField{Label: "Section", Input: s.secInput}
-	right := PanelFixed("NEW SECTION", ff.View(true, 8)+"\n"+RowDivider(rw-6)+"\n"+thHelp.Render("Enter save · Esc back"), rw, bodyH, true)
+	right := PanelFixed("NEW SECTION", ff.View(true, 8)+"\n"+RowDivider(rw-6)+"\n"+thHelp.Render("Enter save · Q back"), rw, bodyH, true)
 	return lipglossJoin(left, right)
 }
 
@@ -899,20 +938,7 @@ func (s *MocksScreen) weakView() string {
 	if s.wErr != "" {
 		rb.WriteString(thError.Render(s.wErr) + "\n")
 	}
-	rb.WriteString(thHelp.Render("Tab move · Enter toggle/save · s save"))
+	rb.WriteString(thHelp.Render("↑/↓ move · Enter toggle · S save · Q back"))
 	right := PanelFixed("WEAK TOPICS", rb.String(), rw, bodyH, s.wFocus == 2)
 	return lipglossJoin(left, right)
-}
-
-func (s *MocksScreen) Hints() string {
-	switch s.mode {
-	case "create":
-		return "Tab Move   Enter Save"
-	case "weak":
-		return "Tab Move   Enter Toggle"
-	case "section":
-		return "Enter Save"
-	default:
-		return "n New   a Section   w Weak"
-	}
 }

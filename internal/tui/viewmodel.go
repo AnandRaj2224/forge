@@ -50,6 +50,39 @@ func FormatHMS(d time.Duration) string {
 // FormatHM renders planned like 01:00:00 or 2h30 for headers.
 func FormatHM(secs int) string { return FormatDuration(secs) }
 
+// FormatDurationLong renders seconds as product metrics: 3600->"1h",
+// 9300->"15h 41m", 2400->"40m". Actual and planned stay visually distinct.
+func FormatDurationLong(secs int) string {
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	h := secs / 3600
+	m := (secs % 3600) / 60
+	if h == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh %02dm", h, m)
+}
+
+// FormatDate renders UI dates as 21 Sep 2026 (numeric day, 3-letter
+// month, 4-digit year). Storage formats are unchanged; this is display.
+func FormatDate(t time.Time) string { return t.Format("02 Jan 2006") }
+
+// FormatDateISO parses a stored YYYY-MM-DD date for display and falls
+// back to the raw input when it does not parse.
+func FormatDateISO(s string) string {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return FormatDate(t)
+	}
+	return s
+}
+
+// FormatDateRange renders 24 Aug 2026 — 30 Aug 2026 for week ranges.
+func FormatDateRange(a, b string) string { return FormatDateISO(a) + " — " + FormatDateISO(b) }
+
 // Bundle describes the concrete work items inside a Today task,
 // resolved from target_json via the typed DB target structs.
 type Bundle struct {
@@ -527,7 +560,7 @@ func ValidatePracticeRow(timeS, attS, corrS, avgS string) (tSecs, att, corr int,
 	if avgS != "" {
 		v, err := strconv.ParseFloat(avgS, 64)
 		if err != nil || v <= 0 {
-			return 0, 0, 0, nil, "avg speed must be > 0"
+			return 0, 0, 0, nil, "average speed must be > 0"
 		}
 		avg = &v
 	}

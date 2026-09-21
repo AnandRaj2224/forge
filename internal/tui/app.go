@@ -54,7 +54,6 @@ type Screen interface {
 	Reload()
 	Update(msg tea.Msg) tea.Cmd
 	View() string
-	Hints() string
 }
 
 type App struct {
@@ -146,43 +145,53 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.reloadCurrent()
 		return a, nil
 	case tea.KeyPressMsg:
-		// While the in-place evidence form owns focus, it owns every key
-		// except Quit and Back. In particular digits, r and x must
-		// reach text inputs instead of triggering global navigation.
-		inForm := a.tab == TabToday && a.today.zone == tzRight && a.today.right == "result"
+		ks := m.String()
+		// Forms own typing keys: digits and letters (including q/s/x) must
+		// reach text inputs instead of triggering global keys. Esc/Ctrl+C
+		// always quit globally. q backs out only from non-text widgets.
+		inForm := a.tab == TabToday && a.today.zone == tzRight && a.today.right == "result" && a.today.result != nil
 		inMockForm := a.tab == TabMocks && a.mocks.ownsKeys()
-		if (inForm || inMockForm) && m.String() != "q" && m.String() != "ctrl+c" && m.String() != "esc" {
-			break
+		if !IsQuit(ks) {
+			if inForm {
+				if IsBack(ks) && !a.today.result.textFocus() {
+					// fall through to Back below
+				} else {
+					break
+				}
+			} else if inMockForm {
+				if IsBack(ks) && a.mocks.qBacksOut() {
+					// fall through to Back below
+				} else {
+					break
+				}
+			}
 		}
-		switch m.String() {
-		case "q", "ctrl+c":
+		switch {
+		case IsQuit(ks):
 			return a, func() tea.Msg { return tea.Quit() }
-		case "1":
+		case ks == "1":
 			a.goTab(TabToday)
 			return a, nil
-		case "2":
+		case ks == "2":
 			a.goTab(TabGOV)
 			return a, nil
-		case "3":
+		case ks == "3":
 			a.goTab(TabDSA)
 			return a, nil
-		case "4":
+		case ks == "4":
 			a.goTab(TabSWE)
 			return a, nil
-		case "5":
+		case ks == "5":
 			a.goTab(TabMocks)
 			return a, nil
-		case "6":
+		case ks == "6":
 			a.goTab(TabHistory)
 			return a, nil
-		case "7":
+		case ks == "7":
 			a.goTab(TabReviews)
 			return a, nil
-		case "r":
-			a.reloadCurrent()
-			return a, nil
-		case "esc":
-			// Sub-state back is owned by each workspace; at root it is a no-op.
+		case IsBack(ks):
+			// Sub-state back is owned by each workspace; at root no-op.
 			switch a.tab {
 			case TabToday:
 				if a.today.onBack() {
@@ -208,10 +217,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if a.history.onBack() {
 					return a, nil
 				}
+			case TabReviews:
+				if a.reviews.onBack() {
+					return a, nil
+				}
 			}
 			return a, nil
-		case "x":
+		case IsStart(ks):
+			// Global start: the selected Today task starts.
+			a.goTab(TabToday)
+			if a.today.right == "detail" {
+				a.today.startSelected()
+			}
+			return a, nil
+		case IsStop(ks):
 			// Global stop: end the session and surface its form on Today.
+			// With no active session this is a no-op (letters still type
+			// inside evidence forms via the guard above).
 			if _, err := runtime.GetActiveSession(a.ctx(), a.DB); err == nil {
 				a.goTab(TabToday)
 				a.today.stopActive()
@@ -387,85 +409,8 @@ func joinHeader(brand string, nav []string, active, clock string, w int, gap str
 	return left + strings.Repeat(" ", sp) + right
 }
 
-// footerView is EXACTLY ONE horizontal command bar with compact key badges.
-// Actions only: no date, no metadata, no titles. The bar is one controlled
-// horizontal composition, visually centered in the footer area. Each key/action
-// pair is a real horizontal unit; the bar never wraps vertically.
-func (a *App) footerView(w int) string {
-	units := []struct{ key, desc string }{
-		{"q", "Quit"},
-		{"j/k", "Navigate"},
-		{"Enter", "Select"},
-		{"Esc", "Back"},
-		{"r", "Refresh"},
-		{"s", "Start"},
-		{"x", "Stop"},
-	}
-	var parts []string
-	for _, u := range units {
-		parts = append(parts, footChip(u.key)+thFootDesc.Render(" "+u.desc))
-	}
-	if s, ok := a.screenHints(); ok && s != "" {
-		parts = append(parts, thFootDesc.Render("· "+TruncateToWidth(s, 36)))
-	}
-	sep := "  "
-	line := strings.Join(parts, sep)
-	// Shrink gracefully from the right but NEVER wrap: keep one row.
-	for lipgloss.Width(line) > w-2 && len(parts) > 4 {
-		parts = parts[:len(parts)-1]
-		line = strings.Join(parts, sep)
-	}
-	if lipgloss.Width(line) > w-2 {
-		line = footChip("q") + thFootDesc.Render(" Quit") + sep +
-			footChip("Enter") + thFootDesc.Render(" Select") + sep +
-			footChip("Esc") + thFootDesc.Render(" Back")
-	}
-	line = TruncateToWidth(line, w-2)
-	// Center the whole bar horizontally within the footer area.
-	lineW := lipgloss.Width(line)
-	avail := w - 2
-	pad := (avail - lineW) / 2
-	if pad < 0 {
-		pad = 0
-	}
-	line = strings.Repeat(" ", pad) + line
-	line = FitLine(line, w-2)
-	return lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), true, false, false, false).
-		BorderForeground(cBorder).
-		Width(w).
-		MaxHeight(2).
-		Render(line)
-}
+// footerView is the ONE shared global footer: a single centered row of
+// uniform key badges with action labels. Identical on every screen:
+// actions only, no metadata, never wraps vertically.
+func (a *App) footerView(w int) string { return GlobalFooter(w) }
 
-func (a *App) footerExtra() string {
-	// Screen-specific hints already flow via screenHints(); no duplication.
-	return ""
-}
-
-// footChip renders a compact single-line key badge. It must stay exactly
-// one line tall so the footer remains ONE horizontal command bar.
-// Neutral badge keeps the footer quiet; only descriptions recede further.
-func footChip(key string) string {
-	return lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary).Background(lipgloss.Color("#23232E")).Padding(0, 1).Render(key)
-}
-
-func (a *App) screenHints() (string, bool) {
-	switch a.tab {
-	case TabToday:
-		return a.today.Hints(), true
-	case TabGOV:
-		return a.gov.Hints(), true
-	case TabDSA:
-		return a.dsa.Hints(), true
-	case TabSWE:
-		return a.swe.Hints(), true
-	case TabMocks:
-		return a.mocks.Hints(), true
-	case TabHistory:
-		return a.history.Hints(), true
-	case TabReviews:
-		return a.reviews.Hints(), true
-	}
-	return "", false
-}

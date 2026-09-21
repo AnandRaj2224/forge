@@ -42,7 +42,7 @@ func (s *HistoryScreen) Reload() {
 	items := make([]RowItem, 0, len(s.dates))
 	for _, d := range s.dates {
 		t, _ := time.Parse("2006-01-02", d)
-		label := t.Format("Mon · 02 Jan")
+		label := t.Format("Mon") + " · " + FormatDate(t)
 		mark := "•"
 		if d == todayStr {
 			mark = "●"
@@ -51,11 +51,12 @@ func (s *HistoryScreen) Reload() {
 		if err == nil {
 			s.sums[d] = sum
 		}
-		meta := ""
+		meta, sub := "", ""
 		if v, ok := s.sums[d]; ok && (v.Sessions > 0 || v.Planned > 0) {
-			meta = fmt.Sprintf("%s/%s", FormatDuration(v.Actual), FormatDuration(v.Planned))
+			meta = FormatDurationLong(v.Actual)
+			sub = "PLAN " + FormatDurationLong(v.Planned)
 		}
-		items = append(items, RowItem{ID: d, Title: label, Meta: meta, Mark: mark})
+		items = append(items, RowItem{ID: d, Title: label, Meta: meta, MetaSub: sub, Mark: mark})
 	}
 	s.list.SetItems(items)
 	// Preselect today when possible.
@@ -113,16 +114,18 @@ func (s *HistoryScreen) dayBody(inner int) string {
 	}
 	sum := s.sums[d]
 	var sb strings.Builder
-	// Top metric cards: PLANNED ACTUAL VARIANCE TASKS SESSIONS.
-	variance := formatSigned(sum.Actual - sum.Planned)
+	sb.WriteString(thScreenTitle.Render(FormatDateISO(d)) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	// Top metric cards: planned, actual, variance with task/session context.
+	variance := formatSignedLong(sum.Actual - sum.Planned)
 	completion := "—"
 	if sum.Planned > 0 {
 		completion = fmt.Sprintf("%.0f%%", float64(sum.Actual)/float64(sum.Planned)*100)
 	}
 	cards := []MetricCard{
-		{Label: "PLANNED", Value: FormatDuration(sum.Planned), Sub: fmt.Sprintf("%d tasks", sum.TasksTotal)},
-		{Label: "ACTUAL", Value: FormatDuration(sum.Actual), Sub: completion},
-		{Label: "VARIANCE", Value: variance, Sub: fmt.Sprintf("%d sess", sum.Sessions)},
+		{Label: "PLANNED", Value: FormatDurationLong(sum.Planned), Sub: fmt.Sprintf("%d tasks", sum.TasksTotal)},
+		{Label: "ACTUAL", Value: FormatDurationLong(sum.Actual), Sub: completion},
+		{Label: "VARIANCE", Value: variance, Sub: fmt.Sprintf("%d Sessions", sum.Sessions)},
 	}
 	sb.WriteString(MetricGrid(cards, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
@@ -131,14 +134,27 @@ func (s *HistoryScreen) dayBody(inner int) string {
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("TIME BY DOMAIN") + "\n")
 	total := sum.GovSeconds + sum.DSASeconds + sum.SWESeconds
-	sb.WriteString(DomainLabel("GOV", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(sum.GovSeconds), pctOf(sum.GovSeconds, total))) + "\n")
-	sb.WriteString(DomainLabel("DSA", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(sum.DSASeconds), pctOf(sum.DSASeconds, total))) + "\n")
-	sb.WriteString(DomainLabel("SWE", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(sum.SWESeconds), pctOf(sum.SWESeconds, total))) + "\n")
+	sb.WriteString(MetricGrid([]MetricCard{
+		{Label: "GOV", Value: FormatDurationLong(sum.GovSeconds) + " · " + pctOf(sum.GovSeconds, total), Accent: cGov},
+		{Label: "DSA", Value: FormatDurationLong(sum.DSASeconds) + " · " + pctOf(sum.DSASeconds, total), Accent: cDSA},
+		{Label: "SWE", Value: FormatDurationLong(sum.SWESeconds) + " · " + pctOf(sum.SWESeconds, total), Accent: cSWE},
+	}, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("DOMAIN EVIDENCE") + "\n")
-	sb.WriteString(DomainStyle("GOV").Render("GOV") + "  " + thPrimary.Render(fmt.Sprintf("lect %d · q %d · acc %s", sum.GovLectures, sum.GovAttempted, fmtAcc(sum.GovAccuracy, sum.GovAttempted))) + "\n")
-	sb.WriteString(DomainStyle("DSA").Render("DSA") + "  " + thPrimary.Render(fmt.Sprintf("%d probs · %d passed", sum.DSAAttempts, sum.DSAPassed)) + "\n")
-	sb.WriteString(DomainStyle("SWE").Render("SWE") + "  " + thPrimary.Render(fmt.Sprintf("%d done · %d partial · %d blocked", sum.SWECompleted, sum.SWEPartial, sum.SWEBlocked)))
+	sb.WriteString(EvidenceRow("GOV", []StatPair{
+		{"Lectures", fmt.Sprint(sum.GovLectures)},
+		{"Questions", fmt.Sprint(sum.GovAttempted)},
+		{"Accuracy", fmtAcc(sum.GovAccuracy, sum.GovAttempted)},
+	}) + "\n")
+	sb.WriteString(EvidenceRow("DSA", []StatPair{
+		{"Problems", fmt.Sprint(sum.DSAAttempts)},
+		{"Passed", fmt.Sprint(sum.DSAPassed)},
+	}) + "\n")
+	sb.WriteString(EvidenceRow("SWE", []StatPair{
+		{"Done", fmt.Sprint(sum.SWECompleted)},
+		{"Partial", fmt.Sprint(sum.SWEPartial)},
+		{"Blocked", fmt.Sprint(sum.SWEBlocked)},
+	}))
 	return sb.String()
 }
 
@@ -156,7 +172,6 @@ func fmtAcc(acc float64, n int) string {
 	return fmt.Sprintf("%.1f%%", acc*100)
 }
 
-func (s *HistoryScreen) Hints() string { return "j/k Day" }
 
 // Ensure lipgloss import is used in small viewports.
 var _ = lipgloss.Top

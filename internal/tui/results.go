@@ -74,14 +74,14 @@ func (s *ResultForm) Reload(sessionID string, task db.TodayTask) {
 	case "PRACTICE":
 		for _, p := range s.bundle.Practice {
 			s.prows = append(s.prows, PracticeRow{TopicID: p.TopicID, Topic: p.Topic,
-				Time: NewField("Time", "1380"), Att: NewField("Attempted", "20"),
-				Corr: NewField("Correct", "16"), Avg: NewField("Avg", "17.2")})
+				Time: NewField("Time", "1380", 8), Att: NewField("Attempted", "20", 8),
+				Corr: NewField("Correct", "16", 8), Avg: NewField("Avg speed", "17.2", 8)})
 		}
 	case "DSA":
 		for _, d := range s.bundle.DSA {
 			s.drows = append(s.drows, DSARow{ProblemID: d.ProblemID, Title: d.Title, Mode: d.Mode,
 				Indep: Checkbox{Label: "Independent"}, Optimal: Checkbox{Label: "Optimal"},
-				Hint: Checkbox{Label: "Hint used"}, Solve: NewField("Solve time", "300")})
+				Hint: Checkbox{Label: "Hint used"}, Solve: NewField("Solve time", "300", 8)})
 		}
 	case "SWE":
 		for _, sw := range s.bundle.SWE {
@@ -228,6 +228,23 @@ func (s *ResultForm) updateFocusVisual() {
 	s.save.Focused = f == s.nFocus()-1
 }
 
+// textFocus reports whether the focused widget is a text input. While a
+// text field owns focus, letter keys (including q) type instead of acting
+// as global keys; q backs out of the form from non-text widgets.
+func (s *ResultForm) textFocus() bool {
+	switch s.kind {
+	case "PRACTICE":
+		return s.focus < len(s.prows)*4
+	case "DSA":
+		if s.focus >= len(s.drows)*4 {
+			return false
+		}
+		return s.focus%4 == 3
+	default:
+		return false
+	}
+}
+
 func (s *ResultForm) moveFocus(d int) {
 	n := s.nFocus()
 	if n <= 0 {
@@ -242,12 +259,6 @@ func (s *ResultForm) moveFocus(d int) {
 func (s *ResultForm) HandleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	ks := msg.String()
 	switch ks {
-	case "tab":
-		s.moveFocus(1)
-		return nil, true
-	case "shift+tab":
-		s.moveFocus(-1)
-		return nil, true
 	case "down":
 		s.moveFocus(1)
 		return nil, true
@@ -260,9 +271,9 @@ func (s *ResultForm) HandleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	case "LECTURE":
 		if f == 0 {
 			switch ks {
-			case "left", "h", "k":
+			case "left", "h":
 				s.lecture.Move(-1)
-			case "right", "l", "j":
+			case "right", "l":
 				s.lecture.Move(1)
 			case " ", "space", "enter":
 				s.lecture.Choose()
@@ -437,13 +448,13 @@ func (s *ResultForm) ViewFor(inner int) string {
 		sb.WriteString(div + "\n")
 		sb.WriteString(s.lecture.View() + "\n")
 	case "PRACTICE":
-		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TOPICS · 1H BLOCK", len(s.prows))) + "\n")
+		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TOPICS", len(s.prows))) + "\n")
 		for i, r := range s.prows {
 			fbase := i * 4
 			sb.WriteString(div + "\n")
 			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(r.Topic, inner-4))) + "\n")
-			sb.WriteString("  " + r.Time.View(s.focus == fbase, 5) + "  " + r.Att.View(s.focus == fbase+1, 5) + "\n")
-			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 5) + "  " + r.Avg.View(s.focus == fbase+3, 5) + "\n")
+			sb.WriteString("  " + r.Time.View(s.focus == fbase, 9) + "  " + r.Att.View(s.focus == fbase+1, 9) + "\n")
+			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 9) + "  " + r.Avg.View(s.focus == fbase+3, 9) + "\n")
 			if _, _, _, _, msg := ValidatePracticeRow(r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value()); msg != "" {
 				sb.WriteString("  " + thError.Render("✕ "+msg) + "\n")
 			} else {
@@ -489,6 +500,6 @@ func (s *ResultForm) ViewFor(inner int) string {
 	if s.err != "" {
 		sb.WriteString(thError.Render(s.err) + "\n")
 	}
-	sb.WriteString(thHelp.Render("Tab move · Space toggle · Enter SAVE"))
+	sb.WriteString(thHelp.Render("↑/↓ move · Space toggle · Enter SAVE"))
 	return sb.String()
 }

@@ -34,7 +34,7 @@ func (s *ReviewsScreen) Reload() {
 	s.reports = reps
 	items := make([]RowItem, 0, len(reps))
 	for _, r := range reps {
-		items = append(items, RowItem{ID: r.ID, Title: r.WeekStart + " — " + r.WeekEnd, Meta: r.ID, Mark: "•"})
+		items = append(items, RowItem{ID: r.ID, Title: FormatDateRange(r.WeekStart, r.WeekEnd), Meta: r.ID, Mark: "•"})
 	}
 	s.weeks.SetItems(items)
 	s.syncSelected()
@@ -54,6 +54,8 @@ func (s *ReviewsScreen) syncSelected() {
 	}
 	s.selected = nil
 }
+
+func (s *ReviewsScreen) onBack() bool { return false }
 
 func (s *ReviewsScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok && (k.String() == "j" || k.String() == "k" || k.String() == "down" || k.String() == "up") {
@@ -116,28 +118,41 @@ func (s *ReviewsScreen) reportView(inner int) string {
 		completion = fmt.Sprintf("%.0f%%", float64(actual)/float64(planned)*100)
 	}
 	var sb strings.Builder
-	sb.WriteString(thScreenTitle.Render(r.WeekStart+"  —  "+r.WeekEnd) + "  " + thMeta.Render(r.ID) + "\n")
+	sb.WriteString(thScreenTitle.Render(FormatDateRange(r.WeekStart, r.WeekEnd)) + "  " + thMeta.Render(r.ID) + "\n")
 	// Compact metric cards: PLANNED ACTUAL COMPLETION SESSIONS TASKS OVER/UNDER.
 	cards := []MetricCard{
-		{Label: "PLANNED", Value: FormatDuration(planned)},
-		{Label: "ACTUAL", Value: FormatDuration(actual)},
+		{Label: "PLANNED", Value: FormatDurationLong(planned)},
+		{Label: "ACTUAL", Value: FormatDurationLong(actual)},
 		{Label: "COMPLETION", Value: completion},
 		{Label: "SESSIONS", Value: fmt.Sprint(ev.Sessions)},
 		{Label: "TASKS", Value: fmt.Sprint(ev.Tasks)},
-		{Label: "OVER/UNDER", Value: formatSigned(r.OverrunSeconds)},
+		{Label: "OVER/UNDER", Value: formatSignedLong(r.OverrunSeconds)},
 	}
 	sb.WriteString(MetricGrid(cards, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("TIME BY DOMAIN") + "\n")
 	total := ev.GovSeconds + ev.DSASeconds + ev.SWESeconds
-	sb.WriteString(DomainLabel("GOV", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(ev.GovSeconds), pctOf(ev.GovSeconds, total))) + "\n")
-	sb.WriteString(DomainLabel("DSA", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(ev.DSASeconds), pctOf(ev.DSASeconds, total))) + "\n")
-	sb.WriteString(DomainLabel("SWE", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(ev.SWESeconds), pctOf(ev.SWESeconds, total))) + "\n")
+	sb.WriteString(MetricGrid([]MetricCard{
+		{Label: "GOV", Value: FormatDurationLong(ev.GovSeconds) + " · " + pctOf(ev.GovSeconds, total), Accent: cGov},
+		{Label: "DSA", Value: FormatDurationLong(ev.DSASeconds) + " · " + pctOf(ev.DSASeconds, total), Accent: cDSA},
+		{Label: "SWE", Value: FormatDurationLong(ev.SWESeconds) + " · " + pctOf(ev.SWESeconds, total), Accent: cSWE},
+	}, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("DOMAIN EVIDENCE") + "\n")
-	sb.WriteString(DomainStyle("GOV").Render("GOV") + "  " + thPrimary.Render(fmt.Sprintf("lect %d · q %d · acc %s", ev.GovLectures, ev.GovAttempted, fmtAcc(ev.GovAccuracy, ev.GovAttempted))) + "\n")
-	sb.WriteString(DomainStyle("DSA").Render("DSA") + "  " + thPrimary.Render(fmt.Sprintf("%d probs · %d passed", ev.DSAAttempts, ev.DSAPassed)) + "\n")
-	sb.WriteString(DomainStyle("SWE").Render("SWE") + "  " + thPrimary.Render(fmt.Sprintf("%d done · %d partial · %d blocked", ev.SWECompleted, ev.SWEPartial, ev.SWEBlocked)) + "\n")
+	sb.WriteString(EvidenceRow("GOV", []StatPair{
+		{"Lectures", fmt.Sprint(ev.GovLectures)},
+		{"Questions", fmt.Sprint(ev.GovAttempted)},
+		{"Accuracy", fmtAcc(ev.GovAccuracy, ev.GovAttempted)},
+	}) + "\n")
+	sb.WriteString(EvidenceRow("DSA", []StatPair{
+		{"Problems", fmt.Sprint(ev.DSAAttempts)},
+		{"Passed", fmt.Sprint(ev.DSAPassed)},
+	}) + "\n")
+	sb.WriteString(EvidenceRow("SWE", []StatPair{
+		{"Done", fmt.Sprint(ev.SWECompleted)},
+		{"Partial", fmt.Sprint(ev.SWEPartial)},
+		{"Blocked", fmt.Sprint(ev.SWEBlocked)},
+	}) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("WHAT WORKED WELL THIS WEEK?") + "\n")
 	sb.WriteString(thPrimary.Render(TruncateToWidth(orDash(r.ReflectionWorked), inner)) + "\n")
@@ -154,6 +169,14 @@ func formatSigned(secs int) string {
 	return FormatDuration(secs)
 }
 
+// formatSignedLong renders signed metric durations: -600->"-10m".
+func formatSignedLong(secs int) string {
+	if secs < 0 {
+		return "-" + FormatDurationLong(-secs)
+	}
+	return FormatDurationLong(secs)
+}
+
 func orDash(s string) string {
 	if s == "" {
 		return "—"
@@ -161,4 +184,3 @@ func orDash(s string) string {
 	return s
 }
 
-func (s *ReviewsScreen) Hints() string { return "j/k Move   Esc Back" }

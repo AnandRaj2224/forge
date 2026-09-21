@@ -128,9 +128,6 @@ func (s *DSAScreen) patternProgress(p *DSAPattern) (int, int) {
 func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
-		case "tab":
-			s.focusR = !s.focusR
-			return nil
 		case "enter":
 			if s.showing == "problem" {
 				return nil
@@ -279,4 +276,3 @@ func (s *DSAScreen) problemBody(inner int) string {
 	return sb.String()
 }
 
-func (s *DSAScreen) Hints() string { return "Tab Focus   Enter Open" }
