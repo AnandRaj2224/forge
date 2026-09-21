@@ -25,9 +25,9 @@ const (
 var (
 	// Application identity.
 	thAppTitle = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
-	// Navigation.
-	thNavActive   = lipgloss.NewStyle().Bold(true).Foreground(cPrimary).Underline(true)
-	thNavInactive = lipgloss.NewStyle().Foreground(cMuted)
+	// Navigation: active is a subtle filled pill, inactive is quiet.
+	thNavActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(cPrimary).Padding(0, 1)
+	thNavInactive = lipgloss.NewStyle().Foreground(cMuted).Padding(0, 1)
 	thClock       = lipgloss.NewStyle().Foreground(cMuted)
 	// Screen + panel titles.
 	thScreenTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
@@ -43,6 +43,13 @@ var (
 	thRunning = lipgloss.NewStyle().Foreground(cActive).Bold(true)
 	thTodo    = lipgloss.NewStyle().Foreground(cMuted)
 	thWarn    = lipgloss.NewStyle().Foreground(cWarning)
+	// Rows: structured list rows with thin dividers. Selected rows own a
+	// full-width background; cursor-without-focus stays visible but quiet.
+	thRowNormal   = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+	thRowSelected = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24"))
+	thRowCursor   = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("235"))
+	// Table header: strong, compact, aligned to columns.
+	thTableHead = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
 	// Footer: keys pop, descriptions recede, groups spaced.
 	thFootKey  = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
 	thFootDesc = lipgloss.NewStyle().Foreground(cMuted)

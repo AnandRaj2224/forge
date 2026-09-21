@@ -206,7 +206,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-// contentViewport returns the central area between header and footer.
+// contentViewport returns the central area between header and footer via
+// the explicit shell layout: MAIN = term - header - footer.
 func (a *App) contentViewport() (w, h int) {
 	w, h = a.width, a.height
 	if w <= 0 {
@@ -215,11 +216,8 @@ func (a *App) contentViewport() (w, h int) {
 	if h <= 0 {
 		h = 30
 	}
-	h -= 5 // header(2) + footer(2) + breathing room
-	if h < 8 {
-		h = 8
-	}
-	return w, h
+	sh := NewShellLayout(w, h)
+	return sh.Main.W, sh.Main.H
 }
 
 func (a *App) View() string {
@@ -230,7 +228,8 @@ func (a *App) View() string {
 	if h <= 0 {
 		h = 30
 	}
-	header := a.headerView(w)
+	sh := NewShellLayout(w, h)
+	header := a.headerView(sh.Header.W)
 	var body string
 	switch a.tab {
 	case TabToday:
@@ -244,11 +243,8 @@ func (a *App) View() string {
 	case TabReviews:
 		body = a.reviews.View()
 	}
-	footer := a.footerView(w)
-	contentH := h - lipgloss.Height(header) - lipgloss.Height(footer) - 1
-	if contentH < 5 {
-		contentH = 5
-	}
+	footer := a.footerView(sh.Footer.W)
+	contentH := sh.Main.H
 	lines := strings.Split(body, "\n")
 	if len(lines) > contentH {
 		lines = lines[:contentH]
@@ -264,9 +260,8 @@ func (a *App) View() string {
 	return out
 }
 
-// headerView is the application navigation bar. Numbers stay keyboard-only.
-// At narrow widths it compresses: tighter gaps, short active pill, clock
-// without seconds, and finally drops the clock — never wraps.
+// headerView is the application navigation bar with THREE zones:
+// LEFT brand | CENTER nav | RIGHT clock. No keyboard numbers, no wrapping.
 func (a *App) headerView(w int) string {
 	brand := thAppTitle.Render("FORGE")
 	names := []string{"TODAY", "GOV", "DSA", "SWE", "REVIEWS"}
@@ -283,25 +278,29 @@ func (a *App) headerView(w int) string {
 	if a.activeInfo != "" {
 		active = thRunning.Render(a.activeInfo)
 	}
-	bar := joinHeader(brand, nav, active, clock, w, "    ")
+	bar := joinHeader(brand, nav, active, clock, w, "  ")
 	if lipgloss.Width(bar) > w {
-		bar = joinHeader(brand, nav, active, clock, w, "  ")
+		bar = joinHeader(brand, nav, active, clock, w, " ")
 	}
 	if lipgloss.Width(bar) > w {
 		shortActive := ""
 		if a.activeInfo != "" {
 			shortActive = thRunning.Render("● ACTIVE")
 		}
-		bar = joinHeader(brand, nav, shortActive, thClock.Render(a.now.Format("15:04")), w, "  ")
+		bar = joinHeader(brand, nav, shortActive, thClock.Render(a.now.Format("15:04")), w, " ")
 	}
 	if lipgloss.Width(bar) > w {
 		bar = joinHeader(brand, nav, "", "", w, " ")
 	}
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(cDimLine).Width(w).Render(bar)
+	// Force single line: truncate instead of wrapping.
+	bar = TruncateToWidth(bar, w)
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(cDimLine).Width(w).MaxHeight(1).Render(bar)
 }
 
 func joinHeader(brand string, nav []string, active, clock string, w int, gap string) string {
+	// LEFT: brand + nav as one anchored block.
 	left := brand + gap + strings.Join(nav, gap)
+	// RIGHT: active session + clock independently right-aligned.
 	right := clock
 	if active != "" {
 		if right != "" {
@@ -317,11 +316,11 @@ func joinHeader(brand string, nav []string, active, clock string, w int, gap str
 	return left + strings.Repeat(" ", sp) + right
 }
 
-// footerView is the grouped status/action bar.
+// footerView is ONE horizontal command bar with compact key badges.
+// Fixed height, never vertical, truncated to fit.
 func (a *App) footerView(w int) string {
 	groups := [][]string{
-		{"q", "Quit"},
-		{"j/k", "Navigate"},
+		{"↑↓", "Navigate"},
 		{"Enter", "Select"},
 		{"Esc", "Back"},
 		{"r", "Refresh"},
@@ -329,27 +328,44 @@ func (a *App) footerView(w int) string {
 	if s, ok := a.screenHints(); ok && s != "" {
 		groups = append(groups, []string{"·", s})
 	}
+	// Per-screen primary action stays visible (Start/Stop/Open).
+	extra := a.footerExtra()
+	if extra != "" {
+		groups = append(groups, []string{"·", extra})
+	}
 	var parts []string
 	for _, g := range groups {
 		if g[0] == "·" {
-			parts = append(parts, thFootDesc.Render(g[1]))
+			parts = append(parts, thFootDesc.Render(TruncateToWidth(g[1], 40)))
 			continue
 		}
-		parts = append(parts, footChip(g[0])+thFootDesc.Render("  "+g[1]))
+		parts = append(parts, footChip(g[0])+thFootDesc.Render(" "+g[1]))
 	}
-	line := strings.Join(parts, "     ")
+	sep := "   "
+	line := strings.Join(parts, sep)
+	// Shrink gracefully: drop secondary groups, keep one horizontal row.
+	for lipgloss.Width(line) > w-2 && len(parts) > 3 {
+		parts = parts[:len(parts)-1]
+		line = strings.Join(parts, sep)
+	}
 	if lipgloss.Width(line) > w-2 {
-		// Narrow terminals: plain keys, primary groups only.
-		line = thFootKey.Render("q") + thFootDesc.Render("  Quit") + "     " +
-			thFootKey.Render("Enter") + thFootDesc.Render("  Select") + "     " +
-			thFootKey.Render("Esc") + thFootDesc.Render("  Back")
+		line = footChip("q") + thFootDesc.Render(" Quit") + sep +
+			footChip("Enter") + thFootDesc.Render(" Select") + sep +
+			footChip("Esc") + thFootDesc.Render(" Back")
 	}
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true, false, false, false).BorderForeground(cDimLine).Width(w).Render(line)
+	line = TruncateToWidth(line, w-2)
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true, false, false, false).BorderForeground(cDimLine).Width(w).MaxHeight(2).Render(line)
 }
 
-// footChip renders a key badge for the action bar.
+func (a *App) footerExtra() string {
+	// Screen-specific hints already flow via screenHints(); no duplication.
+	return ""
+}
+
+// footChip renders a compact single-line key badge. It must stay exactly
+// one line tall so the footer remains ONE horizontal command bar.
 func footChip(key string) string {
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cDimLine).Padding(0, 1).Render(thFootKey.Render(key))
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(cPrimary).Padding(0, 1).Render(key)
 }
 
 func (a *App) screenHints() (string, bool) {

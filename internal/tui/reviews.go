@@ -1,14 +1,14 @@
 package tui
 
 import (
-	"fmt"
+	"strings"
 
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// ---------- REVIEWS ----------
+// ---------- REVIEWS: persistent two-panel weekly workspace ----------
 
 type ReviewsScreen struct {
 	app      *App
@@ -30,11 +30,11 @@ func (s *ReviewsScreen) Reload() {
 	}
 	SortReviews(reps)
 	s.reports = reps
-	items := make([]listItem, 0, len(reps))
+	items := make([]RowItem, 0, len(reps))
 	for _, r := range reps {
-		items = append(items, listItem{id: r.ID, title: r.ID, desc: fmt.Sprintf("%s — %s", r.WeekStart, r.WeekEnd)})
+		items = append(items, RowItem{ID: r.ID, Title: r.WeekStart + " — " + r.WeekEnd, Meta: r.ID, Mark: "•"})
 	}
-	s.weeks.SetItems(wrapItems(items))
+	s.weeks.SetItems(items)
 	s.syncSelected()
 }
 
@@ -58,53 +58,61 @@ func (s *ReviewsScreen) Update(msg tea.Msg) tea.Cmd {
 		down := k.String() == "j" || k.String() == "down"
 		prev := s.weeks.SelectedID()
 		if down {
-			s.weeks.List.CursorDown()
+			s.weeks.CursorDown()
 		} else {
-			s.weeks.List.CursorUp()
+			s.weeks.CursorUp()
 		}
 		if s.weeks.SelectedID() != prev {
 			s.syncSelected()
 		}
 		return nil
 	}
-	prev := s.weeks.SelectedID()
-	var c tea.Cmd
-	s.weeks.List, c = s.weeks.List.Update(msg)
-	if s.weeks.SelectedID() != prev {
-		s.syncSelected()
-	}
-	return c
+	return nil
 }
 
 func (s *ReviewsScreen) View() string {
 	w, h := s.app.contentViewport()
-	lw, rw := splitW(w, 30, 22, 40)
-	listH := h - 6
-	if listH < 8 {
-		listH = 8
+	lw, rw := TwoPaneLayout(w, 32, 24, 40)
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
 	}
-	s.weeks.List.SetWidth(lw - 4)
-	s.weeks.FitHeight(listH)
-	return lipglossJoin(Panel("REVIEWS", s.weeks.List.View(), lw, true), Panel("WEEKLY REPORT", s.reportView(), rw, false))
+	innerH := bodyH - 4
+	if innerH < 4 {
+		innerH = 4
+	}
+	s.weeks.SetWidth(lw - 4)
+	s.weeks.FitHeight(innerH - 1)
+	s.weeks.SetFocused(true)
+	return lipglossJoin(
+		PanelFixed("REVIEWS", SectionHeader("WEEKLY REVIEWS")+"\n"+s.weeks.View(), lw, bodyH, true),
+		PanelFixed("WEEKLY REPORT", s.reportView(rw-6), rw, bodyH, false),
+	)
 }
 
-func (s *ReviewsScreen) reportView() string {
+func (s *ReviewsScreen) reportView(inner int) string {
 	if s.selected == nil {
 		return thMeta.Render("Select a week.")
 	}
+	if inner < 24 {
+		inner = 24
+	}
 	r := s.selected
-	var sb string
-	sb += thScreenTitle.Render(r.WeekStart+"  —  "+r.WeekEnd) + "\n"
-	sb += thMeta.Render(r.ID) + "\n\n"
-	sb += SectionHeader("TIME") + "\n"
-	sb += MetaRow("Planned", FormatDuration(r.PlannedSeconds), 9) + "\n"
-	sb += MetaRow("Actual", FormatDuration(r.ElapsedSeconds), 9) + "\n"
-	sb += MetaRow("Overrun", formatSigned(r.OverrunSeconds), 9) + "\n\n"
-	sb += SectionHeader("WHAT WORKED WELL THIS WEEK?") + "\n"
-	sb += thPrimary.Render(orDash(r.ReflectionWorked)) + "\n\n"
-	sb += SectionHeader("WHAT SHOULD CHANGE NEXT WEEK?") + "\n"
-	sb += thPrimary.Render(orDash(r.ReflectionChange)) + "\n"
-	return sb
+	var sb strings.Builder
+	sb.WriteString(thScreenTitle.Render(r.WeekStart+"  —  "+r.WeekEnd) + "\n")
+	sb.WriteString(thMeta.Render(r.ID) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("TIME") + "\n")
+	sb.WriteString(MetaRow("Planned", FormatDuration(r.PlannedSeconds), 9) + "\n")
+	sb.WriteString(MetaRow("Actual", FormatDuration(r.ElapsedSeconds), 9) + "\n")
+	sb.WriteString(MetaRow("Overrun", formatSigned(r.OverrunSeconds), 9) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("WHAT WORKED WELL THIS WEEK?") + "\n")
+	sb.WriteString(thPrimary.Render(orDash(r.ReflectionWorked)) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("WHAT SHOULD CHANGE NEXT WEEK?") + "\n")
+	sb.WriteString(thPrimary.Render(orDash(r.ReflectionChange)) + "\n")
+	return sb.String()
 }
 
 func formatSigned(secs int) string {
@@ -121,4 +129,4 @@ func orDash(s string) string {
 	return s
 }
 
-func (s *ReviewsScreen) Hints() string { return "" }
+func (s *ReviewsScreen) Hints() string { return "j/k Move   Esc Back" }

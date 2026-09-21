@@ -4,20 +4,22 @@ import (
 	"fmt"
 	"strings"
 
-	db "forge/internal/db"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Panel renders a bento card: styled title bar, consistent inner padding,
-// subtle or accent border. Content is pre-rendered panel body.
+// Forge shared components. Boxy bento cards, thin elegant borders,
+// consistent padding, real controls. No string-based layout.
+
+// Panel renders a bento card: thin boxy border, consistent inner padding,
+// title + divider + body. Focused cards get the accent border + marker.
 func Panel(title, content string, width int, focused bool) string {
-	border := lipgloss.RoundedBorder()
+	if width < 20 {
+		width = 20
+	}
 	style := lipgloss.NewStyle().
-		Border(border).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(cDimLine).
 		Padding(0, 1).
 		Width(width)
@@ -34,8 +36,11 @@ func Panel(title, content string, width int, focused bool) string {
 
 // PanelPlain is a bento card without focus affordance (static info groups).
 func PanelPlain(title, content string, width int) string {
+	if width < 20 {
+		width = 20
+	}
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder()).
 		BorderForeground(cDimLine).
 		Padding(0, 1).
 		Width(width)
@@ -65,6 +70,9 @@ func splitW(total, leftPct, leftMin, rightMin int) (l, r int) {
 	}
 	if r < 10 {
 		r = 10
+	}
+	if l < 10 {
+		l = 10
 	}
 	return l, r
 }
@@ -113,16 +121,29 @@ type Button struct {
 }
 
 func (b Button) View() string {
+	border := lipgloss.NormalBorder()
 	if b.Disabled {
 		inner := thBtnDisabled.Render("  " + b.Label + "  ")
-		return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cDimLine).Padding(0, 1).Render(inner)
+		return lipgloss.NewStyle().Border(border).BorderForeground(cDimLine).Padding(0, 1).Render(inner)
 	}
 	inner := thBtnIdle.Render("  " + b.Label + "  ")
 	if b.Focused {
-		inner = thBtnFocus.Render("  " + b.Label + "  ")
-		return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cPrimary).Padding(0, 1).Render(inner)
+		inner = thBtnFocus.Render("▶ " + b.Label + "  ")
+		return lipgloss.NewStyle().Border(border).BorderForeground(cPrimary).Padding(0, 1).Render(inner)
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cDimLine).Padding(0, 1).Render(inner)
+	return lipgloss.NewStyle().Border(border).BorderForeground(cDimLine).Padding(0, 1).Render(inner)
+}
+
+// CompactView is the single-line button for short viewports: same real
+// control (focus/disabled states) in one line to preserve actions.
+func (b Button) CompactView() string {
+	if b.Disabled {
+		return thBtnDisabled.Render("▪ " + b.Label)
+	}
+	if b.Focused {
+		return thBtnFocus.Render("▶ " + b.Label)
+	}
+	return thBtnIdle.Render("▪ " + b.Label)
 }
 
 // RadioGroup is a real mutually-exclusive selection control with stable
@@ -222,51 +243,81 @@ func lipglossJoin(left, right string) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, left+" ", right)
 }
 
-// Navigator is the shared Forge list wrapper: no duplicated list chrome,
-// content-fitted height, single focus convention. All master navigators
-// (exams, subjects, patterns, areas, weeks) build on it.
+// listItem is a real selectable list row (compat alias for RowItem construction).
+type listItem struct {
+	id    string
+	title string
+	desc  string
+}
+
+func (i listItem) Title() string       { return i.title }
+func (i listItem) Description() string { return i.desc }
+func (i listItem) FilterValue() string { return i.title }
+
+// Navigator is the shared Forge list: thin dividers, polished selection,
+// viewport scrolling, single focus convention. Built on RowList — no Bubbles
+// chrome, no pink defaults. All master navigators build on it.
 type Navigator struct {
-	List list.Model
+	rows RowList
 }
 
-// NewNavigator returns a chrome-free selectable list.
+// NewNavigator returns a chrome-free Forge selectable list.
 func NewNavigator() Navigator {
-	l := list.New(nil, list.NewDefaultDelegate(), 28, 12)
-	l.SetShowHelp(false)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	return Navigator{List: l}
+	r := NewRowList()
+	r.Focused = true
+	return Navigator{rows: r}
 }
 
-// SetItems replaces rows.
-func (n *Navigator) SetItems(items []list.Item) { n.List.SetItems(items) }
+// SetItems replaces rows (Forge RowItems).
+func (n *Navigator) SetItems(items []RowItem) { n.rows.SetItems(items) }
+
+// SetListItems is a compat bridge from legacy listItem rows.
+func (n *Navigator) SetListItems(in []listItem) {
+	out := make([]RowItem, 0, len(in))
+	for _, it := range in {
+		out = append(out, RowItem{ID: it.id, Title: it.title, Meta: it.desc})
+	}
+	n.rows.SetItems(out)
+}
 
 // FitHeight sizes the viewport to content so panels never float in padding.
-func (n *Navigator) FitHeight(maxH int) {
-	h := len(n.List.Items())*2 + 1
-	if h < 4 {
-		h = 4
-	}
-	if h > maxH {
-		h = maxH
-	}
-	n.List.SetHeight(h)
-}
+func (n *Navigator) FitHeight(maxH int) { n.rows.FitHeight(maxH) }
 
-// SelectedID returns the selected row id for listItem rows.
-func (n Navigator) SelectedID() string {
-	if it, ok := n.List.SelectedItem().(listItem); ok {
-		return it.id
-	}
-	return ""
-}
+// SetWidth sets divider span.
+func (n *Navigator) SetWidth(w int) { n.rows.SetWidth(w) }
 
-// wrapItems converts typed rows to list items.
-func wrapItems(in []listItem) []list.Item {
-	out := make([]list.Item, 0, len(in))
+// SetHeight sets viewport rows.
+func (n *Navigator) SetHeight(h int) { n.rows.SetHeight(h) }
+
+// Select moves cursor.
+func (n *Navigator) Select(i int) { n.rows.Select(i) }
+
+// CursorDown moves down.
+func (n *Navigator) CursorDown() { n.rows.CursorDown() }
+
+// CursorUp moves up.
+func (n *Navigator) CursorUp() { n.rows.CursorUp() }
+
+// SelectedID returns the selected row id.
+func (n Navigator) SelectedID() string { return n.rows.SelectedID() }
+
+// View renders rows with dividers.
+func (n Navigator) View() string { return n.rows.View() }
+
+// SetFocused toggles focus treatment.
+func (n *Navigator) SetFocused(f bool) { n.rows.Focused = f }
+
+// Cursor returns cursor index.
+func (n Navigator) Cursor() int { return n.rows.Cursor }
+
+// Len returns row count.
+func (n Navigator) Len() int { return len(n.rows.Items) }
+
+// wrapItems converts legacy typed rows to Forge RowItems.
+func wrapItems(in []listItem) []RowItem {
+	out := make([]RowItem, 0, len(in))
 	for _, it := range in {
-		out = append(out, it)
+		out = append(out, RowItem{ID: it.id, Title: it.title, Meta: it.desc})
 	}
 	return out
 }
@@ -288,34 +339,47 @@ func (c ExamCard) Percent() float64 {
 	return float64(c.Done) / float64(c.Total)
 }
 
-// View renders the card (7 content lines + border). Keep in sync with
-// examCardHeight: dashboard grid math depends on uniform card height.
+// View renders the card with structured sections. Fixed 8 content lines so
+// grid rows stay uniform; see examCardHeight.
 func (c ExamCard) View() string {
 	w := c.Width
 	if w < 28 {
 		w = 28
 	}
+	inner := w - 4
+	if inner < 20 {
+		inner = 20
+	}
+	barW := inner - 6
+	if barW < 12 {
+		barW = 12
+	}
+	if barW > 26 {
+		barW = 26
+	}
 	var sb strings.Builder
-	sb.WriteString(thScreenTitle.Render(c.Name) + "\n")
+	sb.WriteString(thScreenTitle.Render(TruncateToWidth(c.Name, inner)) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
-	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: 20, ShowPct: true}.View() + "\n")
+	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true}.View() + "\n")
 	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
 	sb.WriteString(SectionHeader("PRACTICE READINESS") + "\n")
 	sb.WriteString(thHelp.Render("not yet calculated") + "\n")
-	// Pad to exactly 7 content lines so grid rows stay uniform.
+	sb.WriteString(thMeta.Render("Enter to open →") + "\n")
 	lines := strings.Split(strings.TrimRight(sb.String(), "\n"), "\n")
-	for len(lines) < 7 {
+	for len(lines) < 8 {
 		lines = append(lines, "")
 	}
-	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cDimLine).Padding(0, 1).Width(w)
+	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cDimLine).Padding(0, 1).Width(w)
 	if c.Focused {
 		style = style.BorderForeground(cPrimary)
+		lines[0] = thPanelTitle.Render(TruncateToWidth(c.Name, inner) + "  ●")
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }
 
 // examCardHeight is the rendered ExamCard height including borders.
-const examCardHeight = 9
+const examCardHeight = 10
 
 // EmptyState renders a consistent placeholder for empty content.
 func EmptyState(text string) string { return thHelp.Render(text) }
@@ -326,16 +390,4 @@ func ValidationMessage(msg string) string {
 		return ""
 	}
 	return thError.Render(msg)
-}
-
-// TodayTaskRow builds one aligned Today table row with domain badge text
-// and status pill text. The table owns column alignment; this owns content.
-func TodayTaskRow(i int, t db.TodayTask, st TaskStatus) table.Row {
-	status := "TODO"
-	if st == TaskActive {
-		status = "ACTIVE"
-	} else if st == TaskCompleted {
-		status = "DONE"
-	}
-	return table.Row{fmt.Sprint(i + 1), string(t.Domain), t.Title, FormatDuration(t.PlannedSeconds), status}
 }

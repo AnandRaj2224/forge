@@ -420,46 +420,75 @@ func (s *ResultForm) saveAll() error {
 	return fmt.Errorf("unknown result kind")
 }
 
-// View renders the compact in-panel form.
-func (s *ResultForm) View() string {
+// View renders the structured in-panel evidence form with sections,
+// dividers, stable controls, and a real SAVE button.
+func (s *ResultForm) View() string { return s.ViewFor(30) }
+
+// ViewFor renders the form constrained to an inner width (panel-aware).
+func (s *ResultForm) ViewFor(inner int) string {
+	if inner < 18 {
+		inner = 18
+	}
+	div := RowDivider(inner)
 	var sb strings.Builder
 	switch s.kind {
 	case "LECTURE":
 		sb.WriteString(SectionHeader("LECTURE COMPLETED?") + "\n")
+		sb.WriteString(div + "\n")
 		sb.WriteString(s.lecture.View() + "\n")
 	case "PRACTICE":
-		sb.WriteString(SectionHeader("TOPIC          TIME  ATT  COR  AVG") + "\n")
+		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TOPICS · 1H BLOCK", len(s.prows))) + "\n")
 		for i, r := range s.prows {
 			fbase := i * 4
-			sb.WriteString(thPrimary.Render(r.Topic) + "\n")
-			sb.WriteString("  " + r.Time.View(s.focus == fbase, 9) + " " + r.Att.View(s.focus == fbase+1, 9) + " " + r.Corr.View(s.focus == fbase+2, 9) + " " + r.Avg.View(s.focus == fbase+3, 9) + "\n")
+			sb.WriteString(div + "\n")
+			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(r.Topic, inner-4))) + "\n")
+			sb.WriteString("  " + r.Time.View(s.focus == fbase, 5) + "  " + r.Att.View(s.focus == fbase+1, 5) + "\n")
+			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 5) + "  " + r.Avg.View(s.focus == fbase+3, 5) + "\n")
 			if _, _, _, _, msg := ValidatePracticeRow(r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value()); msg != "" {
-				sb.WriteString("  " + thError.Render(msg) + "\n")
+				sb.WriteString("  " + thError.Render("✕ "+msg) + "\n")
+			} else {
+				sb.WriteString("  " + thSuccess.Render("✓ valid") + "\n")
 			}
 		}
 	case "DSA":
+		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d PROBLEMS", len(s.drows))) + "\n")
 		for i, r := range s.drows {
 			fbase := i * 4
-			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s [%s]", i+1, r.Title, r.Mode)) + "\n")
-			sb.WriteString("  " + r.Indep.View() + "   " + r.Optimal.View() + "   " + r.Hint.View() + "\n")
-			sb.WriteString("  " + r.Solve.View(s.focus == fbase+3, 11) + "\n")
+			sb.WriteString(div + "\n")
+			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(r.Title, inner-8))) + "  " + thMeta.Render("["+string(r.Mode)+"]") + "\n")
+			sb.WriteString("  " + r.Indep.View() + "\n")
+			sb.WriteString("  " + r.Optimal.View() + "\n")
+			sb.WriteString("  " + r.Hint.View() + "\n")
+			sb.WriteString("  " + r.Solve.View(s.focus == fbase+3, 10) + "\n")
 			_ = fbase
 			if _, _, msg := ValidateSolveTime(r.Solve.Input.Value()); msg != "" {
-				sb.WriteString("  " + thError.Render(msg) + "\n")
+				sb.WriteString("  " + thError.Render("✕ "+msg) + "\n")
+			} else {
+				sb.WriteString("  " + thSuccess.Render("✓ valid") + "\n")
 			}
 		}
 	case "SWE":
-		for _, r := range s.srows {
-			sb.WriteString(thPrimary.Render(r.Area+"  ·  "+r.Task) + "\n")
+		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TASKS", len(s.srows))) + "\n")
+		for i, r := range s.srows {
+			sb.WriteString(div + "\n")
+			_ = i
+			sb.WriteString(thPrimary.Render(TruncateToWidth(r.Area+"  ·  "+r.Task, inner-2)) + "\n")
 			sb.WriteString(r.Radio.View() + "\n")
+			if r.Radio.Selected < 0 {
+				sb.WriteString("  " + thWarn.Render("○ outcome required") + "\n")
+			} else {
+				sb.WriteString("  " + thSuccess.Render("✓ "+r.Radio.Options[r.Radio.Selected]) + "\n")
+			}
 		}
 	}
-	sb.WriteString("\n" + s.save.View() + "\n")
+	sb.WriteString(div + "\n")
+	sb.WriteString(s.save.View() + "\n")
 	if s.save.Disabled {
 		sb.WriteString(thMeta.Render("SAVE needs every item valid.") + "\n")
 	}
 	if s.err != "" {
 		sb.WriteString(thError.Render(s.err) + "\n")
 	}
+	sb.WriteString(thHelp.Render("Tab move · Space toggle · Enter SAVE"))
 	return sb.String()
 }

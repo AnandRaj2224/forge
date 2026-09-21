@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
@@ -10,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// ---------- DSA ----------
+// ---------- DSA: persistent two-panel patterns workspace ----------
 
 type DSAProblemDetail struct {
 	Problem db.DSAProblem
@@ -42,11 +43,11 @@ func (s *DSAScreen) Reload() {
 		return
 	}
 	s.patterns = GroupDSAPatterns(probs)
-	items := make([]listItem, 0, len(s.patterns))
+	items := make([]RowItem, 0, len(s.patterns))
 	for _, p := range s.patterns {
-		items = append(items, listItem{id: p.Name, title: p.Name, desc: fmt.Sprintf("%d questions", len(p.Problems))})
+		items = append(items, RowItem{ID: p.Name, Title: p.Name, Meta: fmt.Sprintf("%d questions", len(p.Problems)), Mark: "•"})
 	}
-	s.patList.SetItems(wrapItems(items))
+	s.patList.SetItems(items)
 	s.showing = "pattern"
 	s.reloadQuestions()
 }
@@ -71,16 +72,16 @@ func (s *DSAScreen) reloadQuestions() {
 		s.qList.SetItems(nil)
 		return
 	}
-	items := make([]listItem, 0, len(p.Problems))
+	items := make([]RowItem, 0, len(p.Problems))
 	for _, q := range p.Problems {
 		att, _ := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID)
 		mark := "○"
 		if DSAPassUI(att) {
 			mark = "✓"
 		}
-		items = append(items, listItem{id: string(q.ID), title: mark + "  " + q.Title, desc: q.Difficulty})
+		items = append(items, RowItem{ID: string(q.ID), Title: q.Title, Meta: q.Difficulty, Mark: mark})
 	}
-	s.qList.SetItems(wrapItems(items))
+	s.qList.SetItems(items)
 }
 
 func (s *DSAScreen) openProblem(pid string) {
@@ -141,21 +142,31 @@ func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 			}
 			s.focusR = true
 			return nil
-		case "j", "down", "k", "up":
+		case "j", "down", "k", "up", "h", "left", "l", "right":
 			down := k.String() == "j" || k.String() == "down"
+			up := k.String() == "k" || k.String() == "up"
+			left := k.String() == "h" || k.String() == "left"
+			right := k.String() == "l" || k.String() == "right"
 			if s.focusR {
 				if down {
-					s.qList.List.CursorDown()
-				} else {
-					s.qList.List.CursorUp()
+					s.qList.CursorDown()
+				} else if up {
+					s.qList.CursorUp()
+				} else if left {
+					s.focusR = false
 				}
 				return nil
 			}
 			prev := s.patList.SelectedID()
 			if down {
-				s.patList.List.CursorDown()
+				s.patList.CursorDown()
+			} else if up {
+				s.patList.CursorUp()
+			} else if right {
+				s.focusR = true
+				return nil
 			} else {
-				s.patList.List.CursorUp()
+				return nil
 			}
 			if s.patList.SelectedID() != prev {
 				s.reloadQuestions()
@@ -163,89 +174,108 @@ func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 	}
-	if s.focusR {
-		var c tea.Cmd
-		s.qList.List, c = s.qList.List.Update(msg)
-		return c
-	}
-	prev := s.patList.SelectedID()
-	var c tea.Cmd
-	s.patList.List, c = s.patList.List.Update(msg)
-	if s.patList.SelectedID() != prev {
-		s.reloadQuestions()
-	}
-	return c
+	return nil
 }
 
 func (s *DSAScreen) View() string {
 	w, h := s.app.contentViewport()
-	lw, rw := splitW(w, 30, 22, 40)
-	listH := h - 6
-	if listH < 8 {
-		listH = 8
+	lw, rw := TwoPaneLayout(w, 32, 24, 40)
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
 	}
-	s.patList.List.SetWidth(lw - 4)
-	s.qList.List.SetWidth(rw - 4)
-	s.patList.FitHeight(listH)
-	s.qList.FitHeight(listH - 8)
+	innerH := bodyH - 4
+	if innerH < 4 {
+		innerH = 4
+	}
+	s.patList.SetWidth(lw - 4)
+	s.qList.SetWidth(rw - 4)
+	s.patList.FitHeight(innerH - 1)
+	s.qList.FitHeight(innerH - 7)
+	s.patList.SetFocused(!s.focusR)
+	s.qList.SetFocused(s.focusR)
 	p := s.selPattern()
 	var right string
 	if s.showing == "problem" {
-		right = Panel("PROBLEM", s.problemBody(), rw, true)
+		right = PanelFixed("PROBLEM", s.problemBody(rw-6), rw, bodyH, true)
 	} else if p != nil {
 		done, total := s.patternProgress(p)
 		r := 0.0
 		if total > 0 {
 			r = float64(done) / float64(total)
 		}
-		body := thScreenTitle.Render(p.Name) + "\n\n" +
+		barW := rw - 12
+		if barW < 14 {
+			barW = 14
+		}
+		if barW > 28 {
+			barW = 28
+		}
+		inner := rw - 6
+		body := thScreenTitle.Render(strings.ToUpper(TruncateToWidth(p.Name, inner))) + "\n" +
+			RowDivider(inner) + "\n" +
 			SectionHeader("PROGRESSION") + "\n" +
-			ProgressBar{Ratio: r, Width: 26, ShowPct: true}.View() + "\n" +
-			thMeta.Render(fmt.Sprintf("%d / %d", done, total)) + "\n\n" +
-			SectionHeader("QUESTIONS") + "\n" + s.qList.List.View()
-		right = Panel("PATTERN", body, rw, s.focusR)
+			ProgressBar{Ratio: r, Width: barW, ShowPct: true}.View() + "\n" +
+			thMeta.Render(fmt.Sprintf("%d / %d", done, total)) + "\n" +
+			RowDivider(inner) + "\n" +
+			SectionHeader("QUESTIONS") + "\n" + s.qList.View()
+		right = PanelFixed("PATTERN", body, rw, bodyH, s.focusR)
 	} else {
-		right = Panel("PATTERN", EmptyState("Select a pattern."), rw, s.focusR)
+		right = PanelFixed("PATTERN", EmptyState("Select a pattern."), rw, bodyH, s.focusR)
 	}
-	return lipglossJoin(Panel("PATTERNS", s.patList.List.View(), lw, !s.focusR), right)
+	return lipglossJoin(PanelFixed("PATTERNS", SectionHeader("PATTERNS")+"\n"+s.patList.View(), lw, bodyH, !s.focusR), right)
 }
 
-func (s *DSAScreen) problemBody() string {
+func (s *DSAScreen) problemBody(inner int) string {
 	d := s.detail
 	if d == nil {
 		return EmptyState("Problem not found.")
 	}
-	var sb string
-	sb += thScreenTitle.Render(d.Problem.Title) + "\n"
-	sb += thMeta.Render(d.Problem.Difficulty+"  ·  "+d.Problem.Pattern) + "\n\n"
-	sb += SectionHeader("PROGRESS") + "\n"
+	if inner < 24 {
+		inner = 24
+	}
+	barW := inner - 8
+	if barW < 14 {
+		barW = 14
+	}
+	if barW > 28 {
+		barW = 28
+	}
+	var sb strings.Builder
+	sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(d.Problem.Title, inner))) + "\n")
+	sb.WriteString(thMeta.Render(d.Problem.Difficulty+"  ·  "+d.Problem.Pattern) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("PROGRESS") + "\n")
 	if d.Last == nil {
-		sb += thHelp.Render("Not reached yet") + "\n"
+		sb.WriteString(thHelp.Render("Not reached yet") + "\n")
 	} else if d.Passed {
-		sb += thSuccess.Render("✓  Passed") + "\n"
+		sb.WriteString(thSuccess.Render("✓  Passed") + "\n")
 	} else {
-		sb += thWarn.Render("○  Attempted") + "\n"
+		sb.WriteString(thWarn.Render("○  Attempted") + "\n")
 	}
 	if d.Last != nil {
 		yn := map[bool]string{true: thSuccess.Render("✓"), false: thMeta.Render("No")}
-		sb += "\n" + SectionHeader("LAST ATTEMPT") + "\n"
-		sb += MetaRow("Independent", yn[d.Last.Independent], 12) + "\n"
-		sb += MetaRow("Optimal", yn[d.Last.Optimal], 12) + "\n"
-		sb += MetaRow("Hint used", yn[d.Last.HintUsed], 12) + "\n"
+		sb.WriteString(RowDivider(inner) + "\n")
+		sb.WriteString(SectionHeader("LAST ATTEMPT") + "\n")
+		sb.WriteString(MetaRow("Independent", yn[d.Last.Independent], 12) + "\n")
+		sb.WriteString(MetaRow("Optimal", yn[d.Last.Optimal], 12) + "\n")
+		sb.WriteString(MetaRow("Hint used", yn[d.Last.HintUsed], 12) + "\n")
 		if d.Last.SolveTimeSeconds != nil {
-			sb += MetaRow("Solve time", FormatDuration(*d.Last.SolveTimeSeconds), 12) + "\n"
+			sb.WriteString(MetaRow("Solve time", FormatDuration(*d.Last.SolveTimeSeconds), 12) + "\n")
 		} else {
-			sb += MetaRow("Solve time", "—", 12) + "\n"
+			sb.WriteString(MetaRow("Solve time", "—", 12) + "\n")
 		}
 	}
-	sb += "\n" + SectionHeader("NEXT REVIEW") + "\n"
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("NEXT REVIEW") + "\n")
 	if d.Review != nil {
-		sb += thPrimary.Render(d.Review.NextReviewDate) + "\n"
+		sb.WriteString(thPrimary.Render(d.Review.NextReviewDate) + "\n")
 	} else {
-		sb += thMeta.Render("—") + "\n"
+		sb.WriteString(thMeta.Render("—") + "\n")
 	}
-	sb += "\n" + thHelp.Render("Work starts from Today only.")
-	return sb
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(thHelp.Render("Work starts from Today only."))
+	return sb.String()
 }
 
 func (s *DSAScreen) Hints() string { return "Tab Focus   Enter Open" }

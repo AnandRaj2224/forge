@@ -8,7 +8,6 @@ import (
 
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
-	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -20,12 +19,12 @@ const (
 	tzRight
 )
 
-// TodayScreen is the three-part workspace: task list | active session /
+// TodayScreen is the three-part bento workspace: task list | active session /
 // selected-task-or-result. Selection drives the detail panel; no separate
 // detail screen exists.
 type TodayScreen struct {
 	app      *App
-	tbl      table.Model
+	tbl      TodayTaskTable
 	tasks    []db.TodayTask
 	status   []TaskStatus
 	bundles  []Bundle
@@ -41,25 +40,8 @@ type TodayScreen struct {
 }
 
 func NewTodayScreen(a *App) *TodayScreen {
-	cols := []table.Column{
-		{Title: "#", Width: 3},
-		{Title: "DOMAIN", Width: 6},
-		{Title: "TASK", Width: 30},
-		{Title: "DUR", Width: 5},
-		{Title: "STATUS", Width: 7},
-	}
-	t := table.New(table.WithColumns(cols), table.WithFocused(true), table.WithHeight(12))
-	t.SetStyles(tableStyles())
-	return &TodayScreen{app: a, tbl: t, right: "detail",
-		stopBtn: Button{Label: "STOP"}, startBtn: Button{Label: "START SESSION"}}
-}
-
-func tableStyles() table.Styles {
-	st := table.DefaultStyles()
-	st.Header = st.Header.Bold(true).Foreground(lipgloss.Color("12"))
-	st.Selected = st.Selected.Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24"))
-	st.Cell = st.Cell.Foreground(lipgloss.Color("7"))
-	return st
+	return &TodayScreen{app: a, tbl: NewTodayTaskTable(), right: "detail",
+		stopBtn: Button{Label: "STOP SESSION"}, startBtn: Button{Label: "START SESSION"}}
 }
 
 func (s *TodayScreen) latestSnapshot(ctx context.Context) *db.TodaySnapshot {
@@ -91,8 +73,8 @@ func (s *TodayScreen) Reload() {
 		return
 	}
 	keepCursor := ""
-	if len(s.tasks) > 0 && s.tbl.Cursor() < len(s.tasks) {
-		keepCursor = string(s.tasks[s.tbl.Cursor()].ID)
+	if len(s.tasks) > 0 && s.tbl.CursorPos() < len(s.tasks) {
+		keepCursor = string(s.tasks[s.tbl.CursorPos()].ID)
 	}
 	s.snap = snap
 	tasks, err := runtime.GetTodayTasks(ctx, s.app.DB, snap.ID)
@@ -103,14 +85,12 @@ func (s *TodayScreen) Reload() {
 	s.tasks = tasks
 	s.status = make([]TaskStatus, len(tasks))
 	s.bundles = make([]Bundle, len(tasks))
-	rows := make([]table.Row, 0, len(tasks))
 	for i, t := range tasks {
 		st := ComputeTaskStatus(ctx, s.app.DB, t.ID)
 		s.status[i] = st
 		s.bundles[i] = ResolveBundle(ctx, s.app.DB, t)
-		rows = append(rows, TodayTaskRow(i, t, st))
 	}
-	s.tbl.SetRows(rows)
+	s.tbl.SetData(s.tasks, s.status)
 	if keepCursor != "" {
 		for i, t := range tasks {
 			if string(t.ID) == keepCursor {
@@ -129,10 +109,10 @@ func (s *TodayScreen) Reload() {
 }
 
 func (s *TodayScreen) selected() (db.TodayTask, TaskStatus, Bundle, bool) {
-	if len(s.tasks) == 0 || s.tbl.Cursor() >= len(s.tasks) {
+	if len(s.tasks) == 0 || s.tbl.CursorPos() >= len(s.tasks) {
 		return db.TodayTask{}, TaskTodo, Bundle{}, false
 	}
-	i := s.tbl.Cursor()
+	i := s.tbl.CursorPos()
 	return s.tasks[i], s.status[i], s.bundles[i], true
 }
 
@@ -152,7 +132,7 @@ func (s *TodayScreen) startSelected() {
 	if !ok {
 		return
 	}
-	task := s.tasks[s.tbl.Cursor()]
+	task := s.tasks[s.tbl.CursorPos()]
 	ctx := context.Background()
 	if _, err := runtime.GetActiveSession(ctx, s.app.DB); err == nil {
 		s.app.err = "another session is active — stop it first (x)"
@@ -280,16 +260,6 @@ func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 			}
 		}
 	}
-	if s.zone == tzTasks {
-		var cmd tea.Cmd
-		prev := s.tbl.Cursor()
-		s.tbl, cmd = s.tbl.Update(msg)
-		if s.tbl.Cursor() != prev {
-			s.syncButtons()
-		}
-		_ = prev
-		return cmd
-	}
 	return nil
 }
 
@@ -318,44 +288,48 @@ func (s *TodayScreen) pressEnter() tea.Cmd {
 	return nil
 }
 
-// Viewport-proportioned three-part bento.
+// View is the explicit three-part bento: LEFT tasks | RIGHT active/detail.
+// Bounds come from the shell main viewport: LEFT ~58%, RIGHT ~42%, right
+// split ~50/50 vertically. Panels are height-clipped to the viewport.
 func (s *TodayScreen) View() string {
-	w := s.app.width
-	h := s.app.height
+	w, h := s.app.contentViewport()
 	if w < 60 {
 		w = 60
 	}
-	leftW, rightW := splitW(w, 58, 30, 26)
-	contentH := h - 7 // header(2) + title(1) + footer(2) + margins
+	leftW, rightW := TwoPaneLayout(w, 58, 30, 26)
+	contentH := h - 1 // title row above the bento
 	if contentH < 10 {
 		contentH = 10
 	}
-	// Task column flexes; headers never wrap because the fixed columns
-	// exactly fit their longest values (#/6/5/6 + spacing).
-	taskCol := (leftW - 4) - (3 + 6 + 5 + 7) - 8
-	if taskCol < 6 {
-		taskCol = 6
+	bodyH := contentH - 1 // titleBar occupies 1 line
+	if bodyH < 8 {
+		bodyH = 8
 	}
-	s.tbl.SetColumns([]table.Column{
-		{Title: "#", Width: 3},
-		{Title: "DOMAIN", Width: 6},
-		{Title: "TASK", Width: taskCol},
-		{Title: "DUR", Width: 5},
-		{Title: "STATUS", Width: 7},
-	})
-	s.tbl.SetHeight(contentH - 6)
-	s.tbl.SetWidth(leftW - 4)
+	// Today table viewport in lines: panel chrome ≈ 4 lines.
+	s.tbl.SetSize(leftW-4, bodyH-4)
+	s.tbl.Focus = s.zone == tzTasks
 
 	title := "TODAY"
 	if s.snap != nil {
-		title = fmt.Sprintf("TODAY  ·  %s  ·  revision %d", s.snap.LocalDate, s.snap.Revision)
+		title = fmt.Sprintf("TODAY  ·  %s  ·  rev %d", s.snap.LocalDate, s.snap.Revision)
 	}
+	hints := "j/k select · Tab focus · s start · x stop"
 	titleBar := thScreenTitle.Render(title)
+	full := title + "  " + hints
+	if lipgloss.Width(full) <= w {
+		titleBar = thScreenTitle.Render(title) + "  " + thMeta.Render(hints)
+	} else if lipgloss.Width(title) <= w {
+		titleBar = thScreenTitle.Render(TruncateToWidth(title, w))
+	} else {
+		titleBar = thScreenTitle.Render(TruncateToWidth("TODAY", w))
+	}
 
-	left := Panel("TASKS", s.tbl.View(), leftW, s.zone == tzTasks)
-	rightH := (contentH - 1) / 2
-	activePanel := Panel("ACTIVE SESSION", s.activeView(rightW), rightW, s.zone == tzActive)
-	rightBottom := s.rightPanel(rightW, contentH-rightH-1)
+	// Right column: TOP active session, BOTTOM detail/result, ~50/50.
+	activeH := bodyH / 2
+	bottomH := bodyH - activeH
+	left := PanelFixed("TASKS", s.tbl.View(), leftW, bodyH, s.zone == tzTasks)
+	activePanel := PanelFixed("ACTIVE SESSION", s.activeViewFor(rightW, activeH-4), rightW, activeH, s.zone == tzActive)
+	rightBottom := s.rightPanelFixed(rightW, bottomH)
 	rightCol := lipgloss.JoinVertical(lipgloss.Left, activePanel, rightBottom)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left+" ", rightCol)
 	if s.err != "" {
@@ -364,18 +338,46 @@ func (s *TodayScreen) View() string {
 	return titleBar + "\n" + body
 }
 
-func (s *TodayScreen) rightPanel(w, _ int) string {
-	if s.right == "result" && s.result != nil && s.taskOfResult() {
-		return Panel("RESULT — EVIDENCE", s.result.View(), w, s.zone == tzRight)
+func (s *TodayScreen) rightPanelFixed(w, h int) string {
+	innerH := h - 4
+	if innerH < 3 {
+		innerH = 3
 	}
-	return Panel("SELECTED TASK", s.detailView(), w, s.zone == tzRight)
+	if s.right == "result" && s.result != nil && s.taskOfResult() {
+		return PanelFixed("RESULT — EVIDENCE", s.result.ViewFor(w-4), w, h, s.zone == tzRight)
+	}
+	return PanelFixed("SELECTED TASK", s.detailViewWH(w-4, innerH), w, h, s.zone == tzRight)
 }
+
+// detailView is the test-compat wrapper (default inner width).
+func (s *TodayScreen) detailView() string { return s.detailViewW(36) }
 
 func (s *TodayScreen) taskOfResult() bool { return s.result != nil && s.result.task != nil }
 
-func (s *TodayScreen) activeView(_ int) string {
+// activeViewFor renders the session card constrained to maxLines inner lines.
+// Compact mode at small heights preserves timer + progress + STOP.
+func (s *TodayScreen) activeViewFor(w, maxLines int) string {
+	return s.activeViewWH(w, maxLines)
+}
+
+func (s *TodayScreen) activeView(w int) string { return s.activeViewWH(w, 99) }
+
+func (s *TodayScreen) activeViewWH(w, maxLines int) string {
+	inner := w - 4
+	if inner < 20 {
+		inner = 20
+	}
+	barW := inner - 8
+	if barW < 14 {
+		barW = 14
+	}
+	if barW > 26 {
+		barW = 26
+	}
 	if s.active == nil {
-		return thMeta.Render("No active session.") + "\n\n" + thHelp.Render("Select a task, then START.")
+		return thMeta.Render("No active session.") + "\n" +
+			RowDivider(inner) + "\n" +
+			thHelp.Render("Select a task, then START.")
 	}
 	el := time.Since(s.active.StartedAt)
 	if el < 0 {
@@ -386,40 +388,69 @@ func (s *TodayScreen) activeView(_ int) string {
 		ratio = float64(el.Seconds()) / float64(s.active.PlannedSeconds)
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s  ·  %s\n", DomainBadge(string(s.active.Domain)), thPrimary.Render(string(s.active.Kind)))
-	sb.WriteString(thPrimary.Render(s.active.TitleSnapshot) + "\n\n")
+	// Compact mode for short viewports: timer + progress + STOP only.
+	if maxLines < 8 {
+		sb.WriteString(thScreenTitle.Render(FormatHMS(el)) + "  " + thMeta.Render(TruncateToWidth(s.active.TitleSnapshot, inner-10)) + "\n")
+		sb.WriteString(ProgressBar{Ratio: ratio, Width: barW, ShowPct: true}.View() + "\n")
+		sb.WriteString(s.stopBtn.CompactView())
+		return sb.String()
+	}
+	sb.WriteString(DomainBadge(string(s.active.Domain)) + "  " + thMeta.Render(string(s.active.Kind)) + "\n")
+	sb.WriteString(thPrimary.Render(TruncateToWidth(s.active.TitleSnapshot, inner)) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(thScreenTitle.Render(FormatHMS(el)) + "\n")
-	sb.WriteString(ProgressBar{Ratio: ratio, Width: 22, ShowPct: true}.View() + "\n\n")
+	sb.WriteString(ProgressBar{Ratio: ratio, Width: barW, ShowPct: true}.View() + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(MetaRow("Planned", FormatDuration(s.active.PlannedSeconds), 8) + "\n")
-	sb.WriteString(MetaRow("Started", s.active.StartedAt.Local().Format("15:04"), 8) + "\n\n")
+	sb.WriteString(MetaRow("Started", s.active.StartedAt.Local().Format("15:04"), 8) + "\n")
 	sb.WriteString(s.stopBtn.View())
 	return sb.String()
 }
 
-func (s *TodayScreen) detailView() string {
+func (s *TodayScreen) detailViewForTest() string { return s.detailViewW(36) }
+
+func (s *TodayScreen) detailViewW(inner int) string { return s.detailViewWH(inner, 99) }
+
+func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
+	if inner < 18 {
+		inner = 18
+	}
+	div := RowDivider(inner)
 	_, st, b, ok := s.selected()
 	if !ok {
 		return thMeta.Render("No tasks.")
 	}
-	t := s.tasks[s.tbl.Cursor()]
+	t := s.tasks[s.tbl.CursorPos()]
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s  ·  %s\n\n", DomainBadge(string(t.Domain)), thPrimary.Render(string(t.Kind)))
+	// Compact mode for short viewports: preserve title + planned + action.
+	if maxLines < 8 {
+		sb.WriteString(DomainBadge(string(t.Domain)) + "  " + StatusPill(st) + "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
+		sb.WriteString(div + "\n")
+		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+		sb.WriteString(s.startBtn.CompactView())
+		return strings.TrimRight(sb.String(), "\n")
+	}
+	sb.WriteString(DomainBadge(string(t.Domain)) + "  " + thMeta.Render(string(t.Kind)) + "  " + StatusPill(st) + "\n")
+	sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
 	switch {
 	case b.Lecture != nil:
-		sb.WriteString(thSectionHead.Render(b.Lecture.Subject) + "\n")
-		sb.WriteString(thPrimary.Render(b.Lecture.Topic) + "\n")
-		sb.WriteString(thMeta.Render(b.Lecture.Lecture) + "\n")
+		sb.WriteString(div + "\n")
+		sb.WriteString(SectionHeader("LECTURE") + "\n")
+		sb.WriteString(thSectionHead.Render(TruncateToWidth(b.Lecture.Subject, inner)) + "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(b.Lecture.Topic, inner)) + "\n")
 	case len(b.Practice) > 0:
 		subj := ""
 		if len(b.Practice) > 0 {
 			subj = b.Practice[0].Subject
 		}
-		sb.WriteString(thSectionHead.Render(subj) + "\n")
-		sb.WriteString(SectionHeader(fmt.Sprintf("TOPICS (%d)", len(b.Practice))) + "\n")
+		sb.WriteString(div + "\n")
+		sb.WriteString(SectionHeader(fmt.Sprintf("%s · TOPICS (%d)", strings.ToUpper(TruncateToWidth(subj, 16)), len(b.Practice))) + "\n")
 		for _, p := range b.Practice {
-			sb.WriteString("  " + thPrimary.Render(p.Topic) + "\n")
+			sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(p.Topic, inner-4)) + "\n")
 		}
 	case len(b.DSA) > 0:
+		sb.WriteString(div + "\n")
 		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
 		var repeats, news []DSAItem
 		for _, d := range b.DSA {
@@ -432,50 +463,62 @@ func (s *TodayScreen) detailView() string {
 		if len(repeats) > 0 {
 			sb.WriteString(SectionHeader("REPEAT") + "\n")
 			for _, d := range repeats {
-				sb.WriteString("  " + thPrimary.Render(d.Title) + "\n")
+				sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(d.Title, inner-4)) + "\n")
 			}
 		}
 		if len(news) > 0 {
 			sb.WriteString(SectionHeader("NEW") + "\n")
 			for _, d := range news {
-				sb.WriteString("  " + thPrimary.Render(d.Title) + "\n")
+				sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(d.Title, inner-4)) + "\n")
 			}
 		}
-		sb.WriteString("\n" + MetaRow("Status", string(st), 8) + "\n\n")
-		sb.WriteString(s.startBtn.View())
-		if s.startBtn.Disabled {
-			sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
+		sb.WriteString(div + "\n")
+		if maxLines < 9 {
+			sb.WriteString(s.startBtn.CompactView())
+		} else {
+			sb.WriteString(s.startBtn.View())
+			if s.startBtn.Disabled {
+				sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
+			}
 		}
-		return sb.String()
+		return strings.TrimRight(sb.String(), "\n")
 	case len(b.SWE) > 0:
+		sb.WriteString(div + "\n")
 		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
 		lastArea := ""
 		for _, sw := range b.SWE {
 			if sw.Area != lastArea {
-				sb.WriteString(thSectionHead.Render(sw.Area) + "\n")
+				sb.WriteString(SectionHeader(strings.ToUpper(TruncateToWidth(sw.Area, inner-2))) + "\n")
 				lastArea = sw.Area
 			}
 			if sw.Task != "" {
-				sb.WriteString("  " + thPrimary.Render(sw.Task) + "\n")
+				sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(sw.Task, inner-4)) + "\n")
 			}
 		}
-		sb.WriteString("\n" + MetaRow("Status", string(st), 8) + "\n\n")
+		sb.WriteString(div + "\n")
+		if maxLines < 9 {
+			sb.WriteString(s.startBtn.CompactView())
+		} else {
+			sb.WriteString(s.startBtn.View())
+			if s.startBtn.Disabled {
+				sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
+			}
+		}
+		return strings.TrimRight(sb.String(), "\n")
+	default:
+		sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
+	}
+	sb.WriteString(div + "\n")
+	sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+	if maxLines < 9 {
+		sb.WriteString(s.startBtn.CompactView())
+	} else {
 		sb.WriteString(s.startBtn.View())
 		if s.startBtn.Disabled {
-			sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
+			sb.WriteString("\n" + thHelp.Render("Stop active session first."))
 		}
-		return sb.String()
-	default:
-		sb.WriteString(thPrimary.Render(t.Title) + "\n")
 	}
-	sb.WriteString("\n" + MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
-	sb.WriteString(MetaRow("Status", string(st), 8) + "\n\n")
-	sb.WriteString(s.startBtn.View())
-	if s.startBtn.Disabled {
-		sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
-	}
-	_ = st
-	return sb.String()
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (s *TodayScreen) Hints() string { return "Tab Focus   s Start   x Stop" }

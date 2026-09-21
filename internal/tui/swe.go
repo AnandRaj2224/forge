@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
@@ -10,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// ---------- SWE ----------
+// ---------- SWE: persistent two-panel areas workspace ----------
 
 type SWETaskDetail struct {
 	Area    db.SWEArea
@@ -42,11 +43,12 @@ func (s *SWEScreen) Reload() {
 		return
 	}
 	s.areas = areas
-	items := make([]listItem, 0, len(areas))
+	items := make([]RowItem, 0, len(areas))
 	for _, a := range areas {
-		items = append(items, listItem{id: string(a.ID), title: a.Name})
+		tasks, _ := catalog.GetSWETasks(ctx, s.app.DB, a.ID)
+		items = append(items, RowItem{ID: string(a.ID), Title: a.Name, Meta: fmt.Sprintf("%d tasks", len(tasks)), Mark: "•"})
 	}
-	s.areaList.SetItems(wrapItems(items))
+	s.areaList.SetItems(items)
 	s.showing = "area"
 	s.reloadTasks()
 }
@@ -76,16 +78,16 @@ func (s *SWEScreen) reloadTasks() {
 		s.err = err.Error()
 		return
 	}
-	items := make([]listItem, 0, len(tasks))
+	items := make([]RowItem, 0, len(tasks))
 	for _, t := range tasks {
 		done, _ := runtime.IsSWETaskComplete(ctx, s.app.DB, t.ID)
 		mark := "○"
 		if done {
 			mark = "✓"
 		}
-		items = append(items, listItem{id: string(t.ID), title: mark + "  " + t.Title})
+		items = append(items, RowItem{ID: string(t.ID), Title: t.Title, Mark: mark})
 	}
-	s.taskList.SetItems(wrapItems(items))
+	s.taskList.SetItems(items)
 }
 
 func (s *SWEScreen) openTask(areaID, taskID string) {
@@ -154,21 +156,31 @@ func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 			}
 			s.focusR = true
 			return nil
-		case "j", "down", "k", "up":
+		case "j", "down", "k", "up", "h", "left", "l", "right":
 			down := k.String() == "j" || k.String() == "down"
+			up := k.String() == "k" || k.String() == "up"
+			left := k.String() == "h" || k.String() == "left"
+			right := k.String() == "l" || k.String() == "right"
 			if s.focusR {
 				if down {
-					s.taskList.List.CursorDown()
-				} else {
-					s.taskList.List.CursorUp()
+					s.taskList.CursorDown()
+				} else if up {
+					s.taskList.CursorUp()
+				} else if left {
+					s.focusR = false
 				}
 				return nil
 			}
 			prev := s.areaList.SelectedID()
 			if down {
-				s.areaList.List.CursorDown()
+				s.areaList.CursorDown()
+			} else if up {
+				s.areaList.CursorUp()
+			} else if right {
+				s.focusR = true
+				return nil
 			} else {
-				s.areaList.List.CursorUp()
+				return nil
 			}
 			if s.areaList.SelectedID() != prev {
 				s.reloadTasks()
@@ -176,70 +188,80 @@ func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 	}
-	if s.focusR {
-		var c tea.Cmd
-		s.taskList.List, c = s.taskList.List.Update(msg)
-		return c
-	}
-	prev := s.areaList.SelectedID()
-	var c tea.Cmd
-	s.areaList.List, c = s.areaList.List.Update(msg)
-	if s.areaList.SelectedID() != prev {
-		s.reloadTasks()
-	}
-	return c
+	return nil
 }
 
 func (s *SWEScreen) View() string {
 	w, h := s.app.contentViewport()
-	lw, rw := splitW(w, 30, 22, 40)
-	listH := h - 6
-	if listH < 8 {
-		listH = 8
+	lw, rw := TwoPaneLayout(w, 32, 24, 40)
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
 	}
-	s.areaList.List.SetWidth(lw - 4)
-	s.taskList.List.SetWidth(rw - 4)
-	s.areaList.FitHeight(listH)
-	s.taskList.FitHeight(listH - 8)
+	innerH := bodyH - 4
+	if innerH < 4 {
+		innerH = 4
+	}
+	s.areaList.SetWidth(lw - 4)
+	s.taskList.SetWidth(rw - 4)
+	s.areaList.FitHeight(innerH - 1)
+	s.taskList.FitHeight(innerH - 7)
+	s.areaList.SetFocused(!s.focusR)
+	s.taskList.SetFocused(s.focusR)
 	var right string
 	if s.showing == "task" {
-		right = Panel("TASK", s.taskBody(), rw, true)
+		right = PanelFixed("TASK", s.taskBody(rw-6), rw, bodyH, true)
 	} else if a := s.selArea(); a != nil {
 		pr := ComputeSWEProgress(context.Background(), s.app.DB, *a)
 		r := 0.0
 		if pr.Total > 0 {
 			r = float64(pr.Done) / float64(pr.Total)
 		}
-		body := thScreenTitle.Render(a.Name) + "\n\n" +
+		barW := rw - 12
+		if barW < 14 {
+			barW = 14
+		}
+		if barW > 28 {
+			barW = 28
+		}
+		inner := rw - 6
+		body := thScreenTitle.Render(strings.ToUpper(TruncateToWidth(a.Name, inner))) + "\n" +
+			RowDivider(inner) + "\n" +
 			SectionHeader("PROGRESS") + "\n" +
-			ProgressBar{Ratio: r, Width: 26, ShowPct: true}.View() + "\n" +
-			thMeta.Render(fmt.Sprintf("%d / %d", pr.Done, pr.Total)) + "\n\n" +
-			SectionHeader("TASKS") + "\n" + s.taskList.List.View()
-		right = Panel("AREA", body, rw, s.focusR)
+			ProgressBar{Ratio: r, Width: barW, ShowPct: true}.View() + "\n" +
+			thMeta.Render(fmt.Sprintf("%d / %d", pr.Done, pr.Total)) + "\n" +
+			RowDivider(inner) + "\n" +
+			SectionHeader("TASKS") + "\n" + s.taskList.View()
+		right = PanelFixed("AREA", body, rw, bodyH, s.focusR)
 	} else {
-		right = Panel("AREA", EmptyState("Select an area."), rw, s.focusR)
+		right = PanelFixed("AREA", EmptyState("Select an area."), rw, bodyH, s.focusR)
 	}
-	return lipglossJoin(Panel("AREAS", s.areaList.List.View(), lw, !s.focusR), right)
+	return lipglossJoin(PanelFixed("AREAS", SectionHeader("AREAS")+"\n"+s.areaList.View(), lw, bodyH, !s.focusR), right)
 }
 
-func (s *SWEScreen) taskBody() string {
+func (s *SWEScreen) taskBody(inner int) string {
 	d := s.detail
 	if d == nil {
 		return EmptyState("Task not found: " + s.err)
 	}
-	var sb string
-	sb += thScreenTitle.Render(d.Task.Title) + "\n"
-	sb += thMeta.Render(d.Area.Name) + "\n\n"
+	if inner < 24 {
+		inner = 24
+	}
+	var sb strings.Builder
+	sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(d.Task.Title, inner))) + "\n")
+	sb.WriteString(thMeta.Render(d.Area.Name) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
 	if d.Done {
-		sb += thSuccess.Render("✓  DONE") + "\n"
+		sb.WriteString(thSuccess.Render("✓  DONE") + "\n")
 	} else {
-		sb += thTodo.Render("○  TODO") + "\n"
+		sb.WriteString(thTodo.Render("○  TODO") + "\n")
 	}
-	sb += "\n" + SectionHeader(fmt.Sprintf("EXECUTIONS (%d)", len(d.History))) + "\n"
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader(fmt.Sprintf("EXECUTIONS (%d)", len(d.History))) + "\n")
 	if len(d.History) == 0 {
-		sb += thHelp.Render("No executions yet.") + "\n"
+		sb.WriteString(thHelp.Render("No executions yet.") + "\n")
 	}
-	for _, e := range d.History {
+	for i, e := range d.History {
 		st := thMeta.Render(string(e.Status))
 		switch e.Status {
 		case db.SWEStatusCompleted:
@@ -249,10 +271,14 @@ func (s *SWEScreen) taskBody() string {
 		case db.SWEStatusPartial:
 			st = thWarn.Render(string(e.Status))
 		}
-		sb += "  " + st + "   " + thMeta.Render(e.RecordedAt.Format("02 Jan 15:04")) + "\n"
+		sb.WriteString(SelectableRow{Mark: "•", Title: string(st) + "  " + e.RecordedAt.Format("02 Jan 15:04"), Width: inner}.View() + "\n")
+		if i < len(d.History)-1 {
+			sb.WriteString(RowDivider(inner) + "\n")
+		}
 	}
-	sb += "\n" + thHelp.Render("Work starts from Today only.")
-	return sb
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(thHelp.Render("Work starts from Today only."))
+	return sb.String()
 }
 
 func (s *SWEScreen) Hints() string { return "Tab Focus   Enter Open" }
