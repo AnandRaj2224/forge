@@ -216,10 +216,10 @@ func (s *DSAScreen) View() string {
 		body := lipgloss.NewStyle().Bold(true).Foreground(cDSA).Render(strings.ToUpper(TruncateToWidth(p.Name, inner))) + "\n" +
 			RowDivider(inner) + "\n" +
 			SectionHeader("PROGRESSION") + "\n" +
-			ProgressBar{Ratio: r, Width: barW, ShowPct: true}.View() + "\n" +
+			ProgressBar{Ratio: r, Width: barW, ShowPct: true, Accent: cDSA}.View() + "\n" +
 			thMeta.Render(fmt.Sprintf("%d / %d", done, total)) + "\n" +
 			RowDivider(inner) + "\n" +
-			SectionHeader("QUESTIONS") + "\n" + s.qList.View()
+			DomainSection("DSA", "QUESTIONS") + "\n" + s.qList.View()
 		right = PanelFixed("PATTERN", body, rw, bodyH, s.focusR)
 	} else {
 		right = PanelFixed("PATTERN", EmptyState("Select a pattern."), rw, bodyH, s.focusR)

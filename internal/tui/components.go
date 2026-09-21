@@ -93,11 +93,14 @@ func minInt(a, b int) int {
 
 // ProgressBar is the NORMAL STATIC progress component for syllabus coverage,
 // lecture progress, practice progression, pattern/area progress.
-// Clean quiet bar: ████████░░░░░░ 60% with percentage/count.
+// Clean quiet bar: ████████░░░░░░ 60% with percentage/count. The fill stays
+// neutral by default and may carry one restrained domain accent (GOV violet,
+// DSA cyan, SWE rose) via Accent. Never a gradient.
 type ProgressBar struct {
 	Ratio   float64 // 0..1
 	Width   int
 	ShowPct bool
+	Accent  color.Color // optional domain accent for the fill; nil = neutral
 }
 
 func (p ProgressBar) View() string {
@@ -115,9 +118,13 @@ func (p ProgressBar) View() string {
 	filled := int(r*float64(w) + 0.5)
 	// v2 lipgloss renders empty strings with reset codes; skip empty runs
 	// so clamped bars stay byte-clean for tests and alignment.
+	fill := color.Color(cFgPrimary)
+	if p.Accent != nil {
+		fill = p.Accent
+	}
 	bar := ""
 	if filled > 0 {
-		bar += lipgloss.NewStyle().Foreground(cFgPrimary).Render(strings.Repeat("█", filled))
+		bar += lipgloss.NewStyle().Foreground(fill).Render(strings.Repeat("█", filled))
 	}
 	if w-filled > 0 {
 		bar += lipgloss.NewStyle().Foreground(cBorder).Render(strings.Repeat("░", w-filled))
@@ -477,7 +484,7 @@ func (c ExamCard) View() string {
 	sb.WriteString(thScreenTitle.Render(TruncateToWidth(c.Name, inner)) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
-	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true}.View() + "\n")
+	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
 	sb.WriteString(SectionHeader("PRACTICE READINESS") + "\n")
 	sb.WriteString(thHelp.Render("not yet calculated") + "\n")

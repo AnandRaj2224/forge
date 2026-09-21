@@ -282,21 +282,23 @@ func Clamp(v, lo, hi int) int {
 	}
 	return v
 }
-// ---- Global app shell header: two real layout regions ----
+// ---- Global app shell header: independent layers, one composition ----
 //
-// ShellHeader is ONE horizontal header composed of two side-by-side
-// regions with deterministic widths and explicit vertical alignment:
+// ShellHeader is ONE horizontal header composed from three independently
+// placed layers sharing the full header width (never three competing
+// columns, so widths are never subtracted from each other):
 //
-//	LEFT (LogoRegion)     RIGHT (RightRegion: full remaining width)
-//	FORGE ASCII logo      rows 0-1: QuoteBlock (full quote, right/top)
-//	top-aligned           row 2:    NavBlock (centered horizontally)
-//	                      rows 3-5: empty
+//	LogoLayer:  FORGE ASCII logo, fixed/anchored LEFT, top-aligned.
+//	NavLayer:   navigation, horizontally CENTERED on the full header width
+//	             (nav_x = center_of_header - nav_width / 2), vertically
+//	             around the middle rows of the 6-line logo.
+//	QuoteLayer: bounded quote block, anchored TOP-RIGHT, right-aligned,
+//	             naturally wrapped inside its own width.
 //
-// The quote and navigation share the RIGHT region vertically, so they never
-// compete for horizontal width: the quote receives essentially the full
-// remaining width after the logo. Widths are deterministic; vertical
-// alignment uses lipgloss.Place (not manual spaces). Header content height
-// is always HeaderLogoH (6); the logo determines the natural height.
+// Logo and quote never move; only the nav centers. Header content height
+// is always HeaderLogoH (6); the logo determines the natural height. All
+// positions are calculated widths fed to Lip Gloss primitives — no manual
+// spaces, tabs, or content-dependent accidental alignment.
 const HeaderLogoH = 6
 
 // LogoRegion is the LEFT header region: full Forge ASCII wordmark,
@@ -306,8 +308,8 @@ type LogoRegion struct {
 	Width int      // outer width including left pad + content
 }
 
-// View renders exactly Width x HeaderLogoH, logo at the top-left.
-func (r LogoRegion) View() string {
+// Rows renders the logo as HeaderLogoH rows, each exactly Width cells.
+func (r LogoRegion) Rows() []string {
 	w := r.Width
 	if w < 10 {
 		w = 10
@@ -319,7 +321,65 @@ func (r LogoRegion) View() string {
 	logoBlock := lipgloss.JoinVertical(lipgloss.Left, grad...)
 	style := lipgloss.NewStyle().Width(w).PaddingLeft(2).Align(lipgloss.Left)
 	block := style.Render(logoBlock)
-	return lipgloss.Place(w, HeaderLogoH, lipgloss.Left, lipgloss.Top, block)
+	return strings.Split(lipgloss.Place(w, HeaderLogoH, lipgloss.Left, lipgloss.Top, block), "\n")
+}
+
+// View renders exactly Width x HeaderLogoH, logo at the top-left.
+func (r LogoRegion) View() string {
+	return lipgloss.JoinVertical(lipgloss.Left, r.Rows()...)
+}
+
+// quoteBlockWidth is the deliberate bounded width of the right-side quote
+// block. The 74-cell quote text wraps to two lines inside it at normal
+// fullscreen widths; the attribution fits on one line.
+const quoteBlockWidth = 48
+
+// QuoteRegion is the bounded quote block on the RIGHT side of the header:
+// the full quote text (naturally wrapped inside the block width) plus the
+// attribution line. Right-aligned, top-aligned, secondary to the logo.
+// It never truncates with ellipsis at normal fullscreen widths — wrapping
+// is owned by Lip Gloss width/alignment behavior, not manual spacing.
+type QuoteRegion struct {
+	Text  string // full quote text (raw; styled + wrapped in View)
+	Attr  string // attribution line (raw; styled in View)
+	Width int    // bounded block width
+}
+
+// Rows renders the wrapped quote as rows of exactly Width cells each,
+// right-aligned. The text wraps naturally inside the bounded width.
+func (b QuoteRegion) Rows() []string {
+	w := b.Width
+	if w < 16 {
+		w = 16
+	}
+	text := lipgloss.NewStyle().Width(w).Align(lipgloss.Right).Foreground(cFgSecondary).Render(b.Text)
+	attr := lipgloss.NewStyle().Width(w).Align(lipgloss.Right).Foreground(cFgTertiary).Italic(true).Render(b.Attr)
+	return strings.Split(lipgloss.JoinVertical(lipgloss.Right, text, attr), "\n")
+}
+
+// View renders the wrapped quote forced to Width columns, right-aligned.
+func (b QuoteRegion) View() string {
+	return lipgloss.JoinVertical(lipgloss.Right, b.Rows()...)
+}
+
+// RightRegion describes the RIGHT header area: the full remaining width
+// after the logo, carrying the bounded top-right quote block. It is a
+// geometry holder for ShellHeader's layered composition — not a column the
+// navigation is centered in.
+type RightRegion struct {
+	QuoteText string // full quote text (raw)
+	QuoteAttr string // attribution (raw)
+	NavLine   string // single-line horizontal nav (already styled pills)
+	Width     int    // outer width including the 2-cell right pad
+}
+
+// headerBlank returns a blank segment of exactly n cells ("" when n <= 0,
+// so it can be skipped by the row joiner).
+func headerBlank(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return lipgloss.Place(n, 1, lipgloss.Left, lipgloss.Top, "")
 }
 
 // fitHeaderLine keeps the full line when it fits and only clips (with
@@ -334,70 +394,6 @@ func fitHeaderLine(s string, w int) string {
 	return TruncateToWidth(s, w)
 }
 
-// QuoteBlock renders exactly Width x 2: two quote lines, right-aligned,
-// top-aligned. Full text is preserved whenever it fits.
-type QuoteBlock struct {
-	Line1 string
-	Line2 string
-	Width int // content width (excludes the outer right pad)
-}
-
-// View renders the two-line quote forced to Width x 2.
-func (b QuoteBlock) View() string {
-	w := b.Width
-	if w < 8 {
-		w = 8
-	}
-	l1 := fitHeaderLine(b.Line1, w)
-	l2 := fitHeaderLine(b.Line2, w)
-	return lipgloss.Place(w, 2, lipgloss.Right, lipgloss.Top,
-		lipgloss.JoinVertical(lipgloss.Right, l1, l2))
-}
-
-// NavBlock renders the one-line navigation centered horizontally.
-type NavBlock struct {
-	Line  string // single-line horizontal nav (already styled pills)
-	Width int    // content width (excludes the outer right pad)
-}
-
-// View renders the nav line forced to Width x 1, centered.
-func (b NavBlock) View() string {
-	w := b.Width
-	if w < 10 {
-		w = 10
-	}
-	line := fitHeaderLine(b.Line, w)
-	return lipgloss.Place(w, 1, lipgloss.Center, lipgloss.Center, line)
-}
-
-// RightRegion is the RIGHT header region: the full remaining terminal
-// width after the logo. Rows 0-1 carry the quote, row 2 carries the nav
-// (around the vertical middle of the 6-line header), rows 3-5 stay empty.
-type RightRegion struct {
-	Quote1  string // full first quote line (already styled)
-	Quote2  string // attribution line (already styled)
-	NavLine string // single-line horizontal nav (already styled pills)
-	Width   int    // outer width including the 2-cell right pad
-}
-
-// View renders exactly Width x HeaderLogoH: quote top-right, nav centered
-// on the middle row.
-func (r RightRegion) View() string {
-	w := r.Width
-	if w < 12 {
-		w = 12
-	}
-	contentW := w - 2 // reserve the outer right pad
-	if contentW < 8 {
-		contentW = 8
-	}
-	quote := QuoteBlock{Line1: r.Quote1, Line2: r.Quote2, Width: contentW}.View()
-	nav := NavBlock{Line: r.NavLine, Width: contentW}.View()
-	blanks := lipgloss.Place(contentW, HeaderLogoH-3, lipgloss.Left, lipgloss.Top, "")
-	body := lipgloss.JoinVertical(lipgloss.Left, quote, nav, blanks)
-	return lipgloss.NewStyle().Width(w).PaddingRight(2).Align(lipgloss.Left).Render(body)
-}
-
 // ShellHeader composes the logo and right regions in a real horizontal
 // layout with deterministic widths. Content is always HeaderLogoH lines;
 // the quote fits into the top rows and the nav into the middle row, so
@@ -408,19 +404,90 @@ type ShellHeader struct {
 	Width int
 }
 
-// View joins the two regions side-by-side and wraps with a bottom
-// divider. No extra height is introduced.
+// View composes the three layers over the full header width and wraps
+// with a bottom divider. Logo rows anchor left; quote rows hug the right
+// edge; the nav row centers on the full width. No extra height.
 func (h ShellHeader) View() string {
 	w := h.Width
 	if w < 40 {
 		w = 40
 	}
-	body := lipgloss.JoinHorizontal(lipgloss.Top, h.Logo.View(), h.Right.View())
-	lines := strings.Split(body, "\n")
+	L := h.Logo.Width
+	if L < 10 {
+		L = 10
+	}
+	logoRows := h.Logo.Rows() // HeaderLogoH rows x L
+	// Bounded quote block hugging the right edge (2-cell outer pad).
+	contentW := h.Right.Width - 2
+	if contentW < 8 {
+		contentW = 8
+	}
+	qw := quoteBlockWidth
+	if contentW < qw {
+		qw = contentW
+	}
+	quoteRows := QuoteRegion{Text: h.Right.QuoteText, Attr: h.Right.QuoteAttr, Width: qw}.Rows()
+	qh := len(quoteRows)
+	if qh > HeaderLogoH-1 {
+		// Genuinely tiny widths only: clip the quote, never the logo/nav.
+		qh = HeaderLogoH - 1
+		quoteRows = strings.Split(ClipToHeight(strings.Join(quoteRows, "\n"), qh), "\n")
+	}
+	// Nav centers on the FULL header width, independent of logo/quote.
+	// At narrow widths where exact centering would cover the logo, the nav
+	// starts just right of it instead (graceful, deterministic fallback).
+	navFit := fitHeaderLine(h.Right.NavLine, w)
+	navW := lipgloss.Width(navFit)
+	x0 := (w - navW) / 2
+	if x0 < 0 {
+		x0 = 0
+	}
+	if x0 < L {
+		x0 = L
+		navFit = fitHeaderLine(h.Right.NavLine, w-L)
+		navW = lipgloss.Width(navFit)
+	}
+	// Nav sits on the first row below the quote: middle rows, beside it
+	// spatially, never underneath waiting content.
+	navRow := qh
+	if navRow < 2 {
+		navRow = 2
+	}
+	if navRow > HeaderLogoH-1 {
+		navRow = HeaderLogoH - 1
+	}
+	join := func(parts ...string) string {
+		keep := parts[:0]
+		for _, s := range parts {
+			if s != "" {
+				keep = append(keep, s)
+			}
+		}
+		if len(keep) == 0 {
+			return headerBlank(w)
+		}
+		return lipgloss.JoinHorizontal(lipgloss.Top, keep...)
+	}
+	rows := make([]string, 0, HeaderLogoH)
+	for r := 0; r < HeaderLogoH; r++ {
+		switch {
+		case r < qh:
+			// Logo left, bounded quote right (right pad included).
+			rows = append(rows, join(logoRows[r],
+				headerBlank(w-L-qw-2), quoteRows[r], headerBlank(2)))
+		case r == navRow:
+			// Logo left, nav centered on the full width.
+			rows = append(rows, join(logoRows[r],
+				headerBlank(x0-L), navFit, headerBlank(w-x0-navW)))
+		default:
+			rows = append(rows, join(logoRows[r], headerBlank(w-L)))
+		}
+	}
+	lines := rows
 	for i, ln := range lines {
 		lines[i] = FitLine(ln, w)
 	}
-	body = strings.Join(lines, "\n")
+	body := strings.Join(lines, "\n")
 	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, false, true, false).
 		BorderForeground(cBorder).

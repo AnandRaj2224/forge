@@ -533,12 +533,12 @@ func (s *GovScreen) examView(w, h int) string {
 		}
 		var sb strings.Builder
 		sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
-		sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true}.View() + "\n")
+		sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 		sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
 		sb.WriteString(RowDivider(rw-6) + "\n")
 		sb.WriteString(SectionHeader("PRACTICE READINESS") + "  " + thHelp.Render("not yet calculated") + "\n")
 		sb.WriteString(RowDivider(rw-6) + "\n")
-		sb.WriteString(SectionHeader("TOPICS — "+strings.ToUpper(TruncateToWidth(s.examSubject, 24))) + "\n")
+		sb.WriteString(DomainSection("GOV", "TOPICS — "+strings.ToUpper(TruncateToWidth(s.examSubject, 24))) + "\n")
 		sb.WriteString(s.topicList.View())
 		right = PanelFixed(strings.ToUpper(TruncateToWidth(s.examSubject, 20)), sb.String(), rw, bodyH, s.zone == gzRight)
 	} else {
@@ -590,10 +590,10 @@ func (s *GovScreen) browserRight() string {
 	sb.WriteString(thScreenTitle.Render(TruncateToWidth(name, 30)) + "\n")
 	sb.WriteString(RowDivider(30) + "\n")
 	sb.WriteString(SectionHeader("LECTURE COVERAGE") + "\n")
-	sb.WriteString(ProgressBar{Ratio: ratio(done, total), Width: barW, ShowPct: true}.View() + "\n")
+	sb.WriteString(ProgressBar{Ratio: ratio(done, total), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics lecture-complete", done, total)) + "\n")
 	sb.WriteString(RowDivider(30) + "\n")
-	sb.WriteString(SectionHeader("TOPICS") + "\n")
+	sb.WriteString(DomainSection("GOV", "TOPICS") + "\n")
 	sb.WriteString(s.subTopicList.View())
 	return sb.String()
 }
@@ -650,7 +650,7 @@ func (s *GovScreen) topicBody(inner int) string {
 		sb.WriteString(SectionHeader("LECTURES") + "  " + thSuccess.Render("complete · no lecture track") + "\n")
 	} else {
 		sb.WriteString(SectionHeader("LECTURES") + "\n")
-		sb.WriteString(ProgressBar{Ratio: ratio(v.Done, v.Total), Width: barW, ShowPct: true}.View() + "\n")
+		sb.WriteString(ProgressBar{Ratio: ratio(v.Done, v.Total), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 		sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d", v.Done, v.Total)) + "\n")
 	}
 	sb.WriteString(RowDivider(inner) + "\n")
@@ -659,7 +659,7 @@ func (s *GovScreen) topicBody(inner int) string {
 	if st.Attempted == 0 {
 		sb.WriteString(thHelp.Render("not yet calculated") + "\n")
 	} else {
-		sb.WriteString(ProgressBar{Ratio: accuracyRatio(st), Width: barW, ShowPct: true}.View() + "\n")
+		sb.WriteString(ProgressBar{Ratio: accuracyRatio(st), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 	}
 	sb.WriteString(MetaRow("Questions", fmt.Sprint(st.Attempted), 10) + "\n")
 	sb.WriteString(MetaRow("Correct", fmt.Sprint(st.Correct), 10) + "\n")

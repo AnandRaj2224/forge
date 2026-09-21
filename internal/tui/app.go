@@ -333,18 +333,15 @@ func (a *App) headerView(w int) string {
 		}
 	}
 	logoOuter, rightOuter := ComputeHeaderWidths(w, logoContentW)
-	// Exactly two quote lines, secondary, full text. QuoteBlock keeps the
-	// full line whenever it fits and only clips at genuinely tiny widths.
-	// Right/top alignment is owned by RightRegion.
-	q1 := "“Everyone sees what you appear to be, few experience what you really are.”"
-	q2 := "— Niccolò Machiavelli, The Prince"
+	// The full quote text goes to the bounded right-side block, which wraps
+	// it naturally (styling owned by QuoteRegion). Never truncated here.
 	sh := ShellHeader{
 		Logo: LogoRegion{Lines: forgeLogoLines, Width: logoOuter},
 		Right: RightRegion{
-			Quote1:  thMeta.Render(q1),
-			Quote2:  thHelp.Render(q2),
-			NavLine: navLine,
-			Width:   rightOuter,
+			QuoteText: "“Everyone sees what you appear to be, few experience what you really are.”",
+			QuoteAttr: "— Niccolò Machiavelli, The Prince",
+			NavLine:   navLine,
+			Width:     rightOuter,
 		},
 		Width: w,
 	}

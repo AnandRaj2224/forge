@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 
 	"charm.land/lipgloss/v2"
 )
@@ -174,3 +175,45 @@ func stringRepeat(s string, n int) string {
 
 // SectionHeader renders a small caps-ish section label inside panels.
 func SectionHeader(s string) string { return thSectionHead.Render(s) }
+
+// DomainStyle returns the restrained accent style for a domain tag, label,
+// or section in that domain's workspace. Neutral base is preserved;
+// the domain accent appears only where it carries meaning.
+func DomainStyle(domain string) lipgloss.Style {
+	switch domain {
+	case "GOV":
+		return lipgloss.NewStyle().Bold(true).Foreground(cGov)
+	case "DSA":
+		return lipgloss.NewStyle().Bold(true).Foreground(cDSA)
+	case "SWE":
+		return lipgloss.NewStyle().Bold(true).Foreground(cSWE)
+	default:
+		return thPrimary
+	}
+}
+
+// DomainFg returns the accent foreground for a domain tag or cell.
+func DomainFg(domain string) color.Color {
+	switch domain {
+	case "GOV":
+		return cGov
+	case "DSA":
+		return cDSA
+	case "SWE":
+		return cSWE
+	default:
+		return cFgSecondary
+	}
+}
+
+// DomainLabel renders a padded domain label for aligned metadata rows
+// (e.g. TIME BY DOMAIN sections).
+func DomainLabel(domain string, w int) string {
+	return DomainStyle(domain).Render(padRight(domain, w))
+}
+
+// DomainSection renders a section label tinted by its domain context
+// (e.g. the selected pattern/area/subject sections).
+func DomainSection(domain, label string) string {
+	return DomainStyle(domain).Render(label)
+}

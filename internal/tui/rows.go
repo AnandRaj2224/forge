@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -312,10 +313,10 @@ func Header(logo []string, navLine string, w int) string {
 	sh := ShellHeader{
 		Logo: LogoRegion{Lines: logo, Width: logoOuter},
 		Right: RightRegion{
-			Quote1:  "",
-			Quote2:  "",
-			NavLine: navLine,
-			Width:   rightOuter,
+			QuoteText: "",
+			QuoteAttr: "",
+			NavLine:   navLine,
+			Width:     rightOuter,
 		},
 		Width: w,
 	}
@@ -358,7 +359,7 @@ func (r TodayTaskRow) View() string {
 		taskW = 8
 	}
 	num := PadToWidth(fmt.Sprint(r.Num), numW)
-	dom := PadToWidth(TruncateToWidth(r.Domain, domW), domW)
+	dom := DomainStyle(r.Domain).Render(PadToWidth(TruncateToWidth(r.Domain, domW), domW))
 	title := PadToWidth(TruncateToWidth(r.Title, taskW), taskW)
 	dur := PadToWidth(TruncateToWidth(r.Duration, durW), durW)
 	stTxt := "TODO"
@@ -525,6 +526,8 @@ func (t TodayTaskTable) rowLine(i, numW, domW, taskW, durW, stW, w int) string {
 	if i < len(t.Status) {
 		st = t.Status[i]
 	}
+	// Plain fixed-width cells first; color is applied per segment below so
+	// every state paints the identical column geometry.
 	num := PadToWidth(fmt.Sprint(i+1), numW)
 	dom := PadToWidth(TruncateToWidth(string(task.Domain), domW), domW)
 	title := PadToWidth(TruncateToWidth(task.Title, taskW), taskW)
@@ -537,26 +540,40 @@ func (t TodayTaskTable) rowLine(i, numW, domW, taskW, durW, stW, w int) string {
 		stTxt = "DONE"
 	}
 	stCell := PadToWidth(stTxt, stW)
-	raw := fmt.Sprintf("%s  %s  %s  %s  %s", num, dom, title, dur, stCell)
 	selected := i == t.Cursor
+	if selected && t.Focus {
+		return paintTodayRow(
+			" "+num, DomainFg(string(task.Domain)), dom,
+			title, dur, stCell,
+		)
+	}
+	raw := fmt.Sprintf("%s  %s  %s  %s  %s", num, dom, title, dur, stCell)
 	if selected {
-		// Status tint keeps semantic color inside the selected row.
-		var stStyled string
-		switch st {
-		case TaskActive:
-			stStyled = thRunning.Render(stCell)
-		case TaskCompleted:
-			stStyled = thSuccess.Render(stCell)
-		default:
-			stStyled = thTodo.Render(stCell)
-		}
-		_ = stStyled
-		if t.Focus {
-			return selEdge() + thRowSelected.Render(FitLine(raw, w-1))
-		}
 		return thRowCursor.Render(FitLine(" "+raw, w))
 	}
-	// Unselected rows: domain + status get quiet semantic color via
-	// surrounding styles is not width-safe, so keep plain with markers.
-	return thRowNormal.Render(FitLine(" "+raw, w))
+	// Unselected rows keep the domain accent on the DOMAIN column. The cell
+	// carries only a foreground, and the outer style only a foreground, so
+	// no background is ever cut by a nested reset here.
+	line := fmt.Sprintf("%s  %s  %s  %s  %s",
+		num, DomainStyle(string(task.Domain)).Render(dom), title, dur, stCell)
+	return thRowNormal.Render(FitLine(" "+line, w))
+}
+
+// paintTodayRow renders one focused-selected Today row as a single
+// component across the FULL panel inner width: cyan edge + every column
+// (index, domain, task, duration, status) on one seamless background tint.
+// Each segment carries the background explicitly — a nested lipgloss style
+// terminates with a reset, so wrapping pre-styled cells in one outer style
+// would drop the tint after the first styled cell.
+func paintTodayRow(num string, domFg color.Color, dom, title, dur, st string) string {
+	bg := lipgloss.Color("#2A2547")
+	strong := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(bg)
+	gap := lipgloss.NewStyle().Background(bg).Render("  ")
+	row := selEdge() +
+		strong.Render(num) + gap +
+		lipgloss.NewStyle().Bold(true).Foreground(domFg).Background(bg).Render(dom) + gap +
+		strong.Render(title) + gap +
+		strong.Render(dur) + gap +
+		strong.Render(st)
+	return row
 }

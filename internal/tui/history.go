@@ -131,14 +131,14 @@ func (s *HistoryScreen) dayBody(inner int) string {
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("TIME BY DOMAIN") + "\n")
 	total := sum.GovSeconds + sum.DSASeconds + sum.SWESeconds
-	sb.WriteString(MetaRow("GOV", fmt.Sprintf("%s  %s", FormatDuration(sum.GovSeconds), pctOf(sum.GovSeconds, total)), 5) + "\n")
-	sb.WriteString(MetaRow("DSA", fmt.Sprintf("%s  %s", FormatDuration(sum.DSASeconds), pctOf(sum.DSASeconds, total)), 5) + "\n")
-	sb.WriteString(MetaRow("SWE", fmt.Sprintf("%s  %s", FormatDuration(sum.SWESeconds), pctOf(sum.SWESeconds, total)), 5) + "\n")
+	sb.WriteString(DomainLabel("GOV", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(sum.GovSeconds), pctOf(sum.GovSeconds, total))) + "\n")
+	sb.WriteString(DomainLabel("DSA", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(sum.DSASeconds), pctOf(sum.DSASeconds, total))) + "\n")
+	sb.WriteString(DomainLabel("SWE", 5) + "  " + thPrimary.Render(fmt.Sprintf("%s  %s", FormatDuration(sum.SWESeconds), pctOf(sum.SWESeconds, total))) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("DOMAIN EVIDENCE") + "\n")
-	sb.WriteString(thMeta.Render("GOV") + "  " + thPrimary.Render(fmt.Sprintf("lect %d · q %d · acc %s", sum.GovLectures, sum.GovAttempted, fmtAcc(sum.GovAccuracy, sum.GovAttempted))) + "\n")
-	sb.WriteString(thMeta.Render("DSA") + "  " + thPrimary.Render(fmt.Sprintf("%d probs · %d passed", sum.DSAAttempts, sum.DSAPassed)) + "\n")
-	sb.WriteString(thMeta.Render("SWE") + "  " + thPrimary.Render(fmt.Sprintf("%d done · %d partial · %d blocked", sum.SWECompleted, sum.SWEPartial, sum.SWEBlocked)))
+	sb.WriteString(DomainStyle("GOV").Render("GOV") + "  " + thPrimary.Render(fmt.Sprintf("lect %d · q %d · acc %s", sum.GovLectures, sum.GovAttempted, fmtAcc(sum.GovAccuracy, sum.GovAttempted))) + "\n")
+	sb.WriteString(DomainStyle("DSA").Render("DSA") + "  " + thPrimary.Render(fmt.Sprintf("%d probs · %d passed", sum.DSAAttempts, sum.DSAPassed)) + "\n")
+	sb.WriteString(DomainStyle("SWE").Render("SWE") + "  " + thPrimary.Render(fmt.Sprintf("%d done · %d partial · %d blocked", sum.SWECompleted, sum.SWEPartial, sum.SWEBlocked)))
 	return sb.String()
 }
 

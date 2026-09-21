@@ -229,10 +229,10 @@ func (s *SWEScreen) View() string {
 		body := lipgloss.NewStyle().Bold(true).Foreground(cSWE).Render(strings.ToUpper(TruncateToWidth(a.Name, inner))) + "\n" +
 			RowDivider(inner) + "\n" +
 			SectionHeader("PROGRESS") + "\n" +
-			ProgressBar{Ratio: r, Width: barW, ShowPct: true}.View() + "\n" +
+			ProgressBar{Ratio: r, Width: barW, ShowPct: true, Accent: cSWE}.View() + "\n" +
 			thMeta.Render(fmt.Sprintf("%d / %d", pr.Done, pr.Total)) + "\n" +
 			RowDivider(inner) + "\n" +
-			SectionHeader("TASKS") + "\n" + s.taskList.View()
+			DomainSection("SWE", "TASKS") + "\n" + s.taskList.View()
 		right = PanelFixed("AREA", body, rw, bodyH, s.focusR)
 	} else {
 		right = PanelFixed("AREA", EmptyState("Select an area."), rw, bodyH, s.focusR)
