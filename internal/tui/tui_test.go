@@ -1,11 +1,16 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	db "forge/internal/db"
 )
+
+var ansiRe = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func stripANSIForTest(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
 func TestFormatDuration(t *testing.T) {
 	cases := map[int]string{3600: "1h", 7200: "2h", 9000: "2h30", 5400: "1h30", 2400: "40m", 90: "1m", 45: "45s"}
@@ -85,10 +90,10 @@ func TestGroupDSAPatterns(t *testing.T) {
 }
 
 func TestProgressBarClamp(t *testing.T) {
-	if got := (ProgressBar{Ratio: 2, Width: 4}.View()); got != "████" {
+	if got := stripANSIForTest((ProgressBar{Ratio: 2, Width: 4}.View())); got != "████" {
 		t.Fatalf("clamp high: %q", got)
 	}
-	if got := (ProgressBar{Ratio: -1, Width: 4}.View()); got != "░░░░" {
+	if got := stripANSIForTest((ProgressBar{Ratio: -1, Width: 4}.View())); got != "░░░░" {
 		t.Fatalf("clamp low: %q", got)
 	}
 }

@@ -2,12 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Forge shared components. Boxy bento cards, thin elegant borders,
@@ -112,8 +113,15 @@ func (p ProgressBar) View() string {
 		r = 1
 	}
 	filled := int(r*float64(w) + 0.5)
-	bar := lipgloss.NewStyle().Foreground(cPrimary).Render(strings.Repeat("█", filled)) +
-		lipgloss.NewStyle().Foreground(cBorder).Render(strings.Repeat("░", w-filled))
+	// v2 lipgloss renders empty strings with reset codes; skip empty runs
+	// so clamped bars stay byte-clean for tests and alignment.
+	bar := ""
+	if filled > 0 {
+		bar += lipgloss.NewStyle().Foreground(cPrimary).Render(strings.Repeat("█", filled))
+	}
+	if w-filled > 0 {
+		bar += lipgloss.NewStyle().Foreground(cBorder).Render(strings.Repeat("░", w-filled))
+	}
 	if p.ShowPct {
 		return fmt.Sprintf("%s %s", bar, thMeta.Render(fmt.Sprintf("%3.0f%%", r*100)))
 	}
@@ -176,7 +184,7 @@ func (p SessionProgressBar) View() string {
 
 var gradStops = []string{"#A78BFA", "#8B5CF6", "#60A5FA", "#22D3EE", "#34D399"}
 
-func gradientAt(t float64) lipgloss.Color {
+func gradientAt(t float64) color.Color {
 	if t < 0 {
 		t = 0
 	}
@@ -344,7 +352,7 @@ func KeyBadge(key string) string {
 }
 
 // KeyMsg helpers shared by screens.
-func IsBack(msg tea.KeyMsg) bool { return msg.String() == "esc" }
+func IsBack(msg tea.KeyPressMsg) bool { return msg.String() == "esc" }
 
 // lipglossJoin places two panels side by side with a gap.
 func lipglossJoin(left, right string) string {

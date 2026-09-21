@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -237,6 +237,39 @@ func PanelFixed(title, content string, width, height int, focused bool) string {
 // StackPanels stacks pre-rendered panels vertically.
 func StackPanels(panels ...string) string {
 	return lipgloss.JoinVertical(lipgloss.Left, panels...)
+}
+
+// RowLayout is the explicit horizontal row geometry: number + mark + title +
+// meta composed into a fixed-width row. It backs SelectableRow/TodayTaskRow
+// so every navigable list shares one geometry contract instead of ad-hoc
+// string padding.
+type RowLayout struct {
+	Num   string
+	Mark  string
+	Title string
+	Meta  string
+	Width int
+}
+
+// InnerWidth returns the usable content width inside padding.
+func (r RowLayout) InnerWidth() int {
+	w := r.Width - 2
+	if w < 4 {
+		w = 4
+	}
+	return w
+}
+
+// Prefix returns the plain-text row prefix (number + mark) for width math.
+func (r RowLayout) Prefix() string {
+	mark := r.Mark
+	if mark == "" {
+		mark = " "
+	}
+	if r.Num != "" {
+		return r.Num + "  " + mark + "  "
+	}
+	return mark + "  "
 }
 
 // Clamp confines v to [lo, hi].

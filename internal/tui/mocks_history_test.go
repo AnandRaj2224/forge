@@ -66,7 +66,7 @@ func TestHistoryOnlyCurrentWeek(t *testing.T) {
 			t.Fatal("older DB record must not appear in History")
 		}
 	}
-	view := app.View()
+	view := app.View().Content
 	if !strings.Contains(view, "Mon · 21 Sep") || !strings.Contains(view, "Sun · 27 Sep") {
 		t.Fatalf("history day list missing current week:\n%s", view)
 	}
@@ -139,7 +139,7 @@ func TestMocksScreenDetail(t *testing.T) {
 	app := NewApp(database)
 	app.width, app.height = 150, 40
 	app.goTab(TabMocks)
-	view := app.View()
+	view := app.View().Content
 	for _, want := range []string{"AFCAT Mock 07", "2026-09-18", "AFCAT", "Self", "SCORE", "72 / 100", "RANK", "1842", "PERCENTILE", "84.3", "ACCURACY", "81.2%", "ATTEMPTED", "87 / 100", "CORRECT", "71", "INCORRECT", "16", "UNATTEMPTED", "13", "QUANT", "Percentage", "Ratio"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("mock detail missing %q:\n%s", want, view)
@@ -151,7 +151,7 @@ func TestReviewsMetricsStructure(t *testing.T) {
 	app := NewApp(seedFlowDB(t))
 	app.width, app.height = 150, 40
 	app.goTab(TabReviews)
-	view := app.View()
+	view := app.View().Content
 	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV", "DSA", "SWE", "What worked well", "What should change"} {
 		found := false
 		// case-insensitive for reflections

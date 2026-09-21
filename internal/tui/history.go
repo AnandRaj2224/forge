@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"forge/internal/db/runtime"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // HistoryScreen is the operational current-week view.
@@ -71,7 +71,7 @@ func (s *HistoryScreen) selectedDate() string { return s.list.SelectedID() }
 func (s *HistoryScreen) onBack() bool { return false }
 
 func (s *HistoryScreen) Update(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyMsg); ok {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
 		case "j", "down":
 			s.list.CursorDown()

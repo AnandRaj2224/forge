@@ -7,23 +7,41 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-func testKey(s string) tea.KeyMsg {
+func testKey(s string) tea.KeyPressMsg {
 	switch s {
 	case "tab":
-		return tea.KeyMsg{Type: tea.KeyTab}
+		return tea.KeyPressMsg{Code: tea.KeyTab}
+	case "shift+tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "space", " ":
+		return tea.KeyPressMsg{Code: tea.KeySpace}
+	case "up":
+		return tea.KeyPressMsg{Code: tea.KeyUp}
+	case "down":
+		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
+	case "ctrl+c":
+		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	default:
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+		if len([]rune(s)) == 1 {
+			r := []rune(s)[0]
+			return tea.KeyPressMsg{Text: s, Code: r}
+		}
+		return tea.KeyPressMsg{Text: s, Code: tea.KeyExtended}
 	}
 }
 
@@ -185,7 +203,7 @@ func TestWorkspacesFitViewport(t *testing.T) {
 		app.width, app.height = size[0], size[1]
 		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {
 			app.goTab(tab)
-			view := app.View()
+			view := app.View().Content
 			for _, line := range strings.Split(view, "\n") {
 				if lipgloss.Width(line) > size[0] {
 					t.Fatalf("tab %v %dx%d: row width %d exceeds viewport: %q", tab, size[0], size[1], lipgloss.Width(line), line)
@@ -203,7 +221,7 @@ func TestWorkspacesFitViewport(t *testing.T) {
 		app.width, app.height = 140, 40
 		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {
 			app.goTab(tab)
-			if strings.Contains(app.View(), want) {
+			if strings.Contains(app.View().Content, want) {
 				found = true
 			}
 		}

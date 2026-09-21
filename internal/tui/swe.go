@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ---------- SWE: persistent two-panel areas workspace ----------
@@ -138,7 +138,7 @@ func (s *SWEScreen) onBack() bool {
 }
 
 func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyMsg); ok {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
 		case "tab":
 			s.focusR = !s.focusR

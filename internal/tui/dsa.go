@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ---------- DSA: persistent two-panel patterns workspace ----------
@@ -125,7 +125,7 @@ func (s *DSAScreen) patternProgress(p *DSAPattern) (int, int) {
 }
 
 func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyMsg); ok {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
 		case "tab":
 			s.focusR = !s.focusR

@@ -3,7 +3,7 @@ package tui
 import (
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Forge color system — Charm-inspired, dark, restrained.
@@ -14,7 +14,10 @@ import (
 // ACTIVE: cyan/blue family (running, live).
 // SUCCESS/WARNING/ERROR: restrained semantic colors, used sparingly.
 // DOMAIN: subtle differentiation, low saturation.
-const (
+//
+// NOTE (Charm v2): lipgloss.Color is a func returning color.Color, so palette
+// entries are vars, not consts.
+var (
 	// Base surfaces.
 	cBG      = lipgloss.Color("#0B0B13") // near-black, cool/blue
 	cSurface = lipgloss.Color("#14141F") // panel/surface tone

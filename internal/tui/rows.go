@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Forge row system: every navigable list item is a structured row separated

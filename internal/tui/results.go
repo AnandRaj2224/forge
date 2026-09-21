@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // PracticeRow is one editable topic row in the GOV practice result form.
@@ -239,7 +239,7 @@ func (s *ResultForm) moveFocus(d int) {
 
 // HandleKey processes a key when the result panel owns focus.
 // Returns a command and whether the key was consumed.
-func (s *ResultForm) HandleKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+func (s *ResultForm) HandleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	ks := msg.String()
 	switch ks {
 	case "tab":
@@ -264,7 +264,7 @@ func (s *ResultForm) HandleKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 				s.lecture.Move(-1)
 			case "right", "l", "j":
 				s.lecture.Move(1)
-			case " ", "enter":
+			case " ", "space", "enter":
 				s.lecture.Choose()
 			default:
 				return nil, false
@@ -298,19 +298,19 @@ func (s *ResultForm) HandleKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			r, c := f/4, f%4
 			switch c {
 			case 0:
-				if ks == " " || ks == "enter" {
+				if ks == " " || ks == "space" || ks == "enter" {
 					s.drows[r].Indep.Checked = !s.drows[r].Indep.Checked
 				} else {
 					return nil, false
 				}
 			case 1:
-				if ks == " " || ks == "enter" {
+				if ks == " " || ks == "space" || ks == "enter" {
 					s.drows[r].Optimal.Checked = !s.drows[r].Optimal.Checked
 				} else {
 					return nil, false
 				}
 			case 2:
-				if ks == " " || ks == "enter" {
+				if ks == " " || ks == "space" || ks == "enter" {
 					s.drows[r].Hint.Checked = !s.drows[r].Hint.Checked
 				} else {
 					return nil, false
@@ -332,7 +332,7 @@ func (s *ResultForm) HandleKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 				s.srows[f].Radio.Move(-1)
 			case "right", "l":
 				s.srows[f].Radio.Move(1)
-			case " ", "enter":
+			case " ", "space", "enter":
 				s.srows[f].Radio.Choose()
 			default:
 				return nil, false

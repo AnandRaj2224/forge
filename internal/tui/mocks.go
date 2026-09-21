@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // MocksScreen: LEFT mock list, RIGHT dense mock detail with per-section
@@ -152,7 +152,7 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 	if s.mode == "weak" {
 		return s.updateWeak(msg)
 	}
-	if k, ok := msg.(tea.KeyMsg); ok {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
 		case "tab":
 			if s.selMock() != nil {
@@ -262,7 +262,7 @@ func (s *MocksScreen) updateCreateFocus() {
 }
 
 func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
-	k, isKey := msg.(tea.KeyMsg)
+	k, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
 		// Forward to focused input.
 		if s.cFocus >= 1 && s.cFocus <= len(s.cInputs) {
@@ -449,7 +449,7 @@ func (s *MocksScreen) startSection() {
 }
 
 func (s *MocksScreen) updateSection(msg tea.Msg) tea.Cmd {
-	k, isKey := msg.(tea.KeyMsg)
+	k, isKey := msg.(tea.KeyPressMsg)
 	if isKey && k.String() == "enter" {
 		name := strings.TrimSpace(s.secInput.Value())
 		if name == "" {
@@ -576,7 +576,7 @@ func (s *MocksScreen) toggleWeak(id string) {
 }
 
 func (s *MocksScreen) updateWeak(msg tea.Msg) tea.Cmd {
-	k, isKey := msg.(tea.KeyMsg)
+	k, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
 		if s.wFocus == 0 {
 			var cmd tea.Cmd
@@ -623,7 +623,7 @@ func (s *MocksScreen) updateWeak(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		return nil
-	case "enter", " ":
+	case "enter", " ", "space":
 		if s.wFocus == 1 {
 			s.toggleWeak(s.wList.SelectedID())
 			return nil
@@ -683,7 +683,7 @@ func (s *MocksScreen) View() string {
 
 func (s *MocksScreen) browseView() string {
 	w, h := s.app.contentViewport()
-	lw, rw := TwoPaneLayout(w, 32, 24, 40)
+	lw, rw := TwoPaneLayout(w, 36, 26, 40)
 	bodyH := h
 	if bodyH < 8 {
 		bodyH = 8

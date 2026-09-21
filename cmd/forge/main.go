@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
+	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
 	"forge/internal/tui"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -43,7 +43,7 @@ func main() {
 		os.Exit(1)
 	}
 	app := tui.NewApp(database)
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "tui:", err)
 		os.Exit(1)

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Focus zones inside the Today workspace.
@@ -45,19 +45,39 @@ func NewTodayScreen(a *App) *TodayScreen {
 }
 
 func (s *TodayScreen) latestSnapshot(ctx context.Context) *db.TodaySnapshot {
-	rows, err := s.app.DB.QueryContext(ctx, `SELECT local_date FROM today_snapshots ORDER BY local_date DESC LIMIT 1`)
+	// Prefer today's snapshot so future planned History days never hijack
+	// the home workspace; fall back to the latest snapshot on/before today,
+	// then to the global latest (dev/empty-DB edge).
+	todayStr := time.Now().UTC().Format("2006-01-02")
+	if snap, err := runtime.GetLatestTodaySnapshot(ctx, s.app.DB, todayStr); err == nil {
+		return &snap
+	}
+	var d string
+	rows, err := s.app.DB.QueryContext(ctx, `SELECT local_date FROM today_snapshots WHERE local_date <= ? ORDER BY local_date DESC LIMIT 1`, todayStr)
+	if err == nil {
+		if rows.Next() {
+			_ = rows.Scan(&d)
+		}
+		_ = rows.Close()
+		if d != "" {
+			if snap, err := runtime.GetLatestTodaySnapshot(ctx, s.app.DB, d); err == nil {
+				return &snap
+			}
+		}
+	}
+	rows2, err := s.app.DB.QueryContext(ctx, `SELECT local_date FROM today_snapshots ORDER BY local_date DESC LIMIT 1`)
 	if err != nil {
 		return nil
 	}
-	var d string
-	if rows.Next() {
-		_ = rows.Scan(&d)
+	var d2 string
+	if rows2.Next() {
+		_ = rows2.Scan(&d2)
 	}
-	_ = rows.Close()
-	if d == "" {
+	_ = rows2.Close()
+	if d2 == "" {
 		return nil
 	}
-	snap, err := runtime.GetLatestTodaySnapshot(ctx, s.app.DB, d)
+	snap, err := runtime.GetLatestTodaySnapshot(ctx, s.app.DB, d2)
 	if err != nil {
 		return nil
 	}
@@ -184,7 +204,7 @@ func (s *TodayScreen) stopActive() {
 }
 
 func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyMsg); ok {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
 		// While the in-place result form owns the right panel, it owns
 		// Tab/Up/Down/Space/typing. Esc backs out (handled by the app).
 		if s.zone == tzRight && s.right == "result" && s.result != nil && k.String() != "x" {
@@ -250,7 +270,7 @@ func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 		}
 		// Typing into result inputs.
 		if s.zone == tzRight && s.right == "result" && s.result != nil {
-			if k, ok := msg.(tea.KeyMsg); ok {
+			if k, ok := msg.(tea.KeyPressMsg); ok {
 				ks := k.String()
 				if ks != "tab" && ks != "shift+tab" {
 					if cmd, handled := s.result.HandleKey(k); handled {

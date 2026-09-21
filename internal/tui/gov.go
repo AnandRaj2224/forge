@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Gov levels: dashboard -> exam workspace | subjects browser -> topic.
@@ -261,7 +261,7 @@ func (s *GovScreen) onBack() bool {
 }
 
 func (s *GovScreen) Update(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyMsg); ok {
+	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
 		case "tab":
 			switch s.level {

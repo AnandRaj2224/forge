@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ---------- REVIEWS: persistent two-panel weekly workspace ----------
@@ -56,7 +56,7 @@ func (s *ReviewsScreen) syncSelected() {
 }
 
 func (s *ReviewsScreen) Update(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyMsg); ok && (k.String() == "j" || k.String() == "k" || k.String() == "down" || k.String() == "up") {
+	if k, ok := msg.(tea.KeyPressMsg); ok && (k.String() == "j" || k.String() == "k" || k.String() == "down" || k.String() == "up") {
 		down := k.String() == "j" || k.String() == "down"
 		prev := s.weeks.SelectedID()
 		if down {
