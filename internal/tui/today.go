@@ -325,7 +325,11 @@ func (s *TodayScreen) View() string {
 	}
 
 	// Right column: TOP active session, BOTTOM detail/result, ~50/50.
-	activeH := bodyH / 2
+	// Bottom gets one extra line so bundled START buttons stay visible.
+	activeH := bodyH/2 - 1
+	if activeH < 6 {
+		activeH = bodyH / 2
+	}
 	bottomH := bodyH - activeH
 	left := PanelFixed("TASKS", s.tbl.View(), leftW, bodyH, s.zone == tzTasks)
 	activePanel := PanelFixed("ACTIVE SESSION", s.activeViewFor(rightW, activeH-4), rightW, activeH, s.zone == tzActive)
@@ -387,11 +391,12 @@ func (s *TodayScreen) activeViewWH(w, maxLines int) string {
 	if s.active.PlannedSeconds > 0 {
 		ratio = float64(el.Seconds()) / float64(s.active.PlannedSeconds)
 	}
+	frame := int(el.Seconds())
 	var sb strings.Builder
 	// Compact mode for short viewports: timer + progress + STOP only.
 	if maxLines < 8 {
 		sb.WriteString(thScreenTitle.Render(FormatHMS(el)) + "  " + thMeta.Render(TruncateToWidth(s.active.TitleSnapshot, inner-10)) + "\n")
-		sb.WriteString(ProgressBar{Ratio: ratio, Width: barW, ShowPct: true}.View() + "\n")
+		sb.WriteString(SessionProgressBar{Ratio: ratio, Width: barW, Frame: frame, ShowPct: true}.View() + "\n")
 		sb.WriteString(s.stopBtn.CompactView())
 		return sb.String()
 	}
@@ -399,11 +404,14 @@ func (s *TodayScreen) activeViewWH(w, maxLines int) string {
 	sb.WriteString(thPrimary.Render(TruncateToWidth(s.active.TitleSnapshot, inner)) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(thScreenTitle.Render(FormatHMS(el)) + "\n")
-	sb.WriteString(ProgressBar{Ratio: ratio, Width: barW, ShowPct: true}.View() + "\n")
+	sb.WriteString(SessionProgressBar{Ratio: ratio, Width: barW, Frame: frame, ShowPct: true}.View() + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(MetaRow("Planned", FormatDuration(s.active.PlannedSeconds), 8) + "\n")
-	sb.WriteString(MetaRow("Started", s.active.StartedAt.Local().Format("15:04"), 8) + "\n")
-	sb.WriteString(s.stopBtn.View())
+	if maxLines < 10 {
+		sb.WriteString(s.stopBtn.CompactView())
+	} else {
+		sb.WriteString(s.stopBtn.View())
+	}
 	return sb.String()
 }
 
@@ -432,25 +440,28 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		return strings.TrimRight(sb.String(), "\n")
 	}
 	sb.WriteString(DomainBadge(string(t.Domain)) + "  " + thMeta.Render(string(t.Kind)) + "  " + StatusPill(st) + "\n")
-	sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
 	switch {
 	case b.Lecture != nil:
-		sb.WriteString(div + "\n")
+		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Lecture.Subject, inner))) + "\n")
 		sb.WriteString(SectionHeader("LECTURE") + "\n")
-		sb.WriteString(thSectionHead.Render(TruncateToWidth(b.Lecture.Subject, inner)) + "\n")
 		sb.WriteString(thPrimary.Render(TruncateToWidth(b.Lecture.Topic, inner)) + "\n")
+		if b.Lecture.Lecture != "" {
+			sb.WriteString(thMeta.Render(TruncateToWidth(b.Lecture.Lecture, inner)) + "\n")
+		}
 	case len(b.Practice) > 0:
 		subj := ""
 		if len(b.Practice) > 0 {
 			subj = b.Practice[0].Subject
 		}
-		sb.WriteString(div + "\n")
-		sb.WriteString(SectionHeader(fmt.Sprintf("%s · TOPICS (%d)", strings.ToUpper(TruncateToWidth(subj, 16)), len(b.Practice))) + "\n")
-		for _, p := range b.Practice {
-			sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(p.Topic, inner-4)) + "\n")
+		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(subj, inner))) + "\n")
+		sb.WriteString(SectionHeader(fmt.Sprintf("TOPICS (%d)", len(b.Practice))) + "\n")
+		for i, p := range b.Practice {
+			sb.WriteString(bundleRow(i+1, p.Topic, inner) + "\n")
+			if i < len(b.Practice)-1 {
+				sb.WriteString(RowDivider(inner) + "\n")
+			}
 		}
 	case len(b.DSA) > 0:
-		sb.WriteString(div + "\n")
 		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
 		var repeats, news []DSAItem
 		for _, d := range b.DSA {
@@ -460,20 +471,29 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 				repeats = append(repeats, d)
 			}
 		}
+		n := 0
 		if len(repeats) > 0 {
 			sb.WriteString(SectionHeader("REPEAT") + "\n")
-			for _, d := range repeats {
-				sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(d.Title, inner-4)) + "\n")
+			for i, d := range repeats {
+				n++
+				sb.WriteString(bundleRow(n, d.Title, inner) + "\n")
+				if i < len(repeats)-1 || len(news) > 0 {
+					sb.WriteString(RowDivider(inner) + "\n")
+				}
 			}
 		}
 		if len(news) > 0 {
 			sb.WriteString(SectionHeader("NEW") + "\n")
-			for _, d := range news {
-				sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(d.Title, inner-4)) + "\n")
+			for i, d := range news {
+				n++
+				sb.WriteString(bundleRow(n, d.Title, inner) + "\n")
+				if i < len(news)-1 {
+					sb.WriteString(RowDivider(inner) + "\n")
+				}
 			}
 		}
 		sb.WriteString(div + "\n")
-		if maxLines < 9 {
+		if maxLines < 13 {
 			sb.WriteString(s.startBtn.CompactView())
 		} else {
 			sb.WriteString(s.startBtn.View())
@@ -483,20 +503,21 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		}
 		return strings.TrimRight(sb.String(), "\n")
 	case len(b.SWE) > 0:
-		sb.WriteString(div + "\n")
 		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
 		lastArea := ""
+		n := 0
 		for _, sw := range b.SWE {
 			if sw.Area != lastArea {
 				sb.WriteString(SectionHeader(strings.ToUpper(TruncateToWidth(sw.Area, inner-2))) + "\n")
 				lastArea = sw.Area
 			}
 			if sw.Task != "" {
-				sb.WriteString("  " + thPrimary.Render("• "+TruncateToWidth(sw.Task, inner-4)) + "\n")
+				n++
+				sb.WriteString(bundleRow(n, sw.Task, inner) + "\n")
+				sb.WriteString(RowDivider(inner) + "\n")
 			}
 		}
-		sb.WriteString(div + "\n")
-		if maxLines < 9 {
+		if maxLines < 13 {
 			sb.WriteString(s.startBtn.CompactView())
 		} else {
 			sb.WriteString(s.startBtn.View())
@@ -510,7 +531,7 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 	}
 	sb.WriteString(div + "\n")
 	sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
-	if maxLines < 9 {
+	if maxLines < 13 {
 		sb.WriteString(s.startBtn.CompactView())
 	} else {
 		sb.WriteString(s.startBtn.View())
@@ -522,6 +543,20 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 }
 
 func (s *TodayScreen) Hints() string { return "Tab Focus   s Start   x Stop" }
+
+// bundleRow renders one bundled work item with the global row language:
+// visible number, deliberate padding, thin divider owned by the caller.
+func bundleRow(n int, title string, width int) string {
+	if width < 10 {
+		width = 10
+	}
+	num := fmt.Sprintf("%02d", n)
+	tw := width - 4 - len(num) - 2
+	if tw < 4 {
+		tw = 4
+	}
+	return thPrimary.Render(num + "  " + TruncateToWidth(title, tw))
+}
 
 // onBack steps the right-bottom panel from result back to detail.
 func (s *TodayScreen) onBack() bool {

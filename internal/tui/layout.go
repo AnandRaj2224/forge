@@ -16,18 +16,30 @@ type Rect struct {
 	W, H int
 }
 
-// Shell geometry: fixed header/footer heights, main viewport derived.
+// Contains reports whether (x,y) is inside the rect.
+func (r Rect) Contains(x, y int) bool {
+	return x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H
+}
+
+// Inner shrinks the rect by horizontal/vertical chrome (borders+padding).
+func (r Rect) Inner(dx, dy int) Rect {
+	return Rect{X: r.X + dx, Y: r.Y + dy, W: max(0, r.W-2*dx), H: max(0, r.H-2*dy)}
+}
+
+// Shell geometry: multi-line header holds the 6-line Forge wordmark plus a
+// bottom divider (7 lines) plus 1 join gap; footer is 1 command row plus a
+// top divider (2 lines) plus 1 join gap.
 const (
-	ShellHeaderH = 2
-	ShellFooterH = 2
+	ShellHeaderH = 8
+	ShellFooterH = 3
 )
 
 // ShellLayout computes header/main/footer rects from the terminal size.
 type ShellLayout struct {
 	TermW, TermH int
-	Header      Rect
-	Main        Rect
-	Footer      Rect
+	Header       Rect
+	Main         Rect
+	Footer       Rect
 }
 
 // NewShellLayout builds explicit bounds: MAIN = term - header - footer.
@@ -35,8 +47,8 @@ func NewShellLayout(termW, termH int) ShellLayout {
 	if termW < 40 {
 		termW = 40
 	}
-	if termH < 16 {
-		termH = 16
+	if termH < 20 {
+		termH = 20
 	}
 	header := Rect{X: 0, Y: 0, W: termW, H: ShellHeaderH}
 	footer := Rect{X: 0, Y: termH - ShellFooterH, W: termW, H: ShellFooterH}
@@ -52,6 +64,32 @@ func NewShellLayout(termW, termH int) ShellLayout {
 func TwoPaneLayout(totalW, leftPct, leftMin, rightMin int) (leftW, rightW int) {
 	leftW, rightW = splitW(totalW, leftPct, leftMin, rightMin)
 	return leftW, rightW
+}
+
+// ThreePaneLayout splits total width into three panel widths by percentages.
+// Accounts for three borders (+2 each) and two 1-cell gaps (total chrome 8).
+func ThreePaneLayout(totalW int, pctA, pctB int) (a, b, c int) {
+	if totalW < 40 {
+		totalW = 40
+	}
+	chrome := 8
+	avail := totalW - chrome
+	if avail < 30 {
+		avail = 30
+	}
+	a = avail * pctA / 100
+	b = avail * pctB / 100
+	c = avail - a - b
+	if a < 10 {
+		a = 10
+	}
+	if b < 10 {
+		b = 10
+	}
+	if c < 10 {
+		c = 10
+	}
+	return a, b, c
 }
 
 // BentoGridCardW computes a uniform card width for a responsive grid.
@@ -75,6 +113,59 @@ func BentoCols(totalW int) int {
 		return 2
 	}
 	return 1
+}
+
+// BentoGrid lays out pre-rendered cards into responsive rows with a gap.
+// Cards in the same row are joined horizontally; rows stacked vertically.
+func BentoGrid(cards []string, cols int, gap string) string {
+	if len(cards) == 0 {
+		return ""
+	}
+	if cols < 1 {
+		cols = 1
+	}
+	var rows []string
+	for i := 0; i < len(cards); i += cols {
+		end := i + cols
+		if end > len(cards) {
+			end = len(cards)
+		}
+		parts := make([]string, 0, (end-i)*2-1)
+		for j := i; j < end; j++ {
+			if j > i {
+				parts = append(parts, gap)
+			}
+			parts = append(parts, cards[j])
+		}
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, parts...))
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, rows...)
+}
+
+// HorizontalStack joins blocks left-to-right at the top edge with 1-cell gaps.
+func HorizontalStack(blocks ...string) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0]
+	}
+	withGaps := make([]string, 0, len(blocks)*2-1)
+	for i, b := range blocks {
+		if i > 0 {
+			withGaps = append(withGaps, " ")
+		}
+		withGaps = append(withGaps, b)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, withGaps...)
+}
+
+// VerticalStack joins blocks top-to-bottom, left-aligned.
+func VerticalStack(blocks ...string) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, blocks...)
 }
 
 // TruncateToWidth cuts a string to a visible cell width.

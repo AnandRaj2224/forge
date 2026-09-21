@@ -127,7 +127,7 @@ func TestRadioRoundTripMarkers(t *testing.T) {
 		if strings.Count(v, "◉") != 1 {
 			t.Fatalf("exactly one ◉ required, got:\n%s", v)
 		}
-		if !strings.Contains(v, "▸") {
+		if !strings.Contains(v, "▶") {
 			t.Fatalf("focus marker missing:\n%s", v)
 		}
 		if !strings.Contains(v, "◉  "+r.Options[want]) {

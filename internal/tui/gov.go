@@ -535,7 +535,7 @@ func (s *GovScreen) examView(w, h int) string {
 		sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
 		sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true}.View() + "\n")
 		sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
-		sb.WriteString(RowDivider(rw - 6) + "\n")
+		sb.WriteString(RowDivider(rw-6) + "\n")
 		sb.WriteString(SectionHeader("PRACTICE READINESS") + "  " + thHelp.Render("not yet calculated") + "\n")
 		sb.WriteString(RowDivider(rw-6) + "\n")
 		sb.WriteString(SectionHeader("TOPICS — "+strings.ToUpper(TruncateToWidth(s.examSubject, 24))) + "\n")

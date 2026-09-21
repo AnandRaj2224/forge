@@ -260,10 +260,22 @@ func (a *App) View() string {
 	return out
 }
 
-// headerView is the application navigation bar with THREE zones:
-// LEFT brand | CENTER nav | RIGHT clock. No keyboard numbers, no wrapping.
+// Forge ASCII wordmark — largest element in the header, anchored LEFT.
+var forgeLogoLines = []string{
+	"███████╗ ██████╗ ██████╗  ██████╗ ███████╗",
+	"██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝",
+	"█████╗  ██║   ██║██████╔╝██║  ███╗█████╗",
+	"██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝",
+	"██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗",
+	"╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
+}
+
+// headerView is the Forge shell header: LEFT ASCII wordmark + MID→RIGHT
+// top-level navigation. NO date/time, NO clock, NO numbers in labels.
+// The wordmark is intentionally larger than the navigation text. The header
+// is spatially composed (not tab/space-faked single line): the 6-line logo
+// sits left, navigation is vertically centered to its right.
 func (a *App) headerView(w int) string {
-	brand := thAppTitle.Render("FORGE")
 	names := []string{"TODAY", "GOV", "DSA", "SWE", "REVIEWS"}
 	var nav []string
 	for i, n := range names {
@@ -273,34 +285,43 @@ func (a *App) headerView(w int) string {
 			nav = append(nav, thNavInactive.Render(n))
 		}
 	}
-	clock := thClock.Render(a.now.Format("02 Jan  ·  15:04:05"))
-	active := ""
-	if a.activeInfo != "" {
-		active = thRunning.Render(a.activeInfo)
+	navLine := strings.Join(nav, "  ")
+	// Style logo lines with the Forge accent.
+	logo := make([]string, len(forgeLogoLines))
+	for i, ln := range forgeLogoLines {
+		logo[i] = thLogo.Render(ln)
 	}
-	bar := joinHeader(brand, nav, active, clock, w, "  ")
-	if lipgloss.Width(bar) > w {
-		bar = joinHeader(brand, nav, active, clock, w, " ")
+	logoW := lipgloss.Width(logo[0])
+	gap := "    "
+	avail := w - logoW - lipgloss.Width(gap)
+	if avail < 20 {
+		avail = 20
 	}
-	if lipgloss.Width(bar) > w {
-		shortActive := ""
-		if a.activeInfo != "" {
-			shortActive = thRunning.Render("● ACTIVE")
+	// Navigation stays on ONE line, truncated to fit, vertically centered
+	// against the 6-line logo (row 2 of 0..5).
+	navLine = TruncateToWidth(navLine, avail)
+	rows := make([]string, 0, 6)
+	for i := 0; i < 6; i++ {
+		line := logo[i] + gap
+		if i == 2 {
+			line += navLine
 		}
-		bar = joinHeader(brand, nav, shortActive, thClock.Render(a.now.Format("15:04")), w, " ")
+		// Force exact width so the divider below spans the viewport.
+		line = FitLine(line, w)
+		rows = append(rows, line)
 	}
-	if lipgloss.Width(bar) > w {
-		bar = joinHeader(brand, nav, "", "", w, " ")
-	}
-	// Force single line: truncate instead of wrapping.
-	bar = TruncateToWidth(bar, w)
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(cDimLine).Width(w).MaxHeight(1).Render(bar)
+	block := strings.Join(rows, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(cBorder).
+		Width(w).
+		Render(block)
 }
 
 func joinHeader(brand string, nav []string, active, clock string, w int, gap string) string {
-	// LEFT: brand + nav as one anchored block.
+	// Kept for compat: LEFT brand+nav, RIGHT active/clock. New header no
+	// longer uses clock, but external callers/tests may reference it.
 	left := brand + gap + strings.Join(nav, gap)
-	// RIGHT: active session + clock independently right-aligned.
 	right := clock
 	if active != "" {
 		if right != "" {
@@ -316,35 +337,30 @@ func joinHeader(brand string, nav []string, active, clock string, w int, gap str
 	return left + strings.Repeat(" ", sp) + right
 }
 
-// footerView is ONE horizontal command bar with compact key badges.
-// Fixed height, never vertical, truncated to fit.
+// footerView is EXACTLY ONE horizontal command bar with compact key badges.
+// It never becomes vertical: children are horizontal units, the bar is
+// truncated to fit and occupies a controlled fixed height.
 func (a *App) footerView(w int) string {
-	groups := [][]string{
-		{"↑↓", "Navigate"},
+	units := []struct{ key, desc string }{
+		{"q", "Quit"},
+		{"j/k", "Navigate"},
 		{"Enter", "Select"},
 		{"Esc", "Back"},
 		{"r", "Refresh"},
-	}
-	if s, ok := a.screenHints(); ok && s != "" {
-		groups = append(groups, []string{"·", s})
-	}
-	// Per-screen primary action stays visible (Start/Stop/Open).
-	extra := a.footerExtra()
-	if extra != "" {
-		groups = append(groups, []string{"·", extra})
+		{"s", "Start"},
+		{"x", "Stop"},
 	}
 	var parts []string
-	for _, g := range groups {
-		if g[0] == "·" {
-			parts = append(parts, thFootDesc.Render(TruncateToWidth(g[1], 40)))
-			continue
-		}
-		parts = append(parts, footChip(g[0])+thFootDesc.Render(" "+g[1]))
+	for _, u := range units {
+		parts = append(parts, footChip(u.key)+thFootDesc.Render(" "+u.desc))
 	}
-	sep := "   "
+	if s, ok := a.screenHints(); ok && s != "" {
+		parts = append(parts, thFootDesc.Render("· "+TruncateToWidth(s, 36)))
+	}
+	sep := "  "
 	line := strings.Join(parts, sep)
-	// Shrink gracefully: drop secondary groups, keep one horizontal row.
-	for lipgloss.Width(line) > w-2 && len(parts) > 3 {
+	// Shrink gracefully from the right but NEVER wrap: keep one row.
+	for lipgloss.Width(line) > w-2 && len(parts) > 4 {
 		parts = parts[:len(parts)-1]
 		line = strings.Join(parts, sep)
 	}
@@ -353,8 +369,13 @@ func (a *App) footerView(w int) string {
 			footChip("Enter") + thFootDesc.Render(" Select") + sep +
 			footChip("Esc") + thFootDesc.Render(" Back")
 	}
-	line = TruncateToWidth(line, w-2)
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true, false, false, false).BorderForeground(cDimLine).Width(w).MaxHeight(2).Render(line)
+	line = FitLine(TruncateToWidth(line, w-2), w-2)
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		BorderForeground(cBorder).
+		Width(w).
+		MaxHeight(2).
+		Render(line)
 }
 
 func (a *App) footerExtra() string {

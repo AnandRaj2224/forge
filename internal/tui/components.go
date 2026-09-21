@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -20,7 +21,7 @@ func Panel(title, content string, width int, focused bool) string {
 	}
 	style := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(cDimLine).
+		BorderForeground(cBorder).
 		Padding(0, 1).
 		Width(width)
 	if focused {
@@ -34,6 +35,11 @@ func Panel(title, content string, width int, focused bool) string {
 	return style.Render(head + "\n" + sep + "\n" + content)
 }
 
+// Card is the canonical Forge card alias (see BentoPanel/Panel).
+func Card(title, content string, width int, focused bool) string {
+	return Panel(title, content, width, focused)
+}
+
 // PanelPlain is a bento card without focus affordance (static info groups).
 func PanelPlain(title, content string, width int) string {
 	if width < 20 {
@@ -41,7 +47,7 @@ func PanelPlain(title, content string, width int) string {
 	}
 	style := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
-		BorderForeground(cDimLine).
+		BorderForeground(cBorder).
 		Padding(0, 1).
 		Width(width)
 	return style.Render(thPanelTitle.Render(title) + "\n" + Separator(maxInt(width-4, 4)) + "\n" + content)
@@ -84,8 +90,9 @@ func minInt(a, b int) int {
 	return b
 }
 
-// ProgressBar is the single reusable Forge progress component:
-// ratio-backed, compact, clean block texture with optional percent.
+// ProgressBar is the NORMAL STATIC progress component for syllabus coverage,
+// lecture progress, practice progression, pattern/area progress.
+// Clean quiet bar: ████████░░░░░░ 60% with percentage/count.
 type ProgressBar struct {
 	Ratio   float64 // 0..1
 	Width   int
@@ -106,11 +113,105 @@ func (p ProgressBar) View() string {
 	}
 	filled := int(r*float64(w) + 0.5)
 	bar := lipgloss.NewStyle().Foreground(cPrimary).Render(strings.Repeat("█", filled)) +
-		thMeta.Render(strings.Repeat("░", w-filled))
+		lipgloss.NewStyle().Foreground(cBorder).Render(strings.Repeat("░", w-filled))
 	if p.ShowPct {
-		return fmt.Sprintf("%s %3.0f%%", bar, r*100)
+		return fmt.Sprintf("%s %s", bar, thMeta.Render(fmt.Sprintf("%3.0f%%", r*100)))
 	}
 	return bar
+}
+
+// SessionProgressBar is the LIVE SESSION gradient treatment only.
+// Violet → purple → blue → cyan → green, animated by Frame phase shift.
+// Never use for static coverage bars.
+type SessionProgressBar struct {
+	Ratio   float64 // 0..1
+	Width   int
+	Frame   int
+	ShowPct bool
+}
+
+func (p SessionProgressBar) View() string {
+	w := p.Width
+	if w <= 0 {
+		w = 22
+	}
+	r := p.Ratio
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	filled := int(r*float64(w) + 0.5)
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > w {
+		filled = w
+	}
+	var sb strings.Builder
+	for i := 0; i < w; i++ {
+		if i < filled {
+			// Position along the bar plus animation phase.
+			t := 0.0
+			if w > 1 {
+				t = float64(i) / float64(w-1)
+			}
+			// Animate: shift hue phase slowly with frame.
+			phase := float64(p.Frame%24) / 24.0 * 0.15
+			t += phase
+			if t > 1 {
+				t -= 1
+			}
+			sb.WriteString(lipgloss.NewStyle().Foreground(gradientAt(t)).Render("█"))
+		} else {
+			sb.WriteString(lipgloss.NewStyle().Foreground(cBorder).Render("░"))
+		}
+	}
+	if p.ShowPct {
+		return fmt.Sprintf("%s %s", sb.String(), thPrimary.Render(fmt.Sprintf("%3.0f%%", r*100)))
+	}
+	return sb.String()
+}
+
+var gradStops = []string{"#A78BFA", "#8B5CF6", "#60A5FA", "#22D3EE", "#34D399"}
+
+func gradientAt(t float64) lipgloss.Color {
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	segs := len(gradStops) - 1
+	pos := t * float64(segs)
+	i := int(pos)
+	if i >= segs {
+		return lipgloss.Color(gradStops[segs])
+	}
+	f := pos - float64(i)
+	a := hexRGB(gradStops[i])
+	b := hexRGB(gradStops[i+1])
+	r := int(float64(a[0]) + f*(float64(b[0])-float64(a[0])) + 0.5)
+	g := int(float64(a[1]) + f*(float64(b[1])-float64(a[1])) + 0.5)
+	bl := int(float64(a[2]) + f*(float64(b[2])-float64(a[2])) + 0.5)
+	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", r, g, bl))
+}
+
+func hexRGB(h string) [3]int {
+	h = strings.TrimPrefix(h, "#")
+	if len(h) != 6 {
+		return [3]int{128, 128, 128}
+	}
+	var out [3]int
+	for i := 0; i < 3; i++ {
+		v, err := strconv.ParseInt(h[i*2:i*2+2], 16, 32)
+		if err != nil {
+			return [3]int{128, 128, 128}
+		}
+		out[i] = int(v)
+	}
+	return out
 }
 
 // Button is a real boxy interactive control with focus + disabled states.
@@ -124,14 +225,14 @@ func (b Button) View() string {
 	border := lipgloss.NormalBorder()
 	if b.Disabled {
 		inner := thBtnDisabled.Render("  " + b.Label + "  ")
-		return lipgloss.NewStyle().Border(border).BorderForeground(cDimLine).Padding(0, 1).Render(inner)
+		return lipgloss.NewStyle().Border(border).BorderForeground(cBorder).Padding(0, 1).Render(inner)
 	}
 	inner := thBtnIdle.Render("  " + b.Label + "  ")
 	if b.Focused {
 		inner = thBtnFocus.Render("▶ " + b.Label + "  ")
 		return lipgloss.NewStyle().Border(border).BorderForeground(cPrimary).Padding(0, 1).Render(inner)
 	}
-	return lipgloss.NewStyle().Border(border).BorderForeground(cDimLine).Padding(0, 1).Render(inner)
+	return lipgloss.NewStyle().Border(border).BorderForeground(cBorder).Padding(0, 1).Render(inner)
 }
 
 // CompactView is the single-line button for short viewports: same real
@@ -148,6 +249,8 @@ func (b Button) CompactView() string {
 
 // RadioGroup is a real mutually-exclusive selection control with stable
 // glyphs (◉/○) that never depend on arrow rendering.
+// Focus marker ▶ stays visible alongside the selection glyph:
+// ▶ ◉ YES /   ○ NO  and  ▶ ○ NO /   ◉ YES patterns.
 type RadioGroup struct {
 	Options  []string
 	Selected int // -1 = none
@@ -178,13 +281,12 @@ func (r RadioGroup) View() string {
 		if i == r.Selected {
 			glyph = "◉"
 		}
-		line := glyph + "  " + o
 		if r.Focused && i == r.Cursor {
-			line = thBtnIdle.Render("▸ ") + thPrimary.Render(line)
+			// Both focus arrow and selection glyph always visible.
+			sb.WriteString(thBtnIdle.Render("▶ ") + thPrimary.Render(glyph+"  "+o) + "\n")
 		} else {
-			line = "  " + thPrimary.Render(line)
+			sb.WriteString("  " + thPrimary.Render(glyph+"  "+o) + "\n")
 		}
-		sb.WriteString(line + "\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -203,7 +305,7 @@ func (c Checkbox) View() string {
 	}
 	line := glyph + "  " + c.Label
 	if c.Focused {
-		return thBtnIdle.Render("▸ ") + thPrimary.Render(line)
+		return thBtnIdle.Render("▶ ") + thPrimary.Render(line)
 	}
 	return "  " + thPrimary.Render(line)
 }
@@ -233,6 +335,12 @@ func (f FormField) View(focused bool, labelWidth int) string {
 		return thBtnIdle.Render(lbl+" ") + f.Input.View()
 	}
 	return thMeta.Render(lbl+" ") + f.Input.View()
+}
+
+// KeyBadge renders one compact [key] chip for the footer command bar.
+// Single line, boxy, violet key on dark.
+func KeyBadge(key string) string {
+	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary).Padding(0, 1).Render(key)
 }
 
 // KeyMsg helpers shared by screens.
@@ -370,7 +478,7 @@ func (c ExamCard) View() string {
 	for len(lines) < 8 {
 		lines = append(lines, "")
 	}
-	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cDimLine).Padding(0, 1).Width(w)
+	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w)
 	if c.Focused {
 		style = style.BorderForeground(cPrimary)
 		lines[0] = thPanelTitle.Render(TruncateToWidth(c.Name, inner) + "  ●")
@@ -390,4 +498,17 @@ func ValidationMessage(msg string) string {
 		return ""
 	}
 	return thError.Render(msg)
+}
+
+// AppShell composes header + main + footer with explicit shell bounds.
+// All screens render inside the main viewport; header/footer never shift.
+func AppShell(header, body, footer string, sh ShellLayout) string {
+	lines := strings.Split(body, "\n")
+	if len(lines) > sh.Main.H {
+		lines = lines[:sh.Main.H]
+	}
+	for len(lines) < sh.Main.H {
+		lines = append(lines, "")
+	}
+	return header + "\n" + strings.Join(lines, "\n") + "\n" + footer
 }

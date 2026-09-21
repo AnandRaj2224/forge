@@ -23,16 +23,17 @@ type RowItem struct {
 // RowList is the Forge navigable list: real component with cursor, viewport
 // scrolling, thin dividers, and polished selected states.
 type RowList struct {
-	Items   []RowItem
-	Cursor  int
-	Offset  int // first visible index
-	Width   int // content width for divider span
-	Height  int // max visible rows (viewport)
-	Focused bool
+	Items    []RowItem
+	Cursor   int
+	Offset   int // first visible index
+	Width    int // content width for divider span
+	Height   int // max visible rows (viewport)
+	Focused  bool
+	Numbered bool // global row rule: visible number/index where appropriate
 }
 
 // NewRowList returns an empty Forge list.
-func NewRowList() RowList { return RowList{Width: 28, Height: 12} }
+func NewRowList() RowList { return RowList{Width: 28, Height: 12, Numbered: true} }
 
 // SetItems replaces rows and clamps the cursor.
 func (r *RowList) SetItems(items []RowItem) {
@@ -161,7 +162,12 @@ func (r RowList) View() string {
 	}
 	var sb strings.Builder
 	for i := r.Offset; i < end; i++ {
+		num := ""
+		if r.Numbered {
+			num = fmt.Sprintf("%02d", i+1)
+		}
 		sb.WriteString(SelectableRow{
+			Num:      num,
 			Mark:     r.Items[i].Mark,
 			Title:    r.Items[i].Title,
 			Meta:     r.Items[i].Meta,
@@ -185,9 +191,10 @@ func (r RowList) View() string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// SelectableRow is one structured row: mark + title + meta, with a selected
-// background treatment. The divider is rendered by the owning list.
+// SelectableRow is one structured row: number + mark + title + meta, with a
+// selected background treatment. The divider is rendered by the owning list.
 type SelectableRow struct {
+	Num      string
 	Mark     string
 	Title    string
 	Meta     string
@@ -210,23 +217,29 @@ func (r SelectableRow) View() string {
 	if mark == "" {
 		mark = " "
 	}
+	prefix := mark + "  "
+	if r.Num != "" {
+		prefix = r.Num + "  " + mark + "  "
+	}
 	// Title/meta share the inner width: meta right-aligned when present.
 	title := r.Title
 	meta := r.Meta
 	var line string
+	preW := len([]rune(stripANSI(prefix)))
+	_ = preW
 	if meta == "" {
-		line = mark + "  " + TruncateToWidth(title, inner-3)
+		line = prefix + TruncateToWidth(title, inner-len([]rune(prefixPlain(r.Num, mark))))
 	} else {
 		metaW := lipgloss.Width(meta)
 		if metaW > inner/2 {
 			meta = TruncateToWidth(meta, inner/2)
 			metaW = lipgloss.Width(meta)
 		}
-		titleW := inner - 3 - metaW - 2
+		titleW := inner - len([]rune(prefixPlain(r.Num, mark))) - metaW - 2
 		if titleW < 4 {
 			titleW = 4
 		}
-		line = mark + "  " + PadToWidth(TruncateToWidth(title, titleW), titleW) + "  " + meta
+		line = prefix + PadToWidth(TruncateToWidth(title, titleW), titleW) + "  " + meta
 	}
 	line = FitLine(" "+line, w)
 	if r.Selected {
@@ -237,6 +250,18 @@ func (r SelectableRow) View() string {
 	}
 	return thRowNormal.Render(line)
 }
+
+func prefixPlain(num, mark string) string {
+	if mark == "" {
+		mark = " "
+	}
+	if num != "" {
+		return num + "  " + mark + "  "
+	}
+	return mark + "  "
+}
+
+func stripANSI(s string) string { return s }
 
 // RowDivider is the thin horizontal separator spanning the list width.
 func RowDivider(width int) string {
@@ -249,6 +274,10 @@ func RowDivider(width int) string {
 // Divider renders a thin separator for panel sections (alias used by cards).
 func Divider(width int) string { return RowDivider(width) }
 
+// Row is the global Forge row alias: every navigable list item uses the
+// same row language (number/index, padding, divider, selected state).
+type Row = SelectableRow
+
 // PanelTitle renders a consistent card title.
 func PanelTitle(s string) string { return thPanelTitle.Render(s) }
 
@@ -256,6 +285,81 @@ func PanelTitle(s string) string { return thPanelTitle.Render(s) }
 // padding, title + divider + body, optional focus accent.
 func BentoPanel(title, content string, width int, focused bool) string {
 	return Panel(title, content, width, focused)
+}
+
+// Header renders the shell header block (logo + nav) at width w.
+func Header(logo []string, navLine string, w int) string {
+	rows := make([]string, 0, len(logo))
+	gap := "    "
+	for i, ln := range logo {
+		line := ln + gap
+		if i == 2 {
+			line += navLine
+		}
+		rows = append(rows, FitLine(line, w))
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(cBorder).
+		Width(w).
+		Render(strings.Join(rows, "\n"))
+}
+
+// Footer renders the single-row shell command bar at width w.
+func Footer(line string, w int) string {
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		BorderForeground(cBorder).
+		Width(w).
+		MaxHeight(2).
+		Render(FitLine(TruncateToWidth(line, w-2), w-2))
+}
+
+// TodayTaskRow is one Today task table row as a reusable component:
+// # | DOMAIN | TASK | DUR | STATUS with the global row treatment.
+type TodayTaskRow struct {
+	Num      int
+	Domain   string
+	Title    string
+	Duration string
+	Status   TaskStatus
+	Selected bool
+	Focused  bool
+	Width    int
+}
+
+// View renders the row forced to Width cells.
+func (r TodayTaskRow) View() string {
+	w := r.Width
+	if w < 30 {
+		w = 30
+	}
+	const numW, domW, durW, stW = 3, 6, 6, 7
+	gaps := 4 * 2
+	taskW := w - 2 - (numW + domW + durW + stW) - gaps
+	if taskW < 8 {
+		taskW = 8
+	}
+	num := PadToWidth(fmt.Sprint(r.Num), numW)
+	dom := PadToWidth(TruncateToWidth(r.Domain, domW), domW)
+	title := PadToWidth(TruncateToWidth(r.Title, taskW), taskW)
+	dur := PadToWidth(TruncateToWidth(r.Duration, durW), durW)
+	stTxt := "TODO"
+	switch r.Status {
+	case TaskActive:
+		stTxt = "ACTIVE"
+	case TaskCompleted:
+		stTxt = "DONE"
+	}
+	stCell := PadToWidth(stTxt, stW)
+	line := FitLine(fmt.Sprintf(" %s  %s  %s  %s  %s", num, dom, title, dur, stCell), w)
+	if r.Selected {
+		if r.Focused {
+			return thRowSelected.Render(line)
+		}
+		return thRowCursor.Render(line)
+	}
+	return thRowNormal.Render(line)
 }
 
 // ---- Today task table: real aligned columns + thin dividers ----

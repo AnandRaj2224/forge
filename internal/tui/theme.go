@@ -6,57 +6,91 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Forge color system. Restrained: one primary accent, semantic colors,
-// subtle domain accents. No rainbow decoration.
+// Forge color system — Charm-inspired, dark, restrained.
+// Mostly dark/neutral + muted secondary + small vivid accent.
+//
+// BASE: very dark near-black with cool/blue character.
+// PRIMARY: violet/purple/magenta family (navigation, selection, focus).
+// ACTIVE: cyan/blue family (running, live).
+// SUCCESS/WARNING/ERROR: restrained semantic colors, used sparingly.
+// DOMAIN: subtle differentiation, low saturation.
 const (
-	cPrimary = lipgloss.Color("12") // Forge accent: selected / important
-	cSuccess = lipgloss.Color("10") // completed / pass
-	cActive  = lipgloss.Color("14") // in-progress / running
-	cWarning = lipgloss.Color("11") // incomplete / attention
-	cError   = lipgloss.Color("9")  // validation / errors
-	cMuted   = lipgloss.Color("8")  // secondary metadata / help
-	cDimLine = lipgloss.Color("8")  // separators / borders (unfocused)
+	// Base surfaces.
+	cBG      = lipgloss.Color("#0B0B13") // near-black, cool/blue
+	cSurface = lipgloss.Color("#14141F") // panel/surface tone
+	cBorder  = lipgloss.Color("#2B2B3D") // muted cool border
+	cDimLine = lipgloss.Color("#2B2B3D") // separators / unfocused borders (alias)
 
-	cGov = lipgloss.Color("12") // subtle domain accents
-	cDSA = lipgloss.Color("13")
-	cSWE = lipgloss.Color("14")
+	// Text.
+	cFgPrimary   = lipgloss.Color("#E8E8F0") // soft bright foreground
+	cFgSecondary = lipgloss.Color("#9A9AB0") // muted cool-gray
+	cFgTertiary  = lipgloss.Color("#62627A") // subdued help gray
+	cMuted       = lipgloss.Color("#9A9AB0") // compat alias (secondary)
+
+	// Primary Forge accent: violet.
+	cPrimary       = lipgloss.Color("#A78BFA") // vivid violet
+	cPrimaryDim    = lipgloss.Color("#7C3AED") // deep violet for fills
+	cPrimaryBright = lipgloss.Color("#C4B5FD") // headings / key emphasis
+
+	// Active: cyan/blue.
+	cActive     = lipgloss.Color("#22D3EE") // running / in-progress
+	cActiveBlue = lipgloss.Color("#60A5FA") // blue side of live range
+
+	// Semantic (restrained).
+	cSuccess = lipgloss.Color("#34D399") // completed
+	cWarning = lipgloss.Color("#FBBF24") // attention, sparingly
+	cError   = lipgloss.Color("#F87171") // validation only
+
+	// Domain accents (subtle, not rainbow).
+	cGov = lipgloss.Color("#93A8F5") // cool periwinkle
+	cDSA = lipgloss.Color("#C4B5FD") // soft lavender
+	cSWE = lipgloss.Color("#67E8F9") // soft cyan
+
+	// Live session gradient stops: violet → purple → blue → cyan → green.
+	cGrad0 = lipgloss.Color("#A78BFA")
+	cGrad1 = lipgloss.Color("#8B5CF6")
+	cGrad2 = lipgloss.Color("#60A5FA")
+	cGrad3 = lipgloss.Color("#22D3EE")
+	cGrad4 = lipgloss.Color("#34D399")
 )
 
 var (
 	// Application identity.
 	thAppTitle = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
-	// Navigation: active is a subtle filled pill, inactive is quiet.
-	thNavActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(cPrimary).Padding(0, 1)
-	thNavInactive = lipgloss.NewStyle().Foreground(cMuted).Padding(0, 1)
-	thClock       = lipgloss.NewStyle().Foreground(cMuted)
+	// Forge wordmark: largest element in header.
+	thLogo = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
+	// Navigation: active is obvious accent pill, inactive quiet but readable.
+	thNavActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary).Padding(0, 2)
+	thNavInactive = lipgloss.NewStyle().Foreground(cFgSecondary).Padding(0, 2)
+	thClock       = lipgloss.NewStyle().Foreground(cFgTertiary)
 	// Screen + panel titles.
-	thScreenTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15"))
-	thPanelTitle  = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
-	thSectionHead = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("7"))
+	thScreenTitle = lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary)
+	thPanelTitle  = lipgloss.NewStyle().Bold(true).Foreground(cPrimaryBright)
+	thSectionHead = lipgloss.NewStyle().Bold(true).Foreground(cFgSecondary)
 	// Content levels.
-	thPrimary = lipgloss.NewStyle()
-	thMeta    = lipgloss.NewStyle().Foreground(cMuted)
-	thHelp    = lipgloss.NewStyle().Foreground(cMuted).Italic(true)
+	thPrimary = lipgloss.NewStyle().Foreground(cFgPrimary)
+	thMeta    = lipgloss.NewStyle().Foreground(cFgSecondary)
+	thHelp    = lipgloss.NewStyle().Foreground(cFgTertiary).Italic(true)
 	thError   = lipgloss.NewStyle().Foreground(cError).Bold(true)
 	// Status.
 	thSuccess = lipgloss.NewStyle().Foreground(cSuccess).Bold(true)
 	thRunning = lipgloss.NewStyle().Foreground(cActive).Bold(true)
-	thTodo    = lipgloss.NewStyle().Foreground(cMuted)
+	thTodo    = lipgloss.NewStyle().Foreground(cFgTertiary)
 	thWarn    = lipgloss.NewStyle().Foreground(cWarning)
 	// Rows: structured list rows with thin dividers. Selected rows own a
 	// full-width background; cursor-without-focus stays visible but quiet.
-	thRowNormal   = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	thRowSelected = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24"))
-	thRowCursor   = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(lipgloss.Color("235"))
+	thRowNormal   = lipgloss.NewStyle().Foreground(cFgSecondary)
+	thRowSelected = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(cPrimaryDim)
+	thRowCursor   = lipgloss.NewStyle().Foreground(cFgPrimary).Background(lipgloss.Color("#1E1B33"))
 	// Table header: strong, compact, aligned to columns.
-	thTableHead = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
+	thTableHead = lipgloss.NewStyle().Bold(true).Foreground(cPrimaryBright)
 	// Footer: keys pop, descriptions recede, groups spaced.
 	thFootKey  = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
-	thFootDesc = lipgloss.NewStyle().Foreground(cMuted)
+	thFootDesc = lipgloss.NewStyle().Foreground(cFgSecondary)
 	// Controls.
-	thBtnFocus    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(cPrimary)
+	thBtnFocus    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary)
 	thBtnIdle     = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
-	thBtnDisabled = lipgloss.NewStyle().Foreground(cMuted)
+	thBtnDisabled = lipgloss.NewStyle().Foreground(cFgTertiary)
 )
 
 // DomainBadge renders a small domain tag in its accent color.
@@ -116,7 +150,7 @@ func Separator(width int) string {
 	if width < 4 {
 		width = 4
 	}
-	return lipgloss.NewStyle().Foreground(cDimLine).Render(stringRepeat("─", width))
+	return lipgloss.NewStyle().Foreground(cBorder).Render(stringRepeat("─", width))
 }
 
 func stringRepeat(s string, n int) string {
