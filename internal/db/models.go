@@ -287,6 +287,46 @@ type WeeklyReview struct {
 	ReflectionChange string
 }
 
+// Mock is one actual completed mock/exam attempt (runtime evidence).
+// It belongs to exactly ONE gov exam. Weak topics are stored per section
+// as gov_topic_id references (never free text) so the future GOV practice
+// engine can weight recent weaknesses as a signal inside normal slots.
+// Mock date preserves recency; no decay formula is implemented yet.
+type Mock struct {
+	ID              ID
+	ExamID          ID
+	Name            string
+	MockDate        string // YYYY-MM-DD
+	Platform        string
+	Score           *int
+	TotalScore      *int
+	RankValue       *int
+	Percentile      *float64
+	Accuracy        *float64
+	AvgSpeedSeconds *float64
+	Attempted       *int
+	TotalQuestions  *int
+	Correct         *int
+	Incorrect       *int
+	Unattempted     *int
+	CreatedAt       time.Time
+}
+
+// MockSection is one exam section inside a mock (e.g. QUANT, REASONING).
+type MockSection struct {
+	ID        ID
+	MockID    ID
+	Name      string
+	SortOrder int
+}
+
+// MockWeakTopic is one ordered weakness: 1 = strongest, up to 3 per section.
+type MockWeakTopic struct {
+	SectionID ID
+	TopicID   ID
+	RankOrder int
+}
+
 // Typed target payloads for today_tasks.target_json / sessions.target_snapshot_json.
 
 type GovLectureTarget struct {

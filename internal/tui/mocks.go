@@ -1,0 +1,918 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	db "forge/internal/db"
+	"forge/internal/db/catalog"
+	"forge/internal/db/runtime"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// MocksScreen: LEFT mock list, RIGHT dense mock detail with per-section
+// weak topics (gov_topic_id references, max 3 per section, ordered).
+type MocksScreen struct {
+	app      *App
+	mocks    []db.Mock
+	exams    []db.GovExam
+	examName map[string]string
+	list     Navigator
+	focusR   bool
+	sections []db.MockSection
+	weak     map[string][]db.MockWeakTopic
+	topNames map[string]string
+	secCur   int
+	mode     string // browse, create, weak, section
+	err      string
+
+	// create form
+	cExamCur int
+	cInputs  []textinput.Model
+	cLabels  []string
+	cFocus   int
+	cErr     string
+
+	// section add
+	secInput textinput.Model
+
+	// weak editor
+	wMockID   db.ID
+	wSection  db.MockSection
+	wExamID   db.ID
+	wChoices  []db.GovTopic
+	wSubjName map[string]string
+	wFilter   textinput.Model
+	wList     Navigator
+	wStaged   []db.ID
+	wFocus    int // 0 filter, 1 list, 2 save
+	wErr      string
+}
+
+func NewMocksScreen(a *App) *MocksScreen {
+	return &MocksScreen{app: a, list: NewNavigator(), weak: map[string][]db.MockWeakTopic{}, topNames: map[string]string{}, mode: "browse"}
+}
+
+func (s *MocksScreen) ownsKeys() bool {
+	return s.mode == "create" || s.mode == "weak" || s.mode == "section"
+}
+
+func (s *MocksScreen) Reload() {
+	ctx := context.Background()
+	s.err = ""
+	exams, err := catalog.GetGovExams(ctx, s.app.DB)
+	if err == nil {
+		s.exams = exams
+		s.examName = map[string]string{}
+		for _, e := range exams {
+			s.examName[string(e.ID)] = e.Name
+		}
+	}
+	mocks, err := runtime.ListMocks(ctx, s.app.DB)
+	if err != nil {
+		s.err = err.Error()
+		return
+	}
+	s.mocks = mocks
+	items := make([]RowItem, 0, len(mocks))
+	for _, m := range mocks {
+		ex := s.examName[string(m.ExamID)]
+		items = append(items, RowItem{ID: string(m.ID), Title: m.Name, Meta: m.MockDate + "  ·  " + ex, Mark: "•"})
+	}
+	// Numbered rows: use global row system with numbers.
+	s.list.SetItems(items)
+	s.syncDetail()
+}
+
+func (s *MocksScreen) selMock() *db.Mock {
+	id := s.list.SelectedID()
+	if id == "" {
+		return nil
+	}
+	for i, m := range s.mocks {
+		if string(m.ID) == id {
+			return &s.mocks[i]
+		}
+	}
+	return nil
+}
+
+func (s *MocksScreen) syncDetail() {
+	ctx := context.Background()
+	m := s.selMock()
+	s.sections = nil
+	s.weak = map[string][]db.MockWeakTopic{}
+	s.secCur = 0
+	if m == nil {
+		return
+	}
+	secs, _ := runtime.ListMockSections(ctx, s.app.DB, m.ID)
+	s.sections = secs
+	for _, sec := range secs {
+		ws, _ := runtime.ListWeakTopics(ctx, s.app.DB, sec.ID)
+		s.weak[string(sec.ID)] = ws
+		for _, w := range ws {
+			if _, ok := s.topNames[string(w.TopicID)]; !ok {
+				if tp, err := catalog.GetGovTopic(ctx, s.app.DB, w.TopicID); err == nil {
+					s.topNames[string(w.TopicID)] = tp.Name
+				} else {
+					s.topNames[string(w.TopicID)] = string(w.TopicID)
+				}
+			}
+		}
+	}
+}
+
+func (s *MocksScreen) onBack() bool {
+	switch s.mode {
+	case "create", "weak", "section":
+		s.mode = "browse"
+		s.cErr, s.wErr = "", ""
+		s.Reload()
+		return true
+	}
+	if s.focusR {
+		s.focusR = false
+		return true
+	}
+	return false
+}
+
+func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
+	// Form modes own keys.
+	if s.mode == "create" {
+		return s.updateCreate(msg)
+	}
+	if s.mode == "section" {
+		return s.updateSection(msg)
+	}
+	if s.mode == "weak" {
+		return s.updateWeak(msg)
+	}
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "tab":
+			if s.selMock() != nil {
+				s.focusR = !s.focusR
+			}
+			return nil
+		case "j", "down":
+			if s.focusR {
+				if s.secCur < len(s.sections)-1 {
+					s.secCur++
+				}
+			} else {
+				prev := s.list.SelectedID()
+				s.list.CursorDown()
+				if s.list.SelectedID() != prev {
+					s.syncDetail()
+				}
+			}
+			return nil
+		case "k", "up":
+			if s.focusR {
+				if s.secCur > 0 {
+					s.secCur--
+				}
+			} else {
+				prev := s.list.SelectedID()
+				s.list.CursorUp()
+				if s.list.SelectedID() != prev {
+					s.syncDetail()
+				}
+			}
+			return nil
+		case "h", "left":
+			s.focusR = false
+			return nil
+		case "l", "right":
+			if s.selMock() != nil {
+				s.focusR = true
+			}
+			return nil
+		case "enter":
+			if s.focusR {
+				s.openWeakEditor()
+				return nil
+			}
+			s.focusR = true
+			return nil
+		case "n":
+			s.startCreate()
+			return nil
+		case "a":
+			s.startSection()
+			return nil
+		case "w":
+			s.openWeakEditor()
+			return nil
+		case "D":
+			s.deleteSelected()
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *MocksScreen) deleteSelected() {
+	m := s.selMock()
+	if m == nil {
+		return
+	}
+	ctx := context.Background()
+	_ = runtime.DeleteMock(ctx, s.app.DB, m.ID)
+	s.focusR = false
+	s.Reload()
+}
+
+// ---- create ----
+
+func (s *MocksScreen) startCreate() {
+	s.mode = "create"
+	s.cExamCur = 0
+	s.cLabels = []string{"Name", "Date YYYY-MM-DD", "Platform", "Score", "Total", "Attempted", "TotalQ", "Correct", "Incorrect", "Unattempted", "Rank", "Percentile", "Accuracy", "AvgSpeed"}
+	s.cInputs = make([]textinput.Model, len(s.cLabels))
+	for i, lb := range s.cLabels {
+		ti := textinput.New()
+		ti.Prompt = "│ "
+		ti.CharLimit = 32
+		ti.Placeholder = lb
+		if lb == "Date YYYY-MM-DD" {
+			ti.Placeholder = time.Now().UTC().Format("2006-01-02")
+		}
+		s.cInputs[i] = ti
+	}
+	s.cFocus = 0 // 0 = exam selector, 1..N inputs, N+1 = SAVE
+	s.cErr = ""
+	s.updateCreateFocus()
+}
+
+func (s *MocksScreen) nCreateFocus() int { return 1 + len(s.cInputs) + 1 } // exam + inputs + save
+
+func (s *MocksScreen) updateCreateFocus() {
+	for i := range s.cInputs {
+		s.cInputs[i].Blur()
+	}
+	if s.cFocus >= 1 && s.cFocus <= len(s.cInputs) {
+		s.cInputs[s.cFocus-1].Focus()
+	}
+}
+
+func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
+	k, isKey := msg.(tea.KeyMsg)
+	if !isKey {
+		// Forward to focused input.
+		if s.cFocus >= 1 && s.cFocus <= len(s.cInputs) {
+			var cmd tea.Cmd
+			s.cInputs[s.cFocus-1], cmd = s.cInputs[s.cFocus-1].Update(msg)
+			return cmd
+		}
+		return nil
+	}
+	switch k.String() {
+	case "tab", "down":
+		s.cFocus = (s.cFocus + 1) % s.nCreateFocus()
+		s.updateCreateFocus()
+		return nil
+	case "shift+tab", "up":
+		s.cFocus = (s.cFocus - 1 + s.nCreateFocus()) % s.nCreateFocus()
+		s.updateCreateFocus()
+		return nil
+	case "left", "h":
+		if s.cFocus == 0 && len(s.exams) > 0 {
+			s.cExamCur = (s.cExamCur - 1 + len(s.exams)) % len(s.exams)
+			return nil
+		}
+	case "right", "l":
+		if s.cFocus == 0 && len(s.exams) > 0 {
+			s.cExamCur = (s.cExamCur + 1) % len(s.exams)
+			return nil
+		}
+	case "enter":
+		if s.cFocus == s.nCreateFocus()-1 {
+			if s.saveCreate() {
+				s.mode = "browse"
+				s.Reload()
+			}
+			return nil
+		}
+		if s.cFocus == 0 {
+			s.cFocus = 1
+			s.updateCreateFocus()
+			return nil
+		}
+		// Enter in input moves next.
+		s.cFocus = (s.cFocus + 1) % s.nCreateFocus()
+		s.updateCreateFocus()
+		return nil
+	}
+	if s.cFocus >= 1 && s.cFocus <= len(s.cInputs) {
+		var cmd tea.Cmd
+		s.cInputs[s.cFocus-1], cmd = s.cInputs[s.cFocus-1].Update(msg)
+		return cmd
+	}
+	return nil
+}
+
+func parseOptInt(v string) (*int, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, nil
+	}
+	var n int
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
+		return nil, fmt.Errorf("must be int >= 0")
+	}
+	return &n, nil
+}
+
+func parseOptFloat(v string) (*float64, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, nil
+	}
+	var f float64
+	if _, err := fmt.Sscanf(v, "%f", &f); err != nil {
+		return nil, fmt.Errorf("must be number")
+	}
+	return &f, nil
+}
+
+func (s *MocksScreen) saveCreate() bool {
+	ctx := context.Background()
+	if len(s.exams) == 0 {
+		s.cErr = "no exams"
+		return false
+	}
+	name := strings.TrimSpace(s.cInputs[0].Value())
+	date := strings.TrimSpace(s.cInputs[1].Value())
+	platform := strings.TrimSpace(s.cInputs[2].Value())
+	if name == "" {
+		s.cErr = "name required"
+		return false
+	}
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		s.cErr = "date must be YYYY-MM-DD"
+		return false
+	}
+	get := func(i int) string {
+		if i < len(s.cInputs) {
+			return s.cInputs[i].Value()
+		}
+		return ""
+	}
+	score, err := parseOptInt(get(3))
+	if err != nil {
+		s.cErr = "score " + err.Error()
+		return false
+	}
+	total, err := parseOptInt(get(4))
+	if err != nil {
+		s.cErr = "total " + err.Error()
+		return false
+	}
+	attempted, err := parseOptInt(get(5))
+	if err != nil {
+		s.cErr = "attempted " + err.Error()
+		return false
+	}
+	totalQ, err := parseOptInt(get(6))
+	if err != nil {
+		s.cErr = "totalQ " + err.Error()
+		return false
+	}
+	correct, err := parseOptInt(get(7))
+	if err != nil {
+		s.cErr = "correct " + err.Error()
+		return false
+	}
+	incorrect, err := parseOptInt(get(8))
+	if err != nil {
+		s.cErr = "incorrect " + err.Error()
+		return false
+	}
+	unatt, err := parseOptInt(get(9))
+	if err != nil {
+		s.cErr = "unattempted " + err.Error()
+		return false
+	}
+	rankV, err := parseOptInt(get(10))
+	if err != nil {
+		s.cErr = "rank " + err.Error()
+		return false
+	}
+	perc, err := parseOptFloat(get(11))
+	if err != nil {
+		s.cErr = "percentile " + err.Error()
+		return false
+	}
+	acc, err := parseOptFloat(get(12))
+	if err != nil {
+		s.cErr = "accuracy " + err.Error()
+		return false
+	}
+	avg, err := parseOptFloat(get(13))
+	if err != nil {
+		s.cErr = "avgSpeed " + err.Error()
+		return false
+	}
+	exam := s.exams[s.cExamCur%len(s.exams)]
+	id := db.ID(fmt.Sprintf("mock-%d", time.Now().UTC().UnixNano()))
+	m := db.Mock{ID: id, ExamID: exam.ID, Name: name, MockDate: date, Platform: platform,
+		Score: score, TotalScore: total, Attempted: attempted, TotalQuestions: totalQ,
+		Correct: correct, Incorrect: incorrect, Unattempted: unatt, RankValue: rankV,
+		Percentile: perc, Accuracy: acc, AvgSpeedSeconds: avg, CreatedAt: time.Now().UTC()}
+	if err := runtime.CreateMock(ctx, s.app.DB, m); err != nil {
+		s.cErr = err.Error()
+		return false
+	}
+	return true
+}
+
+// ---- section add ----
+
+func (s *MocksScreen) startSection() {
+	if s.selMock() == nil {
+		s.err = "select a mock first"
+		return
+	}
+	s.mode = "section"
+	ti := textinput.New()
+	ti.Prompt = "│ "
+	ti.Placeholder = "Section name (e.g. QUANT)"
+	ti.CharLimit = 32
+	ti.Focus()
+	s.secInput = ti
+}
+
+func (s *MocksScreen) updateSection(msg tea.Msg) tea.Cmd {
+	k, isKey := msg.(tea.KeyMsg)
+	if isKey && k.String() == "enter" {
+		name := strings.TrimSpace(s.secInput.Value())
+		if name == "" {
+			return nil
+		}
+		ctx := context.Background()
+		m := s.selMock()
+		if m == nil {
+			s.mode = "browse"
+			return nil
+		}
+		id := db.ID(fmt.Sprintf("msec-%d", time.Now().UTC().UnixNano()))
+		if err := runtime.CreateMockSection(ctx, s.app.DB, db.MockSection{ID: id, MockID: m.ID, Name: name}); err != nil {
+			s.err = err.Error()
+		}
+		s.mode = "browse"
+		s.Reload()
+		return nil
+	}
+	var cmd tea.Cmd
+	s.secInput, cmd = s.secInput.Update(msg)
+	return cmd
+}
+
+// ---- weak editor ----
+
+func (s *MocksScreen) openWeakEditor() {
+	m := s.selMock()
+	if m == nil || len(s.sections) == 0 {
+		return
+	}
+	if s.secCur < 0 || s.secCur >= len(s.sections) {
+		s.secCur = 0
+	}
+	sec := s.sections[s.secCur]
+	ctx := context.Background()
+	choices, err := runtime.ExamTopicChoices(ctx, s.app.DB, m.ExamID)
+	if err != nil {
+		s.err = err.Error()
+		return
+	}
+	s.wMockID = m.ID
+	s.wSection = sec
+	s.wExamID = m.ExamID
+	s.wChoices = choices
+	s.wSubjName = map[string]string{}
+	subjs, _ := catalog.GetGovSubjects(ctx, s.app.DB)
+	for _, g := range subjs {
+		s.wSubjName[string(g.ID)] = g.Name
+	}
+	exist, _ := runtime.ListWeakTopics(ctx, s.app.DB, sec.ID)
+	s.wStaged = make([]db.ID, 0, len(exist))
+	for _, w := range exist {
+		s.wStaged = append(s.wStaged, w.TopicID)
+	}
+	ti := textinput.New()
+	ti.Prompt = "│ "
+	ti.Placeholder = "filter topics…"
+	ti.CharLimit = 32
+	ti.Focus()
+	s.wFilter = ti
+	s.wList = NewNavigator()
+	s.wFocus = 0
+	s.wErr = ""
+	s.mode = "weak"
+	s.refreshWeakList()
+}
+
+func (s *MocksScreen) refreshWeakList() {
+	q := strings.ToLower(strings.TrimSpace(s.wFilter.Value()))
+	staged := map[string]int{}
+	for i, id := range s.wStaged {
+		staged[string(id)] = i + 1
+	}
+	items := []RowItem{}
+	for _, t := range s.wChoices {
+		subj := s.wSubjName[string(t.SubjectID)]
+		if q != "" && !strings.Contains(strings.ToLower(t.Name+" "+subj+" "+string(t.ID)), q) {
+			continue
+		}
+		mark := "○"
+		suffix := ""
+		if ord, ok := staged[string(t.ID)]; ok {
+			mark = "◉"
+			suffix = fmt.Sprintf("  [%d]", ord)
+		}
+		title := t.Name + suffix
+		meta := subj
+		items = append(items, RowItem{ID: string(t.ID), Title: title, Meta: meta, Mark: mark})
+	}
+	prev := s.wList.SelectedID()
+	s.wList.SetItems(items)
+	// Keep cursor on same id when filtering.
+	if prev != "" {
+		for i, it := range items {
+			if it.ID == prev {
+				s.wList.Select(i)
+			}
+		}
+	}
+	s.wList.SetFocused(s.wFocus == 1)
+}
+
+func (s *MocksScreen) toggleWeak(id string) {
+	if id == "" {
+		return
+	}
+	for i, v := range s.wStaged {
+		if string(v) == id {
+			// Remove.
+			s.wStaged = append(s.wStaged[:i], s.wStaged[i+1:]...)
+			s.wErr = ""
+			s.refreshWeakList()
+			return
+		}
+	}
+	if len(s.wStaged) >= 3 {
+		s.wErr = "maximum 3 weak topics per section"
+		return
+	}
+	s.wStaged = append(s.wStaged, db.ID(id))
+	s.wErr = ""
+	s.refreshWeakList()
+}
+
+func (s *MocksScreen) updateWeak(msg tea.Msg) tea.Cmd {
+	k, isKey := msg.(tea.KeyMsg)
+	if !isKey {
+		if s.wFocus == 0 {
+			var cmd tea.Cmd
+			s.wFilter, cmd = s.wFilter.Update(msg)
+			s.refreshWeakList()
+			return cmd
+		}
+		return nil
+	}
+	switch k.String() {
+	case "tab":
+		s.wFocus = (s.wFocus + 1) % 3
+		if s.wFocus == 0 {
+			s.wFilter.Focus()
+		} else {
+			s.wFilter.Blur()
+		}
+		s.refreshWeakList()
+		return nil
+	case "shift+tab":
+		s.wFocus = (s.wFocus + 2) % 3
+		if s.wFocus == 0 {
+			s.wFilter.Focus()
+		} else {
+			s.wFilter.Blur()
+		}
+		s.refreshWeakList()
+		return nil
+	case "j", "down":
+		if s.wFocus == 1 {
+			s.wList.CursorDown()
+			return nil
+		}
+		if s.wFocus == 0 {
+			s.wFocus = 1
+			s.wFilter.Blur()
+			s.refreshWeakList()
+			return nil
+		}
+		return nil
+	case "k", "up":
+		if s.wFocus == 1 {
+			s.wList.CursorUp()
+			return nil
+		}
+		return nil
+	case "enter", " ":
+		if s.wFocus == 1 {
+			s.toggleWeak(s.wList.SelectedID())
+			return nil
+		}
+		if s.wFocus == 2 {
+			ctx := context.Background()
+			if err := runtime.SetWeakTopics(ctx, s.app.DB, s.wMockID, s.wSection.ID, s.wStaged); err != nil {
+				s.wErr = err.Error()
+				return nil
+			}
+			s.mode = "browse"
+			s.Reload()
+			return nil
+		}
+		if s.wFocus == 0 {
+			s.wFocus = 1
+			s.wFilter.Blur()
+			s.refreshWeakList()
+			return nil
+		}
+		return nil
+	case "s":
+		if s.wFocus != 0 {
+			ctx := context.Background()
+			if err := runtime.SetWeakTopics(ctx, s.app.DB, s.wMockID, s.wSection.ID, s.wStaged); err != nil {
+				s.wErr = err.Error()
+				return nil
+			}
+			s.mode = "browse"
+			s.Reload()
+			return nil
+		}
+	}
+	if s.wFocus == 0 {
+		var cmd tea.Cmd
+		s.wFilter, cmd = s.wFilter.Update(msg)
+		s.refreshWeakList()
+		return cmd
+	}
+	return nil
+}
+
+// ---- view ----
+
+func (s *MocksScreen) View() string {
+	switch s.mode {
+	case "create":
+		return s.createView()
+	case "section":
+		return s.sectionView()
+	case "weak":
+		return s.weakView()
+	default:
+		return s.browseView()
+	}
+}
+
+func (s *MocksScreen) browseView() string {
+	w, h := s.app.contentViewport()
+	lw, rw := TwoPaneLayout(w, 32, 24, 40)
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
+	}
+	innerH := bodyH - 4
+	if innerH < 4 {
+		innerH = 4
+	}
+	s.list.SetWidth(lw - 4)
+	s.list.FitHeight(innerH - 1)
+	s.list.SetFocused(!s.focusR)
+	left := PanelFixed("MOCKS", SectionHeader("MOCK LIST")+"\n"+s.list.View(), lw, bodyH, !s.focusR)
+	right := PanelFixed("MOCK DETAIL", s.mockBody(rw-6), rw, bodyH, s.focusR)
+	out := lipglossJoin(left, right)
+	if s.err != "" {
+		out += "\n" + thError.Render(s.err)
+	}
+	return out
+}
+
+func intStr(v *int) string {
+	if v == nil {
+		return "—"
+	}
+	return fmt.Sprint(*v)
+}
+
+func floatStr(v *float64, suffix string) string {
+	if v == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%s", *v, suffix)
+}
+
+func (s *MocksScreen) mockBody(inner int) string {
+	m := s.selMock()
+	if m == nil {
+		return EmptyState("No mocks yet.")
+	}
+	if inner < 24 {
+		inner = 24
+	}
+	exam := s.examName[string(m.ExamID)]
+	if exam == "" {
+		exam = string(m.ExamID)
+	}
+	var sb strings.Builder
+	sb.WriteString(thScreenTitle.Render(TruncateToWidth(m.Name, inner)) + "\n")
+	sb.WriteString(thMeta.Render(TruncateToWidth(m.MockDate+"  ·  "+exam+"  ·  "+orDash(m.Platform), inner)) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	// Dense metric bento: responsive grid, never overflows.
+	scoreV := "—"
+	if m.Score != nil && m.TotalScore != nil {
+		scoreV = fmt.Sprintf("%d / %d", *m.Score, *m.TotalScore)
+	} else if m.Score != nil {
+		scoreV = fmt.Sprint(*m.Score)
+	}
+	attV := "—"
+	if m.Attempted != nil && m.TotalQuestions != nil {
+		attV = fmt.Sprintf("%d / %d", *m.Attempted, *m.TotalQuestions)
+	} else if m.Attempted != nil {
+		attV = fmt.Sprint(*m.Attempted)
+	}
+	cards := []MetricCard{
+		{Label: "SCORE", Value: scoreV},
+		{Label: "RANK", Value: intStr(m.RankValue)},
+		{Label: "PERCENTILE", Value: floatStr(m.Percentile, "")},
+		{Label: "ACCURACY", Value: floatStr(m.Accuracy, "%")},
+		{Label: "AVG SPEED", Value: floatStr(m.AvgSpeedSeconds, "s")},
+		{Label: "ATTEMPTED", Value: attV},
+		{Label: "CORRECT", Value: intStr(m.Correct)},
+		{Label: "INCORRECT", Value: intStr(m.Incorrect)},
+		{Label: "UNATTEMPTED", Value: intStr(m.Unattempted)},
+	}
+	sb.WriteString(MetricGrid(cards, inner) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("WEAK TOPICS") + "\n")
+	if len(s.sections) == 0 {
+		sb.WriteString(thHelp.Render("No sections yet.") + "\n")
+	}
+	for i, sec := range s.sections {
+		head := SectionHeader(strings.ToUpper(TruncateToWidth(sec.Name, inner-4)))
+		if s.focusR && i == s.secCur {
+			head = thPanelTitle.Render("▶ " + strings.ToUpper(sec.Name))
+		}
+		sb.WriteString(head + "\n")
+		ws := s.weak[string(sec.ID)]
+		if len(ws) == 0 {
+			sb.WriteString("  " + thHelp.Render("—") + "\n")
+		}
+		for j, w := range ws {
+			nm := s.topNames[string(w.TopicID)]
+			if nm == "" {
+				nm = string(w.TopicID)
+			}
+			sb.WriteString("  " + thPrimary.Render(fmt.Sprintf("%02d  %s", j+1, TruncateToWidth(nm, inner-8))) + "\n")
+			if j < len(ws)-1 {
+				sb.WriteString("  " + RowDivider(inner-2) + "\n")
+			}
+		}
+		if i < len(s.sections)-1 {
+			sb.WriteString(RowDivider(inner) + "\n")
+		}
+	}
+	return sb.String()
+}
+
+func (s *MocksScreen) createView() string {
+	w, h := s.app.contentViewport()
+	lw, rw := TwoPaneLayout(w, 32, 24, 40)
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
+	}
+	var sb strings.Builder
+	sb.WriteString(SectionHeader("EXAM") + "\n")
+	for i, e := range s.exams {
+		mark := "○"
+		if i == s.cExamCur {
+			mark = "◉"
+		}
+		line := mark + "  " + e.Name
+		if i == s.cExamCur && s.cFocus == 0 {
+			sb.WriteString(thBtnIdle.Render("▶ ") + thPrimary.Render(line) + "\n")
+		} else {
+			sb.WriteString("  " + thPrimary.Render(line) + "\n")
+		}
+	}
+	left := PanelFixed("EXAM", sb.String(), lw, bodyH, s.cFocus == 0)
+	var rb strings.Builder
+	rb.WriteString(SectionHeader("NEW MOCK") + "\n")
+	for i, lb := range s.cLabels {
+		focused := s.cFocus == i+1
+		// Reuse FormField view language via label + input.
+		ff := FormField{Label: lb, Input: s.cInputs[i]}
+		rb.WriteString(ff.View(focused, 14) + "\n")
+	}
+	rb.WriteString(RowDivider(rw-6) + "\n")
+	save := Button{Label: "SAVE", Focused: s.cFocus == s.nCreateFocus()-1}
+	rb.WriteString(save.View() + "\n")
+	if s.cErr != "" {
+		rb.WriteString(thError.Render(s.cErr) + "\n")
+	}
+	rb.WriteString(thHelp.Render("Tab move · ←/→ exam · Enter SAVE · Esc back"))
+	right := PanelFixed("DETAILS", rb.String(), rw, bodyH, s.cFocus > 0)
+	return lipglossJoin(left, right)
+}
+
+func (s *MocksScreen) sectionView() string {
+	w, h := s.app.contentViewport()
+	lw, rw := TwoPaneLayout(w, 40, 24, 40)
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
+	}
+	m := s.selMock()
+	name := ""
+	if m != nil {
+		name = m.Name
+	}
+	left := PanelFixed("MOCK", thPrimary.Render(TruncateToWidth(name, lw-6)), lw, bodyH, false)
+	ff := FormField{Label: "Section", Input: s.secInput}
+	right := PanelFixed("NEW SECTION", ff.View(true, 8)+"\n"+RowDivider(rw-6)+"\n"+thHelp.Render("Enter save · Esc back"), rw, bodyH, true)
+	return lipglossJoin(left, right)
+}
+
+func (s *MocksScreen) weakView() string {
+	w, h := s.app.contentViewport()
+	lw, rw := TwoPaneLayout(w, 45, 30, 32)
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
+	}
+	// Left: filter + exam topic choices (selector).
+	var lb strings.Builder
+	lb.WriteString(SectionHeader("FILTER") + "\n")
+	lb.WriteString(s.wFilter.View() + "\n")
+	lb.WriteString(RowDivider(lw-6) + "\n")
+	s.wList.SetWidth(lw - 6)
+	innerH := bodyH - 10
+	if innerH < 4 {
+		innerH = 4
+	}
+	s.wList.FitHeight(innerH)
+	lb.WriteString(SectionHeader(fmt.Sprintf("TOPICS — %d / 3 SELECTED", len(s.wStaged))) + "\n")
+	lb.WriteString(s.wList.View())
+	left := PanelFixed("TOPIC SELECTOR", lb.String(), lw, bodyH, s.wFocus <= 1)
+	// Right: staged ordered + save.
+	var rb strings.Builder
+	rb.WriteString(thPrimary.Render(TruncateToWidth(string(s.wSection.Name), rw-8)) + "\n")
+	rb.WriteString(RowDivider(rw-6) + "\n")
+	rb.WriteString(SectionHeader("SELECTED (ORDERED)") + "\n")
+	if len(s.wStaged) == 0 {
+		rb.WriteString(thHelp.Render("none yet — Enter toggles") + "\n")
+	}
+	ctx := context.Background()
+	for i, tid := range s.wStaged {
+		nm := ""
+		if tp, err := catalog.GetGovTopic(ctx, s.app.DB, tid); err == nil {
+			nm = tp.Name
+		} else {
+			nm = string(tid)
+		}
+		rb.WriteString(thPrimary.Render(fmt.Sprintf("%02d  %s", i+1, TruncateToWidth(nm, rw-12))) + "\n")
+		rb.WriteString(thMeta.Render("    "+string(tid)) + "\n")
+		if i < len(s.wStaged)-1 {
+			rb.WriteString(RowDivider(rw-6) + "\n")
+		}
+	}
+	rb.WriteString(RowDivider(rw-6) + "\n")
+	save := Button{Label: "SAVE", Focused: s.wFocus == 2, Disabled: false}
+	rb.WriteString(save.View() + "\n")
+	if s.wErr != "" {
+		rb.WriteString(thError.Render(s.wErr) + "\n")
+	}
+	rb.WriteString(thHelp.Render("Tab move · Enter toggle/save · s save"))
+	right := PanelFixed("WEAK TOPICS", rb.String(), rw, bodyH, s.wFocus == 2)
+	return lipglossJoin(left, right)
+}
+
+func (s *MocksScreen) Hints() string {
+	switch s.mode {
+	case "create":
+		return "Tab Move   Enter Save"
+	case "weak":
+		return "Tab Move   Enter Toggle"
+	case "section":
+		return "Enter Save"
+	default:
+		return "n New   a Section   w Weak"
+	}
+}

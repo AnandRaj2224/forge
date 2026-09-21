@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	db "forge/internal/db"
@@ -98,20 +100,50 @@ func (s *ReviewsScreen) reportView(inner int) string {
 		inner = 24
 	}
 	r := s.selected
+	ctx := context.Background()
+	ev := runtime.ComputeWeeklyEvidence(ctx, s.app.DB, r.WeekStart, r.WeekEnd)
+	// Prefer stored review totals when present, else derived evidence.
+	planned := r.PlannedSeconds
+	actual := r.ElapsedSeconds
+	if planned == 0 {
+		planned = ev.Planned
+	}
+	if actual == 0 {
+		actual = ev.Actual
+	}
+	completion := "—"
+	if planned > 0 {
+		completion = fmt.Sprintf("%.0f%%", float64(actual)/float64(planned)*100)
+	}
 	var sb strings.Builder
-	sb.WriteString(thScreenTitle.Render(r.WeekStart+"  —  "+r.WeekEnd) + "\n")
-	sb.WriteString(thMeta.Render(r.ID) + "\n")
+	sb.WriteString(thScreenTitle.Render(r.WeekStart+"  —  "+r.WeekEnd) + "  " + thMeta.Render(r.ID) + "\n")
+	// Compact metric cards: PLANNED ACTUAL COMPLETION SESSIONS TASKS OVER/UNDER.
+	cards := []MetricCard{
+		{Label: "PLANNED", Value: FormatDuration(planned)},
+		{Label: "ACTUAL", Value: FormatDuration(actual)},
+		{Label: "COMPLETION", Value: completion},
+		{Label: "SESSIONS", Value: fmt.Sprint(ev.Sessions)},
+		{Label: "TASKS", Value: fmt.Sprint(ev.Tasks)},
+		{Label: "OVER/UNDER", Value: formatSigned(r.OverrunSeconds)},
+	}
+	sb.WriteString(MetricGrid(cards, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
-	sb.WriteString(SectionHeader("TIME") + "\n")
-	sb.WriteString(MetaRow("Planned", FormatDuration(r.PlannedSeconds), 9) + "\n")
-	sb.WriteString(MetaRow("Actual", FormatDuration(r.ElapsedSeconds), 9) + "\n")
-	sb.WriteString(MetaRow("Overrun", formatSigned(r.OverrunSeconds), 9) + "\n")
+	sb.WriteString(SectionHeader("TIME BY DOMAIN") + "\n")
+	total := ev.GovSeconds + ev.DSASeconds + ev.SWESeconds
+	sb.WriteString(MetaRow("GOV", fmt.Sprintf("%s  %s", FormatDuration(ev.GovSeconds), pctOf(ev.GovSeconds, total)), 5) + "\n")
+	sb.WriteString(MetaRow("DSA", fmt.Sprintf("%s  %s", FormatDuration(ev.DSASeconds), pctOf(ev.DSASeconds, total)), 5) + "\n")
+	sb.WriteString(MetaRow("SWE", fmt.Sprintf("%s  %s", FormatDuration(ev.SWESeconds), pctOf(ev.SWESeconds, total)), 5) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("DOMAIN EVIDENCE") + "\n")
+	sb.WriteString(thMeta.Render("GOV") + "  " + thPrimary.Render(fmt.Sprintf("lect %d · q %d · acc %s", ev.GovLectures, ev.GovAttempted, fmtAcc(ev.GovAccuracy, ev.GovAttempted))) + "\n")
+	sb.WriteString(thMeta.Render("DSA") + "  " + thPrimary.Render(fmt.Sprintf("%d probs · %d passed", ev.DSAAttempts, ev.DSAPassed)) + "\n")
+	sb.WriteString(thMeta.Render("SWE") + "  " + thPrimary.Render(fmt.Sprintf("%d done · %d partial · %d blocked", ev.SWECompleted, ev.SWEPartial, ev.SWEBlocked)) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("WHAT WORKED WELL THIS WEEK?") + "\n")
-	sb.WriteString(thPrimary.Render(orDash(r.ReflectionWorked)) + "\n")
+	sb.WriteString(thPrimary.Render(TruncateToWidth(orDash(r.ReflectionWorked), inner)) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("WHAT SHOULD CHANGE NEXT WEEK?") + "\n")
-	sb.WriteString(thPrimary.Render(orDash(r.ReflectionChange)) + "\n")
+	sb.WriteString(thPrimary.Render(TruncateToWidth(orDash(r.ReflectionChange), inner)) + "\n")
 	return sb.String()
 }
 

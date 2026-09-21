@@ -291,38 +291,20 @@ func (s *TodayScreen) pressEnter() tea.Cmd {
 // View is the explicit three-part bento: LEFT tasks | RIGHT active/detail.
 // Bounds come from the shell main viewport: LEFT ~58%, RIGHT ~42%, right
 // split ~50/50 vertically. Panels are height-clipped to the viewport.
+// No metadata/shortcut text lives in main content; that belongs in footer.
 func (s *TodayScreen) View() string {
 	w, h := s.app.contentViewport()
 	if w < 60 {
 		w = 60
 	}
 	leftW, rightW := TwoPaneLayout(w, 58, 30, 26)
-	contentH := h - 1 // title row above the bento
-	if contentH < 10 {
-		contentH = 10
-	}
-	bodyH := contentH - 1 // titleBar occupies 1 line
-	if bodyH < 8 {
-		bodyH = 8
+	bodyH := h
+	if bodyH < 10 {
+		bodyH = 10
 	}
 	// Today table viewport in lines: panel chrome ≈ 4 lines.
 	s.tbl.SetSize(leftW-4, bodyH-4)
 	s.tbl.Focus = s.zone == tzTasks
-
-	title := "TODAY"
-	if s.snap != nil {
-		title = fmt.Sprintf("TODAY  ·  %s  ·  rev %d", s.snap.LocalDate, s.snap.Revision)
-	}
-	hints := "j/k select · Tab focus · s start · x stop"
-	titleBar := thScreenTitle.Render(title)
-	full := title + "  " + hints
-	if lipgloss.Width(full) <= w {
-		titleBar = thScreenTitle.Render(title) + "  " + thMeta.Render(hints)
-	} else if lipgloss.Width(title) <= w {
-		titleBar = thScreenTitle.Render(TruncateToWidth(title, w))
-	} else {
-		titleBar = thScreenTitle.Render(TruncateToWidth("TODAY", w))
-	}
 
 	// Right column: TOP active session, BOTTOM detail/result, ~50/50.
 	// Bottom gets one extra line so bundled START buttons stay visible.
@@ -331,7 +313,7 @@ func (s *TodayScreen) View() string {
 		activeH = bodyH / 2
 	}
 	bottomH := bodyH - activeH
-	left := PanelFixed("TASKS", s.tbl.View(), leftW, bodyH, s.zone == tzTasks)
+	left := PanelFixed("TODAY TASKS", s.tbl.View(), leftW, bodyH, s.zone == tzTasks)
 	activePanel := PanelFixed("ACTIVE SESSION", s.activeViewFor(rightW, activeH-4), rightW, activeH, s.zone == tzActive)
 	rightBottom := s.rightPanelFixed(rightW, bottomH)
 	rightCol := lipgloss.JoinVertical(lipgloss.Left, activePanel, rightBottom)
@@ -339,7 +321,7 @@ func (s *TodayScreen) View() string {
 	if s.err != "" {
 		body += "\n" + thError.Render(s.err)
 	}
-	return titleBar + "\n" + body
+	return body
 }
 
 func (s *TodayScreen) rightPanelFixed(w, h int) string {

@@ -19,6 +19,8 @@ const (
 	TabGOV
 	TabDSA
 	TabSWE
+	TabMocks
+	TabHistory
 	TabReviews
 )
 
@@ -32,6 +34,10 @@ func (t TopTab) Title() string {
 		return "DSA"
 	case TabSWE:
 		return "SWE"
+	case TabMocks:
+		return "MOCKS"
+	case TabHistory:
+		return "HISTORY"
 	default:
 		return "REVIEWS"
 	}
@@ -63,6 +69,8 @@ type App struct {
 	gov     *GovScreen
 	dsa     *DSAScreen
 	swe     *SWEScreen
+	mocks   *MocksScreen
+	history *HistoryScreen
 	reviews *ReviewsScreen
 
 	activeInfo string
@@ -74,6 +82,8 @@ func NewApp(database *db.DB) *App {
 	a.gov = NewGovScreen(a)
 	a.dsa = NewDSAScreen(a)
 	a.swe = NewSWEScreen(a)
+	a.mocks = NewMocksScreen(a)
+	a.history = NewHistoryScreen(a)
 	a.reviews = NewReviewsScreen(a)
 	return a
 }
@@ -97,6 +107,10 @@ func (a *App) reloadCurrent() {
 		a.dsa.Reload()
 	case TabSWE:
 		a.swe.Reload()
+	case TabMocks:
+		a.mocks.Reload()
+	case TabHistory:
+		a.history.Reload()
 	case TabReviews:
 		a.reviews.Reload()
 	}
@@ -133,10 +147,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case tea.KeyMsg:
 		// While the in-place evidence form owns focus, it owns every key
-		// except Quit and Back. In particular digits (1-5), r and x must
+		// except Quit and Back. In particular digits, r and x must
 		// reach text inputs instead of triggering global navigation.
 		inForm := a.tab == TabToday && a.today.zone == tzRight && a.today.right == "result"
-		if inForm && m.String() != "q" && m.String() != "ctrl+c" && m.String() != "esc" {
+		inMockForm := a.tab == TabMocks && a.mocks.ownsKeys()
+		if (inForm || inMockForm) && m.String() != "q" && m.String() != "ctrl+c" && m.String() != "esc" {
 			break
 		}
 		switch m.String() {
@@ -155,6 +170,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.goTab(TabSWE)
 			return a, nil
 		case "5":
+			a.goTab(TabMocks)
+			return a, nil
+		case "6":
+			a.goTab(TabHistory)
+			return a, nil
+		case "7":
 			a.goTab(TabReviews)
 			return a, nil
 		case "r":
@@ -179,6 +200,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if a.swe.onBack() {
 					return a, nil
 				}
+			case TabMocks:
+				if a.mocks.onBack() {
+					return a, nil
+				}
+			case TabHistory:
+				if a.history.onBack() {
+					return a, nil
+				}
 			}
 			return a, nil
 		case "x":
@@ -200,6 +229,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = a.dsa.Update(msg)
 	case TabSWE:
 		cmd = a.swe.Update(msg)
+	case TabMocks:
+		cmd = a.mocks.Update(msg)
+	case TabHistory:
+		cmd = a.history.Update(msg)
 	case TabReviews:
 		cmd = a.reviews.Update(msg)
 	}
@@ -240,6 +273,10 @@ func (a *App) View() string {
 		body = a.dsa.View()
 	case TabSWE:
 		body = a.swe.View()
+	case TabMocks:
+		body = a.mocks.View()
+	case TabHistory:
+		body = a.history.View()
 	case TabReviews:
 		body = a.reviews.View()
 	}
@@ -273,10 +310,10 @@ var forgeLogoLines = []string{
 // headerView is the Forge shell header: LEFT ASCII wordmark + MID→RIGHT
 // top-level navigation. NO date/time, NO clock, NO numbers in labels.
 // The wordmark is intentionally larger than the navigation text. The header
-// is spatially composed (not tab/space-faked single line): the 6-line logo
-// sits left, navigation is vertically centered to its right.
+// is spatially composed: the 6-line logo sits left with padding, navigation
+// is visually centered in the REMAINING horizontal header space.
 func (a *App) headerView(w int) string {
-	names := []string{"TODAY", "GOV", "DSA", "SWE", "REVIEWS"}
+	names := []string{"TODAY", "GOV", "DSA", "SWE", "MOCKS", "HISTORY", "REVIEWS"}
 	var nav []string
 	for i, n := range names {
 		if TopTab(i) == a.tab {
@@ -297,14 +334,23 @@ func (a *App) headerView(w int) string {
 	if avail < 20 {
 		avail = 20
 	}
-	// Navigation stays on ONE line, truncated to fit, vertically centered
-	// against the 6-line logo (row 2 of 0..5).
-	navLine = TruncateToWidth(navLine, avail)
+	// Center the navigation in the remaining space (not just after logo).
+	navW := lipgloss.Width(navLine)
+	if navW > avail {
+		navLine = TruncateToWidth(navLine, avail)
+		navW = lipgloss.Width(navLine)
+	}
+	padTotal := avail - navW
+	if padTotal < 0 {
+		padTotal = 0
+	}
+	padLeft := padTotal / 2
+	centered := strings.Repeat(" ", padLeft) + navLine
 	rows := make([]string, 0, 6)
 	for i := 0; i < 6; i++ {
 		line := logo[i] + gap
 		if i == 2 {
-			line += navLine
+			line += centered
 		}
 		// Force exact width so the divider below spans the viewport.
 		line = FitLine(line, w)
@@ -399,6 +445,10 @@ func (a *App) screenHints() (string, bool) {
 		return a.dsa.Hints(), true
 	case TabSWE:
 		return a.swe.Hints(), true
+	case TabMocks:
+		return a.mocks.Hints(), true
+	case TabHistory:
+		return a.history.Hints(), true
 	case TabReviews:
 		return a.reviews.Hints(), true
 	}

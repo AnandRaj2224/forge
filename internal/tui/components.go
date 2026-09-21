@@ -473,7 +473,7 @@ func (c ExamCard) View() string {
 	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
 	sb.WriteString(SectionHeader("PRACTICE READINESS") + "\n")
 	sb.WriteString(thHelp.Render("not yet calculated") + "\n")
-	sb.WriteString(thMeta.Render("Enter to open →") + "\n")
+	sb.WriteString("" + "\n")
 	lines := strings.Split(strings.TrimRight(sb.String(), "\n"), "\n")
 	for len(lines) < 8 {
 		lines = append(lines, "")
@@ -488,6 +488,97 @@ func (c ExamCard) View() string {
 
 // examCardHeight is the rendered ExamCard height including borders.
 const examCardHeight = 10
+
+// MetricCard is a compact bento metric: label + prominent value + sub.
+// Used for PLANNED/ACTUAL/COMPLETION/SESSIONS/TASKS/OVER-UNDER, mock
+// scores, history summaries. Fixed 3-line body keeps grids uniform.
+type MetricCard struct {
+	Label string
+	Value string
+	Sub   string
+	Width int
+}
+
+func (c MetricCard) View() string {
+	w := c.Width
+	if w < 14 {
+		w = 14
+	}
+	inner := w - 4
+	if inner < 8 {
+		inner = 8
+	}
+	label := SectionHeader(TruncateToWidth(c.Label, inner))
+	value := thScreenTitle.Render(TruncateToWidth(c.Value, inner))
+	sub := thMeta.Render(TruncateToWidth(c.Sub, inner))
+	if c.Sub == "" {
+		sub = ""
+		return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w).Render(label + "\n" + value)
+	}
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w).Render(label + "\n" + value + "\n" + sub)
+}
+
+// MockCard is a dense selectable summary for the mock list.
+// Number + name + date + exam; focused state uses the accent border.
+type MockCard struct {
+	Num     int
+	Name    string
+	Date    string
+	Exam    string
+	Focused bool
+	Width   int
+}
+
+func (c MockCard) View() string {
+	w := c.Width
+	if w < 24 {
+		w = 24
+	}
+	inner := w - 4
+	if inner < 16 {
+		inner = 16
+	}
+	title := thPrimary.Render(TruncateToWidth(c.Name, inner))
+	meta := thMeta.Render(TruncateToWidth(c.Date+"  ·  "+c.Exam, inner))
+	num := fmt.Sprintf("%02d", c.Num)
+	head := thMeta.Render(num+"  ") + title
+	body := head + "\n" + "      " + meta
+	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w)
+	if c.Focused {
+		style = style.BorderForeground(cPrimary)
+		body = thPanelTitle.Render(num+"  "+TruncateToWidth(c.Name, inner-4)+"  ●") + "\n" + "      " + meta
+	}
+	return style.Render(body)
+}
+
+// MetricGrid renders compact MetricCards responsively inside inner width.
+// cols: 3 when wide, 2 medium, 1 narrow. Card widths are derived so the
+// grid never overflows its panel.
+func MetricGrid(cards []MetricCard, inner int) string {
+	if len(cards) == 0 {
+		return ""
+	}
+	cols := 3
+	if inner < 52 {
+		cols = 2
+	}
+	if inner < 30 {
+		cols = 1
+	}
+	if cols > len(cards) {
+		cols = len(cards)
+	}
+	cw := (inner - (cols-1)*1) / cols
+	if cw < 10 {
+		cw = 10
+	}
+	rendered := make([]string, 0, len(cards))
+	for _, c := range cards {
+		c.Width = cw
+		rendered = append(rendered, c.View())
+	}
+	return BentoGrid(rendered, cols, " ")
+}
 
 // EmptyState renders a consistent placeholder for empty content.
 func EmptyState(text string) string { return thHelp.Render(text) }

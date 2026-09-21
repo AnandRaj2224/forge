@@ -454,7 +454,7 @@ func (s *GovScreen) dashboardView(w, h int) string {
 		}
 		rendered = append(rendered, lipgloss.JoinHorizontal(lipgloss.Top, parts...))
 	}
-	body := thScreenTitle.Render("GOVERNMENT EXAMS") + "  " + thMeta.Render("exam-card dashboard · Enter opens workspace") + "\n"
+	body := thScreenTitle.Render("GOVERNMENT EXAMS") + "\n"
 	body += strings.Join(rendered, "\n\n")
 	if start > 0 {
 		body += "\n" + thHelp.Render("↑ more above")
@@ -483,7 +483,7 @@ func (s *GovScreen) subjectsCell(w int, focused bool) string {
 		thMeta.Render("Every subject, every topic."),
 		thMeta.Render("Lecture + practice progress."),
 		"",
-		thHelp.Render("Enter to open →"),
+		"",
 		"",
 	}
 	for len(lines) < 8 {
@@ -656,12 +656,16 @@ func (s *GovScreen) topicBody(inner int) string {
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("PRACTICE") + "\n")
 	st := v.Stats
-	sb.WriteString(ProgressBar{Ratio: accuracyRatio(st), Width: barW}.View() + "  " + thMeta.Render(fmt.Sprintf("%.1f%% acc", st.Accuracy*100)) + "\n")
+	if st.Attempted == 0 {
+		sb.WriteString(thHelp.Render("not yet calculated") + "\n")
+	} else {
+		sb.WriteString(ProgressBar{Ratio: accuracyRatio(st), Width: barW, ShowPct: true}.View() + "\n")
+	}
 	sb.WriteString(MetaRow("Questions", fmt.Sprint(st.Attempted), 10) + "\n")
 	sb.WriteString(MetaRow("Correct", fmt.Sprint(st.Correct), 10) + "\n")
 	sb.WriteString(MetaRow("Incorrect", fmt.Sprint(st.Incorrect), 10) + "\n")
+	sb.WriteString(MetaRow("Accuracy", fmt.Sprintf("%.1f%%", st.Accuracy*100), 10) + "\n")
 	sb.WriteString(MetaRow("Avg speed", avgStr(st), 10) + "\n")
-	sb.WriteString(MetaRow("Progression", "not yet calculated", 10) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("LECTURES") + "\n")
 	for i, l := range v.Lectures {
@@ -669,7 +673,7 @@ func (s *GovScreen) topicBody(inner int) string {
 		if i < len(v.Flags) && v.Flags[i] {
 			mark = "✓"
 		}
-		sb.WriteString(SelectableRow{Mark: mark, Title: l.Title, Width: inner}.View() + "\n")
+		sb.WriteString(SelectableRow{Num: fmt.Sprintf("%02d", i+1), Mark: mark, Title: l.Title, Width: inner}.View() + "\n")
 		if i < len(v.Lectures)-1 {
 			sb.WriteString(RowDivider(inner) + "\n")
 		}
