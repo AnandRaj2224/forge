@@ -18,11 +18,12 @@ import (
 // NOTE (Charm v2): lipgloss.Color is a func returning color.Color, so palette
 // entries are vars, not consts.
 var (
-	// Base surfaces.
+	// Base surfaces. Neutral cool-dark tones; borders are slate, never
+	// tinted with the Forge accent except on focused/selected components.
 	cBG      = lipgloss.Color("#0B0B13") // near-black, cool/blue
 	cSurface = lipgloss.Color("#14141F") // panel/surface tone
-	cBorder  = lipgloss.Color("#2B2B3D") // muted cool border
-	cDimLine = lipgloss.Color("#2B2B3D") // separators / unfocused borders (alias)
+	cBorder  = lipgloss.Color("#2E3340") // muted neutral slate border
+	cDimLine = lipgloss.Color("#2E3340") // separators / unfocused borders (alias)
 
 	// Text.
 	cFgPrimary   = lipgloss.Color("#E8E8F0") // soft bright foreground
@@ -45,9 +46,9 @@ var (
 	cError   = lipgloss.Color("#F87171") // validation only
 
 	// Domain accents (subtle, not rainbow).
-	cGov = lipgloss.Color("#93A8F5") // cool periwinkle
-	cDSA = lipgloss.Color("#C4B5FD") // soft lavender
-	cSWE = lipgloss.Color("#67E8F9") // soft cyan
+	cGov = lipgloss.Color("#A78BFA") // subtle violet
+	cDSA = lipgloss.Color("#67E8F9") // subtle cyan/blue
+	cSWE = lipgloss.Color("#F9A8D4") // subtle rose/pink
 
 	// Live session gradient stops: violet → purple → blue → cyan → green.
 	cGrad0 = lipgloss.Color("#A78BFA")
@@ -66,9 +67,10 @@ var (
 	thNavActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary).Padding(0, 2)
 	thNavInactive = lipgloss.NewStyle().Foreground(cFgSecondary).Padding(0, 2)
 	thClock       = lipgloss.NewStyle().Foreground(cFgTertiary)
-	// Screen + panel titles.
+	// Screen + panel titles. Neutral by default; the Forge accent is
+	// reserved for focus/selection markers, never for every heading.
 	thScreenTitle = lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary)
-	thPanelTitle  = lipgloss.NewStyle().Bold(true).Foreground(cPrimaryBright)
+	thPanelTitle  = lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary)
 	thSectionHead = lipgloss.NewStyle().Bold(true).Foreground(cFgSecondary)
 	// Content levels.
 	thPrimary = lipgloss.NewStyle().Foreground(cFgPrimary)
@@ -82,17 +84,23 @@ var (
 	thWarn    = lipgloss.NewStyle().Foreground(cWarning)
 	// Rows: structured list rows with thin dividers. Selected rows own a
 	// full-width background; cursor-without-focus stays visible but quiet.
+	// Restrained dark tint (not solid violet) keeps the UI neutral.
 	thRowNormal   = lipgloss.NewStyle().Foreground(cFgSecondary)
-	thRowSelected = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(cPrimaryDim)
+	thRowSelected = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#2A2547"))
 	thRowCursor   = lipgloss.NewStyle().Foreground(cFgPrimary).Background(lipgloss.Color("#1E1B33"))
-	// Table header: strong, compact, aligned to columns.
-	thTableHead = lipgloss.NewStyle().Bold(true).Foreground(cPrimaryBright)
+	// Table header: strong, compact, neutral, aligned to columns.
+	thTableHead = lipgloss.NewStyle().Bold(true).Foreground(cFgSecondary)
 	// Footer: keys pop, descriptions recede, groups spaced.
-	thFootKey  = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
+	thFootKey  = lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary)
 	thFootDesc = lipgloss.NewStyle().Foreground(cFgSecondary)
-	// Controls.
+	// Focus markers use the active/focus accent (cyan/blue), not violet.
+	thFocusMark = lipgloss.NewStyle().Bold(true).Foreground(cActive)
+	// Focus dot marks the single focused card/panel; small and selective.
+	thFocusDot = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
+	// Controls. Idle buttons stay neutral; only the focused primary action
+	// carries the accent fill.
 	thBtnFocus    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary)
-	thBtnIdle     = lipgloss.NewStyle().Bold(true).Foreground(cPrimary)
+	thBtnIdle     = lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary)
 	thBtnDisabled = lipgloss.NewStyle().Foreground(cFgTertiary)
 )
 

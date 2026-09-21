@@ -767,7 +767,7 @@ func (s *MocksScreen) mockBody(inner int) string {
 	for i, sec := range s.sections {
 		head := SectionHeader(strings.ToUpper(TruncateToWidth(sec.Name, inner-4)))
 		if s.focusR && i == s.secCur {
-			head = thPanelTitle.Render("▶ " + strings.ToUpper(sec.Name))
+			head = thFocusMark.Render("▶ ") + thPanelTitle.Render(strings.ToUpper(sec.Name))
 		}
 		sb.WriteString(head + "\n")
 		ws := s.weak[string(sec.ID)]
@@ -807,7 +807,7 @@ func (s *MocksScreen) createView() string {
 		}
 		line := mark + "  " + e.Name
 		if i == s.cExamCur && s.cFocus == 0 {
-			sb.WriteString(thBtnIdle.Render("▶ ") + thPrimary.Render(line) + "\n")
+			sb.WriteString(thFocusMark.Render("▶ ") + thPrimary.Render(line) + "\n")
 		} else {
 			sb.WriteString("  " + thPrimary.Render(line) + "\n")
 		}

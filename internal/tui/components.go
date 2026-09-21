@@ -30,7 +30,7 @@ func Panel(title, content string, width int, focused bool) string {
 	}
 	head := thPanelTitle.Render(title)
 	if focused {
-		head = thPanelTitle.Render(title + "  ●")
+		head = thPanelTitle.Render(title) + thFocusDot.Render("  ●")
 	}
 	sep := Separator(maxInt(width-4, 4))
 	return style.Render(head + "\n" + sep + "\n" + content)
@@ -117,7 +117,7 @@ func (p ProgressBar) View() string {
 	// so clamped bars stay byte-clean for tests and alignment.
 	bar := ""
 	if filled > 0 {
-		bar += lipgloss.NewStyle().Foreground(cPrimary).Render(strings.Repeat("█", filled))
+		bar += lipgloss.NewStyle().Foreground(cFgPrimary).Render(strings.Repeat("█", filled))
 	}
 	if w-filled > 0 {
 		bar += lipgloss.NewStyle().Foreground(cBorder).Render(strings.Repeat("░", w-filled))
@@ -182,7 +182,7 @@ func (p SessionProgressBar) View() string {
 	return sb.String()
 }
 
-var gradStops = []string{"#A78BFA", "#8B5CF6", "#60A5FA", "#22D3EE", "#34D399"}
+var gradStops = []string{"#A78BFA", "#E879F9", "#8B5CF6", "#60A5FA", "#22D3EE", "#34D399"}
 
 func gradientAt(t float64) color.Color {
 	if t < 0 {
@@ -291,7 +291,7 @@ func (r RadioGroup) View() string {
 		}
 		if r.Focused && i == r.Cursor {
 			// Both focus arrow and selection glyph always visible.
-			sb.WriteString(thBtnIdle.Render("▶ ") + thPrimary.Render(glyph+"  "+o) + "\n")
+			sb.WriteString(thFocusMark.Render("▶ ") + thPrimary.Render(glyph+"  "+o) + "\n")
 		} else {
 			sb.WriteString("  " + thPrimary.Render(glyph+"  "+o) + "\n")
 		}
@@ -313,7 +313,7 @@ func (c Checkbox) View() string {
 	}
 	line := glyph + "  " + c.Label
 	if c.Focused {
-		return thBtnIdle.Render("▶ ") + thPrimary.Render(line)
+		return thFocusMark.Render("▶ ") + thPrimary.Render(line)
 	}
 	return "  " + thPrimary.Render(line)
 }
@@ -340,15 +340,15 @@ func (f FormField) View(focused bool, labelWidth int) string {
 	}
 	lbl := padRight(f.Label, labelWidth)
 	if focused {
-		return thBtnIdle.Render(lbl+" ") + f.Input.View()
+		return thFocusMark.Render(lbl+" ") + f.Input.View()
 	}
 	return thMeta.Render(lbl+" ") + f.Input.View()
 }
 
 // KeyBadge renders one compact [key] chip for the footer command bar.
-// Single line, boxy, violet key on dark.
+// Single line, neutral badge: bright text on a dark neutral surface.
 func KeyBadge(key string) string {
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary).Padding(0, 1).Render(key)
+	return lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary).Background(lipgloss.Color("#23232E")).Padding(0, 1).Render(key)
 }
 
 // KeyMsg helpers shared by screens.
@@ -489,7 +489,7 @@ func (c ExamCard) View() string {
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w)
 	if c.Focused {
 		style = style.BorderForeground(cPrimary)
-		lines[0] = thPanelTitle.Render(TruncateToWidth(c.Name, inner) + "  ●")
+		lines[0] = thPanelTitle.Render(TruncateToWidth(c.Name, inner)) + thFocusDot.Render("  ●")
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }
@@ -554,7 +554,7 @@ func (c MockCard) View() string {
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w)
 	if c.Focused {
 		style = style.BorderForeground(cPrimary)
-		body = thPanelTitle.Render(num+"  "+TruncateToWidth(c.Name, inner-4)+"  ●") + "\n" + "      " + meta
+		body = thPanelTitle.Render(num+"  "+TruncateToWidth(c.Name, inner-4)) + thFocusDot.Render("  ●") + "\n" + "      " + meta
 	}
 	return style.Render(body)
 }

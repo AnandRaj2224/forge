@@ -492,7 +492,7 @@ func (s *GovScreen) subjectsCell(w int, focused bool) string {
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cDimLine).Padding(0, 1).Width(w)
 	if focused {
 		style = style.BorderForeground(cPrimary)
-		lines[0] = thPanelTitle.Render("ALL SUBJECTS  ●")
+		lines[0] = thPanelTitle.Render("ALL SUBJECTS") + thFocusDot.Render("  ●")
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }

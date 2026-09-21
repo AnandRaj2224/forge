@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
@@ -225,7 +226,7 @@ func (s *SWEScreen) View() string {
 			barW = 28
 		}
 		inner := rw - 6
-		body := thScreenTitle.Render(strings.ToUpper(TruncateToWidth(a.Name, inner))) + "\n" +
+		body := lipgloss.NewStyle().Bold(true).Foreground(cSWE).Render(strings.ToUpper(TruncateToWidth(a.Name, inner))) + "\n" +
 			RowDivider(inner) + "\n" +
 			SectionHeader("PROGRESS") + "\n" +
 			ProgressBar{Ratio: r, Width: barW, ShowPct: true}.View() + "\n" +

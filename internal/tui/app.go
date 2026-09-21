@@ -307,120 +307,48 @@ var forgeLogoLines = []string{
 	"╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
 }
 
-// headerView is the Forge shell header: LEFT gradient ASCII wordmark +
-// MIDDLE centered top-level navigation + RIGHT two-line literary quote.
-// NO date/time, NO clock, NO numbers in labels. The wordmark is the largest
-// element; nav is centered in the middle region; quote is independently
-// right-aligned. Header height stays at the 6-line logo (no growth).
+// headerView is the Forge shell header: LEFT 6-line gradient ASCII
+// wordmark + RIGHT region carrying the full two-line quote on rows 0-1 and
+// the one-line navigation centered on the middle row. Two real layout
+// regions (LogoRegion/RightRegion) joined via ShellHeader. NO date/time,
+// NO clock. Header height stays at the 6-line logo (no growth).
 func (a *App) headerView(w int) string {
 	names := []string{"TODAY", "GOV", "DSA", "SWE", "MOCKS", "HISTORY", "REVIEWS"}
-	// Header nav uses compact padding so all 7 items fit in the middle
-	// region at normal widths; global thNav styles stay roomy elsewhere.
+	// Compact pills so all 7 items fit; active keeps an accent fill.
 	navActive := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary).Padding(0, 1)
 	navInactive := lipgloss.NewStyle().Foreground(cFgSecondary).Padding(0, 1)
-	var nav []string
+	pills := make([]string, 0, len(names))
 	for i, n := range names {
 		if TopTab(i) == a.tab {
-			nav = append(nav, navActive.Render(n))
+			pills = append(pills, navActive.Render(n))
 		} else {
-			nav = append(nav, navInactive.Render(n))
+			pills = append(pills, navInactive.Render(n))
 		}
 	}
-	navLine := strings.Join(nav, " ")
-
-	// Gradient wordmark: horizontal violet→magenta→purple→blue→cyan→green.
-	logo := make([]string, len(forgeLogoLines))
-	for i, ln := range forgeLogoLines {
-		logo[i] = gradientLogoLine(ln)
+	navLine := strings.Join(pills, " ")
+	logoContentW := 0
+	for _, ln := range forgeLogoLines {
+		if lw := lipgloss.Width(ln); lw > logoContentW {
+			logoContentW = lw
+		}
 	}
-	logoW := lipgloss.Width(forgeLogoLines[0])
-	leftPad := "  "
-	gap := "    "
-
-	// Right quote block: exactly two lines, right-aligned, elegant, secondary.
-	// Navigation has priority: size the quote from the remainder after logo
-	// + full nav, so all 7 nav items stay visible whenever possible.
+	logoOuter, rightOuter := ComputeHeaderWidths(w, logoContentW)
+	// Exactly two quote lines, secondary, full text. QuoteBlock keeps the
+	// full line whenever it fits and only clips at genuinely tiny widths.
+	// Right/top alignment is owned by RightRegion.
 	q1 := "“Everyone sees what you appear to be, few experience what you really are.”"
 	q2 := "— Niccolò Machiavelli, The Prince"
-	navW := lipgloss.Width(navLine)
-	quoteW := w - len([]rune(leftPad)) - logoW - len([]rune(gap)) - navW - 4 - 2
-	if quoteW > 40 {
-		quoteW = 40
+	sh := ShellHeader{
+		Logo: LogoRegion{Lines: forgeLogoLines, Width: logoOuter},
+		Right: RightRegion{
+			Quote1:  thMeta.Render(q1),
+			Quote2:  thHelp.Render(q2),
+			NavLine: navLine,
+			Width:   rightOuter,
+		},
+		Width: w,
 	}
-	if quoteW < 16 {
-		quoteW = 16
-	}
-	// Reserve space: leftPad + logo + gap + middle + quote + rightPad(2).
-	rightPad := 2
-	middleStart := len([]rune(leftPad)) + logoW + len([]rune(gap))
-	middleEnd := w - rightPad - quoteW
-	if middleEnd < middleStart+20 {
-		// Tight terminal: shrink quote to preserve logo + nav.
-		quoteW = w - rightPad - middleStart - 20
-		if quoteW < 16 {
-			quoteW = 16
-		}
-		middleEnd = w - rightPad - quoteW
-	}
-	middleW := middleEnd - middleStart
-	if middleW < 10 {
-		middleW = 10
-	}
-	ql1 := TruncateToWidth(q1, quoteW)
-	ql2 := TruncateToWidth(q2, quoteW)
-	// Right-align within quote block.
-	ql1 = strings.Repeat(" ", max(0, quoteW-lipgloss.Width(ql1))) + ql1
-	ql2 = strings.Repeat(" ", max(0, quoteW-lipgloss.Width(ql2))) + ql2
-	ql1 = thMeta.Render(ql1)
-	ql2 = thHelp.Render(ql2)
-
-	// Center nav in the middle region (not just after logo).
-	if navW > middleW {
-		navLine = TruncateToWidth(navLine, middleW)
-		navW = lipgloss.Width(navLine)
-	}
-	padLeft := (middleW - navW) / 2
-	if padLeft < 0 {
-		padLeft = 0
-	}
-	navCentered := strings.Repeat(" ", padLeft) + navLine
-
-	rows := make([]string, 0, 6)
-	for i := 0; i < 6; i++ {
-		var sb strings.Builder
-		sb.WriteString(leftPad)
-		sb.WriteString(logo[i])
-		sb.WriteString(gap)
-		if i == 2 {
-			sb.WriteString(navCentered)
-			// Fill remainder of middle region so quote stays right-anchored.
-			used := middleW - padLeft - navW
-			if used < 0 {
-				used = 0
-			}
-			sb.WriteString(strings.Repeat(" ", used))
-		} else if i == 3 {
-			// Second nav-adjacent row stays blank in middle (keeps nav airy).
-			sb.WriteString(strings.Repeat(" ", middleW))
-		} else {
-			sb.WriteString(strings.Repeat(" ", middleW))
-		}
-		if i == 2 {
-			sb.WriteString(ql1)
-		} else if i == 3 {
-			sb.WriteString(ql2)
-		} else {
-			sb.WriteString(strings.Repeat(" ", quoteW))
-		}
-		sb.WriteString(strings.Repeat(" ", rightPad))
-		rows = append(rows, FitLine(sb.String(), w))
-	}
-	block := strings.Join(rows, "\n")
-	return lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), false, false, true, false).
-		BorderForeground(cBorder).
-		Width(w).
-		Render(block)
+	return sh.View()
 }
 
 // gradientLogoLine renders one wordmark line with a smooth horizontal
@@ -520,8 +448,9 @@ func (a *App) footerExtra() string {
 
 // footChip renders a compact single-line key badge. It must stay exactly
 // one line tall so the footer remains ONE horizontal command bar.
+// Neutral badge keeps the footer quiet; only descriptions recede further.
 func footChip(key string) string {
-	return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(cPrimary).Padding(0, 1).Render(key)
+	return lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary).Background(lipgloss.Color("#23232E")).Padding(0, 1).Render(key)
 }
 
 func (a *App) screenHints() (string, bool) {

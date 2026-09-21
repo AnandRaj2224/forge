@@ -241,11 +241,12 @@ func (r SelectableRow) View() string {
 		}
 		line = prefix + PadToWidth(TruncateToWidth(title, titleW), titleW) + "  " + meta
 	}
+	if r.Selected && r.Focused {
+		body := FitLine(line, w-1)
+		return selEdge() + thRowSelected.Render(body)
+	}
 	line = FitLine(" "+line, w)
 	if r.Selected {
-		if r.Focused {
-			return thRowSelected.Render(line)
-		}
 		return thRowCursor.Render(line)
 	}
 	return thRowNormal.Render(line)
@@ -262,6 +263,17 @@ func prefixPlain(num, mark string) string {
 }
 
 func stripANSI(s string) string { return s }
+
+
+// selEdge renders the 1-cell accent edge for a focused+selected row.
+// The edge shares the selected background so the row reads as one block:
+// dark tint + subtle accent edge + strong text, never a bright block.
+func selEdge() string {
+	return lipgloss.NewStyle().Foreground(cActive).Background(lipgloss.Color("#2A2547")).Render("\u258C")
+}
+
+// Selected rows use the focus accent for the number; unfocused cursor rows
+// stay quiet.
 
 // RowDivider is the thin horizontal separator spanning the list width.
 func RowDivider(width int) string {
@@ -288,21 +300,26 @@ func BentoPanel(title, content string, width int, focused bool) string {
 }
 
 // Header renders the shell header block (logo + nav) at width w.
+// Compat wrapper over the real ShellHeader layout (empty quote).
 func Header(logo []string, navLine string, w int) string {
-	rows := make([]string, 0, len(logo))
-	gap := "    "
-	for i, ln := range logo {
-		line := ln + gap
-		if i == 2 {
-			line += navLine
+	logoContentW := 0
+	for _, ln := range logo {
+		if lw := lipgloss.Width(ln); lw > logoContentW {
+			logoContentW = lw
 		}
-		rows = append(rows, FitLine(line, w))
 	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder(), false, false, true, false).
-		BorderForeground(cBorder).
-		Width(w).
-		Render(strings.Join(rows, "\n"))
+	logoOuter, rightOuter := ComputeHeaderWidths(w, logoContentW)
+	sh := ShellHeader{
+		Logo: LogoRegion{Lines: logo, Width: logoOuter},
+		Right: RightRegion{
+			Quote1:  "",
+			Quote2:  "",
+			NavLine: navLine,
+			Width:   rightOuter,
+		},
+		Width: w,
+	}
+	return sh.View()
 }
 
 // Footer renders the single-row shell command bar at width w.
@@ -352,11 +369,12 @@ func (r TodayTaskRow) View() string {
 		stTxt = "DONE"
 	}
 	stCell := PadToWidth(stTxt, stW)
-	line := FitLine(fmt.Sprintf(" %s  %s  %s  %s  %s", num, dom, title, dur, stCell), w)
+	raw := fmt.Sprintf("%s  %s  %s  %s  %s", num, dom, title, dur, stCell)
+	if r.Selected && r.Focused {
+		return selEdge() + thRowSelected.Render(FitLine(raw, w-1))
+	}
+	line := FitLine(" "+raw, w)
 	if r.Selected {
-		if r.Focused {
-			return thRowSelected.Render(line)
-		}
 		return thRowCursor.Render(line)
 	}
 	return thRowNormal.Render(line)
@@ -519,7 +537,7 @@ func (t TodayTaskTable) rowLine(i, numW, domW, taskW, durW, stW, w int) string {
 		stTxt = "DONE"
 	}
 	stCell := PadToWidth(stTxt, stW)
-	line := FitLine(fmt.Sprintf(" %s  %s  %s  %s  %s", num, dom, title, dur, stCell), w)
+	raw := fmt.Sprintf("%s  %s  %s  %s  %s", num, dom, title, dur, stCell)
 	selected := i == t.Cursor
 	if selected {
 		// Status tint keeps semantic color inside the selected row.
@@ -534,11 +552,11 @@ func (t TodayTaskTable) rowLine(i, numW, domW, taskW, durW, stW, w int) string {
 		}
 		_ = stStyled
 		if t.Focus {
-			return thRowSelected.Render(line)
+			return selEdge() + thRowSelected.Render(FitLine(raw, w-1))
 		}
-		return thRowCursor.Render(line)
+		return thRowCursor.Render(FitLine(" "+raw, w))
 	}
 	// Unselected rows: domain + status get quiet semantic color via
 	// surrounding styles is not width-safe, so keep plain with markers.
-	return thRowNormal.Render(line)
+	return thRowNormal.Render(FitLine(" "+raw, w))
 }
