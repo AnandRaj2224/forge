@@ -391,7 +391,7 @@ func (s *TodayScreen) activeViewWH(w, maxLines int) string {
 	sb.WriteString(thScreenTitle.Render(FormatHMS(el)) + "\n")
 	sb.WriteString(SessionProgressBar{Ratio: ratio, Width: barW, Frame: frame, ShowPct: true}.View() + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
-	sb.WriteString(MetaRow("Planned", FormatDuration(s.active.PlannedSeconds), 8) + "\n")
+	sb.WriteString(MetaRow("Planned", FormatDurationLong(s.active.PlannedSeconds), 8) + "\n")
 	if maxLines < 10 {
 		sb.WriteString(s.stopBtn.CompactView())
 	} else {
@@ -420,7 +420,7 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		sb.WriteString(DomainBadge(string(t.Domain)) + "  " + StatusPill(st) + "\n")
 		sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
 		sb.WriteString(div + "\n")
-		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
 		sb.WriteString(s.startBtn.CompactView())
 		return strings.TrimRight(sb.String(), "\n")
 	}
@@ -447,7 +447,7 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 			}
 		}
 	case len(b.DSA) > 0:
-		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
 		var repeats, news []DSAItem
 		for _, d := range b.DSA {
 			if d.Mode == db.DSAModeNew {
@@ -488,7 +488,7 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		}
 		return strings.TrimRight(sb.String(), "\n")
 	case len(b.SWE) > 0:
-		sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
 		lastArea := ""
 		n := 0
 		for _, sw := range b.SWE {
@@ -515,7 +515,7 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
 	}
 	sb.WriteString(div + "\n")
-	sb.WriteString(MetaRow("Planned", FormatDuration(t.PlannedSeconds), 8) + "\n")
+	sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
 	if maxLines < 13 {
 		sb.WriteString(s.startBtn.CompactView())
 	} else {

@@ -179,41 +179,163 @@ func TestRadioRoundTripStillVisible(t *testing.T) {
 	}
 }
 
-// TestMockSectionEnterFlow guards Enter-driven section/weak-topic editing:
-// no a/w shortcuts; the "+ New section" row opens the section form, Enter
-// on a section opens the weak-topic editor.
-func TestMockSectionEnterFlow(t *testing.T) {
+// TestMockCreateFlow guards the single mock creation flow: raw facts in,
+// derived metrics out, sections auto-derived from the exam, weak topics
+// picked per section in one continuous chain. No manual sections.
+func TestMockCreateFlow(t *testing.T) {
 	database := seedMockHistoryDB(t)
-	ctx := context.Background()
-	now := time.Now().UTC()
-	score, total := 72, 100
-	_ = runtime.CreateMock(ctx, database, db.Mock{ID: "mock-1", ExamID: "exam-afcat", Name: "AFCAT Mock 07", MockDate: "2026-09-18", Platform: "Self", Score: &score, TotalScore: &total, CreatedAt: now})
-	_ = runtime.CreateMockSection(ctx, database, db.MockSection{ID: "sec-q", MockID: "mock-1", Name: "QUANT", SortOrder: 1})
 	app := NewApp(database)
 	app.width, app.height = 150, 40
 	app.goTab(TabMocks)
-	if v := stripANSIForTest(app.View().Content); !strings.Contains(v, "New section") {
-		t.Fatalf("new-section row missing")
+	testSend(app, "n")
+	if app.mocks.mode != "create" {
+		t.Fatalf("mode=%q want create", app.mocks.mode)
 	}
-	testSend(app, "l")
-	testSend(app, "j")
-	if app.mocks.secCur != 1 {
-		t.Fatalf("secCur=%d want 1 (new-section row)", app.mocks.secCur)
+	if len(app.mocks.cInputs) != 11 {
+		t.Fatalf("create fields=%d want 11 raw facts", len(app.mocks.cInputs))
+	}
+	typeKeys := func(s string) {
+		for _, r := range s {
+			testSend(app, string(r))
+		}
+	}
+	testSend(app, "down") // Name
+	typeKeys("AFCAT 9")
+	testSend(app, "down") // Date
+	typeKeys("2026-09-18")
+	testSend(app, "down") // Platform (left empty)
+	testSend(app, "down") // Score
+	typeKeys("72")
+	testSend(app, "down") // Total Marks
+	typeKeys("100")
+	testSend(app, "down") // Total Questions
+	typeKeys("100")
+	testSend(app, "down") // Attempted
+	typeKeys("87")
+	testSend(app, "down") // Correct (cFocus 8)
+	typeKeys("71")
+	for range [4]struct{}{} {
+		testSend(app, "down")
+	} // Rank, Percentile, Average Speed, SAVE (cFocus 12)
+	if app.mocks.cFocus != app.mocks.nCreateFocus()-1 {
+		t.Fatalf("cFocus=%d want save", app.mocks.cFocus)
 	}
 	testSend(app, "enter")
-	if app.mocks.mode != "section" {
-		t.Fatalf("mode=%q want section", app.mocks.mode)
+	// AFCAT maps only Quant: one auto-section, straight into its editor.
+	if app.mocks.mode != "weak" {
+		t.Fatalf("mode=%q want weak-chain (%s)", app.mocks.mode, app.mocks.cErr)
 	}
-	for _, k := range []string{"V", "E", "R", "B", "A", "L"} {
+	if sec := string(app.mocks.wSection.Name); sec != "Quant" && sec != "QUANT" {
+		t.Fatalf("chain section=%q want exam subject", sec)
+	}
+	// Toggle two weak topics, save, chain ends (single section).
+	testSend(app, "down") // filter -> list
+	testSend(app, "enter")
+	testSend(app, "down")
+	testSend(app, "enter")
+	testSend(app, "s")
+	if app.mocks.mode != "browse" {
+		t.Fatalf("mode=%q want browse (%s)", app.mocks.mode, app.mocks.wErr)
+	}
+	ctx := context.Background()
+	mocks, err := runtime.ListMocks(ctx, database)
+	if err != nil || len(mocks) != 1 {
+		t.Fatalf("mocks=%d err=%v", len(mocks), err)
+	}
+	m := mocks[0]
+	if m.Incorrect == nil || *m.Incorrect != 16 {
+		t.Fatalf("incorrect=%v want 16", m.Incorrect)
+	}
+	if m.Unattempted == nil || *m.Unattempted != 13 {
+		t.Fatalf("unattempted=%v want 13", m.Unattempted)
+	}
+	if m.Accuracy == nil {
+		t.Fatal("accuracy not derived")
+	}
+	secs, _ := runtime.ListMockSections(ctx, database, m.ID)
+	if len(secs) != 1 {
+		t.Fatalf("sections=%d want 1 exam-derived", len(secs))
+	}
+	ws, _ := runtime.ListWeakTopics(ctx, database, secs[0].ID)
+	if len(ws) != 2 {
+		t.Fatalf("weak=%d want 2", len(ws))
+	}
+}
+// TestMockCreateValidation rejects impossible raw combinations.
+func TestMockCreateValidation(t *testing.T) {
+	database := seedMockHistoryDB(t)
+	app := NewApp(database)
+	app.width, app.height = 150, 40
+	app.goTab(TabMocks)
+	testSend(app, "n")
+	for _, k := range []string{"B", "a", "d"} {
 		testSend(app, k)
 	}
-	testSend(app, "enter")
-	if app.mocks.mode != "browse" || len(app.mocks.sections) != 2 {
-		t.Fatalf("section not saved: mode=%q sections=%d", app.mocks.mode, len(app.mocks.sections))
+	// Date valid, then Attempted 5 / Correct 9 (correct > attempted).
+	testSend(app, "down")
+	for _, k := range []string{"2", "0", "2", "6", "-", "0", "9", "-", "1", "8"} {
+		testSend(app, k)
 	}
-	testSend(app, "k")
+	for range [4]struct{}{} {
+		testSend(app, "down")
+	} // score, total, totalQ
+	testSend(app, "down") // attempted
+	testSend(app, "5")
+	testSend(app, "down") // correct
+	testSend(app, "9")
+	for range [5]struct{}{} {
+		testSend(app, "down")
+	} // rank, percentile, avg, save (4 downs?) -> save
 	testSend(app, "enter")
-	if app.mocks.mode != "weak" {
-		t.Fatalf("mode=%q want weak", app.mocks.mode)
+	if app.mocks.mode != "create" {
+		t.Fatalf("invalid combo left create mode")
+	}
+	if app.mocks.cErr == "" {
+		t.Fatal("expected validation error")
+	}
+}
+
+// TestReviewReflectionEdit guards the weekly reflection workflow: Enter
+// opens editing on the selected reflection, typing works, SAVE persists to
+// the stored review model, and reopening shows the saved text.
+func TestReviewReflectionEdit(t *testing.T) {
+	app := NewApp(seedFlowDB(t))
+	app.width, app.height = 150, 40
+	app.goTab(TabReviews)
+	testSend(app, "l")
+	testSend(app, "enter")
+	if !app.reviews.editing {
+		t.Fatal("enter should start editing")
+	}
+	for _, k := range []string{"G", "o", "o", "d"} {
+		testSend(app, k)
+	}
+	testSend(app, "down")
+	for _, k := range []string{"B", "a", "d"} {
+		testSend(app, k)
+	}
+	testSend(app, "down")
+	testSend(app, "enter")
+	if app.reviews.editing {
+		t.Fatal("save should exit editing")
+	}
+	id := app.reviews.weeks.SelectedID()
+	r, err := runtime.GetWeeklyReview(app.ctx(), app.DB, id)
+	if err != nil {
+		t.Fatalf("review not persisted: %v", err)
+	}
+	if r.ReflectionWorked != "Good" || r.ReflectionChange != "Bad" {
+		t.Fatalf("reflections=%q/%q", r.ReflectionWorked, r.ReflectionChange)
+	}
+	app.goTab(TabToday)
+	app.goTab(TabReviews)
+	for i, e := range app.reviews.entries {
+		if e.ID == id {
+			app.reviews.weeks.Select(i)
+		}
+	}
+	app.reviews.syncSelected()
+	if app.reviews.selected.ReflectionWorked != "Good" {
+		t.Fatalf("not reloaded: %q", app.reviews.selected.ReflectionWorked)
 	}
 }

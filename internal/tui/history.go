@@ -117,10 +117,11 @@ func (s *HistoryScreen) dayBody(inner int) string {
 	sb.WriteString(thScreenTitle.Render(FormatDateISO(d)) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	// Top metric cards: planned, actual, variance with task/session context.
+	// Completion is task-count based (DONE over planned), never hours.
 	variance := formatSignedLong(sum.Actual - sum.Planned)
 	completion := "—"
-	if sum.Planned > 0 {
-		completion = fmt.Sprintf("%.0f%%", float64(sum.Actual)/float64(sum.Planned)*100)
+	if sum.TasksTotal > 0 {
+		completion = fmt.Sprintf("%.0f%%", float64(sum.TasksCompleted)/float64(sum.TasksTotal)*100)
 	}
 	cards := []MetricCard{
 		{Label: "PLANNED", Value: FormatDurationLong(sum.Planned), Sub: fmt.Sprintf("%d tasks", sum.TasksTotal)},
@@ -151,7 +152,7 @@ func (s *HistoryScreen) dayBody(inner int) string {
 		{"Passed", fmt.Sprint(sum.DSAPassed)},
 	}) + "\n")
 	sb.WriteString(EvidenceRow("SWE", []StatPair{
-		{"Done", fmt.Sprint(sum.SWECompleted)},
+		{"Completed", fmt.Sprint(sum.SWECompleted)},
 		{"Partial", fmt.Sprint(sum.SWEPartial)},
 		{"Blocked", fmt.Sprint(sum.SWEBlocked)},
 	}))

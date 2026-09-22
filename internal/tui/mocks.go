@@ -29,15 +29,18 @@ type MocksScreen struct {
 	mode     string // browse, create, weak, section
 	err      string
 
-	// create form
+// create form
 	cExamCur int
+	cSubjects []string // cached subjects of the selected exam
 	cInputs  []textinput.Model
 	cLabels  []string
 	cFocus   int
 	cErr     string
 
-	// section add
-	secInput textinput.Model
+// create-chain weak selection across fresh sections
+	wChain     bool
+	wChainSecs []db.MockSection
+	wChainIdx  int
 
 	// weak editor
 	wMockID   db.ID
@@ -57,7 +60,7 @@ func NewMocksScreen(a *App) *MocksScreen {
 }
 
 func (s *MocksScreen) ownsKeys() bool {
-	return s.mode == "create" || s.mode == "weak" || s.mode == "section"
+	return s.mode == "create" || s.mode == "weak"
 }
 
 func (s *MocksScreen) Reload() {
@@ -134,16 +137,16 @@ func (s *MocksScreen) qBacksOut() bool {
 		return s.cFocus == 0
 	case "weak":
 		return s.wFocus != 0
-	case "section":
-		return false
 	}
 	return true
 }
 
 func (s *MocksScreen) onBack() bool {
 	switch s.mode {
-	case "create", "weak", "section":
+	case "create", "weak":
 		s.mode = "browse"
+		s.wChain = false
+		s.wChainSecs = nil
 		s.cErr, s.wErr = "", ""
 		s.Reload()
 		return true
@@ -160,9 +163,6 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 	if s.mode == "create" {
 		return s.updateCreate(msg)
 	}
-	if s.mode == "section" {
-		return s.updateSection(msg)
-	}
 	if s.mode == "weak" {
 		return s.updateWeak(msg)
 	}
@@ -170,7 +170,7 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 		switch k.String() {
 		case "j", "down":
 			if s.focusR {
-				if s.secCur < len(s.sections) {
+				if s.secCur < len(s.sections)-1 {
 					s.secCur++
 				}
 			} else {
@@ -204,11 +204,7 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 			return nil
 		case "enter":
 			if s.focusR {
-				if s.secCur >= len(s.sections) {
-					s.startSection()
-				} else {
-					s.openWeakEditor()
-				}
+				s.openWeakEditor()
 				return nil
 			}
 			s.focusR = true
@@ -240,7 +236,8 @@ func (s *MocksScreen) deleteSelected() {
 func (s *MocksScreen) startCreate() {
 	s.mode = "create"
 	s.cExamCur = 0
-	s.cLabels = []string{"Name", "Date", "Platform", "Score", "Total Marks", "Attempted", "Total Questions", "Correct", "Incorrect", "Unattempted", "Rank", "Percentile", "Accuracy", "Average Speed"}
+// Raw facts only: Incorrect, Unattempted and Accuracy are derived at save.
+	s.cLabels = []string{"Name", "Date", "Platform", "Score", "Total Marks", "Total Questions", "Attempted", "Correct", "Rank", "Percentile", "Average Speed"}
 	s.cInputs = make([]textinput.Model, len(s.cLabels))
 	for i, lb := range s.cLabels {
 		ti := textinput.New()
@@ -255,7 +252,25 @@ func (s *MocksScreen) startCreate() {
 	}
 	s.cFocus = 0 // 0 = exam selector, 1..N inputs, N+1 = SAVE
 	s.cErr = ""
+	s.refreshCreateSubjects()
 	s.updateCreateFocus()
+}
+
+// refreshCreateSubjects caches the selected exam's subject names: the
+// sections the new mock will derive automatically.
+func (s *MocksScreen) refreshCreateSubjects() {
+	s.cSubjects = nil
+	if len(s.exams) == 0 {
+		return
+	}
+	exam := s.exams[s.cExamCur%len(s.exams)]
+	cov, err := ComputeExamCoverage(context.Background(), s.app.DB, exam.ID)
+	if err != nil {
+		return
+	}
+	for _, sc := range cov.Subjects {
+		s.cSubjects = append(s.cSubjects, sc.Subject)
+	}
 }
 
 func (s *MocksScreen) nCreateFocus() int { return 1 + len(s.cInputs) + 1 } // exam + inputs + save
@@ -292,16 +307,20 @@ func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
 	case "left", "h":
 		if s.cFocus == 0 && len(s.exams) > 0 {
 			s.cExamCur = (s.cExamCur - 1 + len(s.exams)) % len(s.exams)
+			s.refreshCreateSubjects()
 			return nil
 		}
 	case "right", "l":
 		if s.cFocus == 0 && len(s.exams) > 0 {
 			s.cExamCur = (s.cExamCur + 1) % len(s.exams)
+			s.refreshCreateSubjects()
 			return nil
 		}
 	case "enter":
 		if s.cFocus == s.nCreateFocus()-1 {
-			if s.saveCreate() {
+			// saveCreate owns the next mode: weak-chain for fresh
+			// sections, browse when there is nothing to pick.
+			if s.saveCreate() && !s.wChain {
 				s.mode = "browse"
 				s.Reload()
 			}
@@ -384,17 +403,17 @@ func (s *MocksScreen) saveCreate() bool {
 	}
 	total, err := parseOptInt(get(4))
 	if err != nil {
-		s.cErr = "total " + err.Error()
+		s.cErr = "total marks " + err.Error()
 		return false
 	}
-	attempted, err := parseOptInt(get(5))
-	if err != nil {
-		s.cErr = "attempted " + err.Error()
-		return false
-	}
-	totalQ, err := parseOptInt(get(6))
+	totalQ, err := parseOptInt(get(5))
 	if err != nil {
 		s.cErr = "total questions " + err.Error()
+		return false
+	}
+	attempted, err := parseOptInt(get(6))
+	if err != nil {
+		s.cErr = "attempted " + err.Error()
 		return false
 	}
 	correct, err := parseOptInt(get(7))
@@ -402,90 +421,92 @@ func (s *MocksScreen) saveCreate() bool {
 		s.cErr = "correct " + err.Error()
 		return false
 	}
-	incorrect, err := parseOptInt(get(8))
-	if err != nil {
-		s.cErr = "incorrect " + err.Error()
-		return false
-	}
-	unatt, err := parseOptInt(get(9))
-	if err != nil {
-		s.cErr = "unattempted " + err.Error()
-		return false
-	}
-	rankV, err := parseOptInt(get(10))
+	rankV, err := parseOptInt(get(8))
 	if err != nil {
 		s.cErr = "rank " + err.Error()
 		return false
 	}
-	perc, err := parseOptFloat(get(11))
+	perc, err := parseOptFloat(get(9))
 	if err != nil {
 		s.cErr = "percentile " + err.Error()
 		return false
 	}
-	acc, err := parseOptFloat(get(12))
-	if err != nil {
-		s.cErr = "accuracy " + err.Error()
-		return false
-	}
-	avg, err := parseOptFloat(get(13))
+	avg, err := parseOptFloat(get(10))
 	if err != nil {
 		s.cErr = "average speed " + err.Error()
 		return false
+	}
+	// Raw facts must compose: correct within attempted within total.
+	att, corr, tot := 0, 0, 0
+	if attempted != nil {
+		att = *attempted
+	}
+	if correct != nil {
+		corr = *correct
+	}
+	if totalQ != nil {
+		tot = *totalQ
+	}
+	if corr > att || att > tot {
+		s.cErr = "need 0 <= correct <= attempted <= total"
+		return false
+	}
+	// Derived metrics (never entered): incorrect, unattempted, accuracy.
+	incorrect := att - corr
+	unatt := tot - att
+	var acc *float64
+	if att > 0 {
+		a := float64(corr) / float64(att) * 100
+		acc = &a
 	}
 	exam := s.exams[s.cExamCur%len(s.exams)]
 	id := db.ID(fmt.Sprintf("mock-%d", time.Now().UTC().UnixNano()))
 	m := db.Mock{ID: id, ExamID: exam.ID, Name: name, MockDate: date, Platform: platform,
 		Score: score, TotalScore: total, Attempted: attempted, TotalQuestions: totalQ,
-		Correct: correct, Incorrect: incorrect, Unattempted: unatt, RankValue: rankV,
+		Correct: correct, Incorrect: &incorrect, Unattempted: &unatt, RankValue: rankV,
 		Percentile: perc, Accuracy: acc, AvgSpeedSeconds: avg, CreatedAt: time.Now().UTC()}
 	if err := runtime.CreateMock(ctx, s.app.DB, m); err != nil {
 		s.cErr = err.Error()
 		return false
 	}
+	// Sections derive automatically from the exam's subjects.
+	secs := s.examSubjectSections(ctx, exam.ID, id)
+	if len(secs) == 0 {
+		s.mode = "browse"
+		s.Reload()
+		return true
+	}
+	// One continuous flow: pick weak topics per fresh section in order.
+	s.wChain = true
+	s.wChainSecs = secs
+	s.wChainIdx = 0
+	s.openWeakFor(m, secs[0])
 	return true
 }
 
-// ---- section add ----
-
-func (s *MocksScreen) startSection() {
-	if s.selMock() == nil {
-		s.err = "select a mock first"
-		return
-	}
-	s.mode = "section"
-	ti := textinput.New()
-	ti.Prompt = "│ "
-	ti.Placeholder = "Section name (e.g. QUANT)"
-	ti.CharLimit = 32
-	ti.SetWidth(24)
-	ti.Focus()
-	s.secInput = ti
-}
-
-func (s *MocksScreen) updateSection(msg tea.Msg) tea.Cmd {
-	k, isKey := msg.(tea.KeyPressMsg)
-	if isKey && k.String() == "enter" {
-		name := strings.TrimSpace(s.secInput.Value())
-		if name == "" {
-			return nil
-		}
-		ctx := context.Background()
-		m := s.selMock()
-		if m == nil {
-			s.mode = "browse"
-			return nil
-		}
-		id := db.ID(fmt.Sprintf("msec-%d", time.Now().UTC().UnixNano()))
-		if err := runtime.CreateMockSection(ctx, s.app.DB, db.MockSection{ID: id, MockID: m.ID, Name: name}); err != nil {
-			s.err = err.Error()
-		}
-		s.mode = "browse"
-		s.Reload()
+// examSubjectSections creates one mock section per subject of the exam,
+// ordered as the exam maps them. Names come from catalog subjects.
+func (s *MocksScreen) examSubjectSections(ctx context.Context, examID, mockID db.ID) []db.MockSection {
+	cov, err := ComputeExamCoverage(ctx, s.app.DB, examID)
+	if err != nil {
+		s.cErr = err.Error()
 		return nil
 	}
-	var cmd tea.Cmd
-	s.secInput, cmd = s.secInput.Update(msg)
-	return cmd
+	secs := make([]db.MockSection, 0, len(cov.Subjects))
+	for i, sc := range cov.Subjects {
+		sec := db.MockSection{
+			ID:        db.ID(fmt.Sprintf("msec-%d-%d", time.Now().UTC().UnixNano(), i)),
+			MockID:    mockID,
+			Name:      sc.Subject,
+			SortOrder: i + 1,
+		}
+		if err := runtime.CreateMockSection(ctx, s.app.DB, sec); err != nil {
+			s.cErr = err.Error()
+			return nil
+		}
+		secs = append(secs, sec)
+	}
+	return secs
 }
 
 // ---- weak editor ----
@@ -498,9 +519,15 @@ func (s *MocksScreen) openWeakEditor() {
 	if s.secCur < 0 || s.secCur >= len(s.sections) {
 		s.secCur = 0
 	}
-	sec := s.sections[s.secCur]
+	s.wChain = false
+	s.openWeakFor(*m, s.sections[s.secCur])
+}
+
+// openWeakFor opens the weak-topic editor for one concrete section.
+// Choices are real gov topics filtered to that section's subject.
+func (s *MocksScreen) openWeakFor(m db.Mock, sec db.MockSection) {
 	ctx := context.Background()
-	choices, err := runtime.ExamTopicChoices(ctx, s.app.DB, m.ExamID)
+	choices, err := s.sectionTopicChoices(ctx, m.ExamID, sec.Name)
 	if err != nil {
 		s.err = err.Error()
 		return
@@ -531,6 +558,68 @@ func (s *MocksScreen) openWeakEditor() {
 	s.wErr = ""
 	s.mode = "weak"
 	s.refreshWeakList()
+}
+
+// saveWeakTopics persists the staged ordered weak topics. Inside the
+// creation chain it advances to the next fresh section; otherwise it
+// returns to browsing.
+func (s *MocksScreen) saveWeakTopics() {
+	ctx := context.Background()
+	if err := runtime.SetWeakTopics(ctx, s.app.DB, s.wMockID, s.wSection.ID, s.wStaged); err != nil {
+		s.wErr = err.Error()
+		return
+	}
+	if s.wChain && s.wChainIdx+1 < len(s.wChainSecs) {
+		mock, err := runtime.GetMock(ctx, s.app.DB, s.wMockID)
+		if err != nil {
+			s.wErr = err.Error()
+			s.wChain = false
+			s.mode = "browse"
+			s.Reload()
+			return
+		}
+		s.wChainIdx++
+		s.openWeakFor(mock, s.wChainSecs[s.wChainIdx])
+		return
+	}
+	s.wChain = false
+	s.wChainSecs = nil
+	s.mode = "browse"
+	s.Reload()
+}
+
+// sectionTopicChoices returns real gov topics for one section: the exam
+// topics belonging to the section's subject. It falls back to every exam
+// topic when the section does not map to an exam subject (legacy customs).
+func (s *MocksScreen) sectionTopicChoices(ctx context.Context, examID db.ID, section string) ([]db.GovTopic, error) {
+	all, err := runtime.ExamTopicChoices(ctx, s.app.DB, examID)
+	if err != nil {
+		return nil, err
+	}
+	cov, cerr := ComputeExamCoverage(ctx, s.app.DB, examID)
+	if cerr != nil {
+		return all, nil
+	}
+	var subjectID db.ID
+	for _, sc := range cov.Subjects {
+		if strings.EqualFold(sc.Subject, section) {
+			subjectID = sc.SubjectID
+			break
+		}
+	}
+	if subjectID == "" {
+		return all, nil
+	}
+	out := make([]db.GovTopic, 0)
+	for _, tp := range all {
+		if tp.SubjectID == subjectID {
+			out = append(out, tp)
+		}
+	}
+	if len(out) == 0 {
+		return all, nil
+	}
+	return out, nil
 }
 
 func (s *MocksScreen) refreshWeakList() {
@@ -653,13 +742,7 @@ func (s *MocksScreen) updateWeak(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		if s.wFocus == 2 {
-			ctx := context.Background()
-			if err := runtime.SetWeakTopics(ctx, s.app.DB, s.wMockID, s.wSection.ID, s.wStaged); err != nil {
-				s.wErr = err.Error()
-				return nil
-			}
-			s.mode = "browse"
-			s.Reload()
+			s.saveWeakTopics()
 			return nil
 		}
 		if s.wFocus == 0 {
@@ -671,13 +754,7 @@ func (s *MocksScreen) updateWeak(msg tea.Msg) tea.Cmd {
 		return nil
 	case "s":
 		if s.wFocus != 0 {
-			ctx := context.Background()
-			if err := runtime.SetWeakTopics(ctx, s.app.DB, s.wMockID, s.wSection.ID, s.wStaged); err != nil {
-				s.wErr = err.Error()
-				return nil
-			}
-			s.mode = "browse"
-			s.Reload()
+			s.saveWeakTopics()
 			return nil
 		}
 	}
@@ -696,8 +773,6 @@ func (s *MocksScreen) View() string {
 	switch s.mode {
 	case "create":
 		return s.createView()
-	case "section":
-		return s.sectionView()
 	case "weak":
 		return s.weakView()
 	default:
@@ -815,19 +890,13 @@ func (s *MocksScreen) mockBody(inner int) string {
 			sb.WriteString(RowDivider(inner) + "\n")
 		}
 	}
-	// Trailing "+ New section" row: Enter-driven, no shortcut to remember.
-	if len(s.sections) > 0 {
-		sb.WriteString(RowDivider(inner) + "\n")
-	}
-	newHead := thMeta.Render("+  New section")
-	if s.focusR && s.secCur == len(s.sections) {
-		newHead = thFocusMark.Render("▶ ") + thPrimary.Render("+  New section")
-	}
-	sb.WriteString(newHead + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(thHelp.Render("Enter weak topics"))
 	return sb.String()
 }
+
+// createSubjects returns the cached subject names of the selected exam.
+func (s *MocksScreen) createSubjects() []string { return s.cSubjects }
 
 func (s *MocksScreen) createView() string {
 	w, h := s.app.contentViewport()
@@ -850,6 +919,12 @@ func (s *MocksScreen) createView() string {
 		}
 		sb.WriteString(arrow + padRight(mark, 13) + " " + thPrimary.Render(TruncateToWidth(e.Name, lw-24)) + "\n")
 	}
+	// Sections derive automatically from the selected exam's subjects.
+	sb.WriteString(RowDivider(lw-6) + "\n")
+	sb.WriteString(SectionHeader("SECTIONS") + "\n")
+	for _, sc := range s.createSubjects() {
+		sb.WriteString(thPrimary.Render(TruncateToWidth(sc, lw-8)) + "\n")
+	}
 	left := PanelFixed("EXAM", sb.String(), lw, bodyH, s.cFocus == 0)
 	var rb strings.Builder
 	rb.WriteString(SectionHeader("NEW MOCK") + "\n")
@@ -868,24 +943,6 @@ func (s *MocksScreen) createView() string {
 	}
 	rb.WriteString(thHelp.Render("↑/↓ move · H/L exam · Enter SAVE · Q back"))
 	right := PanelFixed("DETAILS", rb.String(), rw, bodyH, s.cFocus > 0)
-	return lipglossJoin(left, right)
-}
-
-func (s *MocksScreen) sectionView() string {
-	w, h := s.app.contentViewport()
-	lw, rw := TwoPaneLayout(w, 40, 24, 40)
-	bodyH := h
-	if bodyH < 8 {
-		bodyH = 8
-	}
-	m := s.selMock()
-	name := ""
-	if m != nil {
-		name = m.Name
-	}
-	left := PanelFixed("MOCK", thPrimary.Render(TruncateToWidth(name, lw-6)), lw, bodyH, false)
-	ff := FormField{Label: "Section", Input: s.secInput}
-	right := PanelFixed("NEW SECTION", ff.View(true, 8)+"\n"+RowDivider(rw-6)+"\n"+thHelp.Render("Enter save · Q back"), rw, bodyH, true)
 	return lipglossJoin(left, right)
 }
 

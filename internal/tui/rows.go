@@ -500,6 +500,55 @@ func (r TodayTaskRow) View() string {
 	return out
 }
 
+// wrapCell word-wraps s to width w on word boundaries, padding every line
+// to exactly w. It never returns empty and never ellipsizes: overlong
+// single words are hard-split. Widths are rune-based (cells are plain).
+func wrapCell(s string, w int) []string {
+	if w < 4 {
+		w = 4
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{strings.Repeat(" ", w)}
+	}
+	var lines []string
+	cur := ""
+	flush := func() {
+		if cur != "" {
+			lines = append(lines, PadToWidth(cur, w))
+			cur = ""
+		}
+	}
+	for _, wd := range words {
+		runes := []rune(wd)
+		if len(runes) > w {
+			// Hard-split pathological long words without ellipsis.
+			flush()
+			for len(runes) > w {
+				lines = append(lines, string(runes[:w]))
+				runes = runes[w:]
+			}
+			cur = string(runes)
+			continue
+		}
+		if cur == "" {
+			cur = wd
+			continue
+		}
+		if len([]rune(cur))+1+len(runes) <= w {
+			cur += " " + wd
+			continue
+		}
+		flush()
+		cur = wd
+	}
+	flush()
+	if len(lines) == 0 {
+		lines = append(lines, strings.Repeat(" ", w))
+	}
+	return lines
+}
+
 // ---- Today task table: real aligned columns + thin dividers ----
 
 // TodayRowView renders one Today task as aligned columns:
@@ -509,14 +558,14 @@ type TodayTaskTable struct {
 	Status  []TaskStatus
 	Bundles []Bundle
 	Cursor  int
-	Offset  int
+	Offset  int // first visible logical row
 	Width   int
-	Height  int // visible rows
+	Lines   int // visible line budget (header + dividers + row lines)
 	Focus   bool
 }
 
 // NewTodayTaskTable returns an empty table.
-func NewTodayTaskTable() TodayTaskTable { return TodayTaskTable{Width: 60, Height: 10} }
+func NewTodayTaskTable() TodayTaskTable { return TodayTaskTable{Width: 60, Lines: 10} }
 
 // SetData replaces rows with their resolved bundles for columns.
 func (t *TodayTaskTable) SetData(tasks []db.TodayTask, status []TaskStatus, bundles []Bundle) {
@@ -532,8 +581,9 @@ func (t *TodayTaskTable) SetData(tasks []db.TodayTask, status []TaskStatus, bund
 	t.ensureVisible()
 }
 
-// SetSize sets content width and viewport height in LINES.
-// Header + divider cost 2 lines; each row + divider costs ~2 lines.
+// SetSize sets content width and the visible line budget. The header costs
+// 2 lines; every logical row costs 1 line per wrapped TASK line plus one
+// divider, so multi-line rows consume the budget dynamically.
 func (t *TodayTaskTable) SetSize(w, lines int) {
 	if w < 30 {
 		w = 30
@@ -542,11 +592,7 @@ func (t *TodayTaskTable) SetSize(w, lines int) {
 		lines = 5
 	}
 	t.Width = w
-	rows := (lines - 2 + 1) / 2
-	if rows < 2 {
-		rows = 2
-	}
-	t.Height = rows
+	t.Lines = lines
 }
 
 // SetCursor moves selection.
@@ -579,15 +625,60 @@ func (t *TodayTaskTable) MoveUp(n int) {
 // CursorPos returns the cursor.
 func (t TodayTaskTable) CursorPos() int { return t.Cursor }
 
+// lineCost returns the rendered line count of logical row i (wrapped TASK
+// lines, dividers excluded).
+func (t *TodayTaskTable) lineCost(i int) int {
+	if i < 0 || i >= len(t.Tasks) {
+		return 1
+	}
+	numW, domW, areaW, typW, durW, stW := measureTodayCols(t.Width)
+	taskW := t.Width - 1 - (numW + domW + areaW + typW + durW + stW) - 6*2
+	if taskW < 4 {
+		taskW = 4
+	}
+	var b Bundle
+	if i < len(t.Bundles) {
+		b = t.Bundles[i]
+	}
+	_, _, label := TaskColumns(t.Tasks[i], b)
+	n := len(wrapCell(label, taskW))
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
 func (t *TodayTaskTable) ensureVisible() {
-	if t.Height < 1 {
-		t.Height = 1
+	if t.Lines < 5 {
+		t.Lines = 5
+	}
+	if len(t.Tasks) == 0 {
+		t.Offset = 0
+		return
+	}
+	if t.Cursor >= len(t.Tasks) {
+		t.Cursor = len(t.Tasks) - 1
+	}
+	if t.Cursor < 0 {
+		t.Cursor = 0
 	}
 	if t.Cursor < t.Offset {
 		t.Offset = t.Cursor
 	}
-	if t.Cursor >= t.Offset+t.Height {
-		t.Offset = t.Cursor - t.Height + 1
+	// Advance the offset until the cursor block fits the line budget.
+	// Header (2) + row lines + one divider between consecutive rows.
+	for {
+		total := 2
+		for i := t.Offset; i <= t.Cursor; i++ {
+			total += t.lineCost(i)
+			if i > t.Offset {
+				total++ // divider
+			}
+		}
+		if total <= t.Lines || t.Offset >= t.Cursor {
+			break
+		}
+		t.Offset++
 	}
 	if t.Offset < 0 {
 		t.Offset = 0
@@ -622,17 +713,26 @@ func (t TodayTaskTable) View() string {
 	var sb strings.Builder
 	sb.WriteString(thTableHead.Render(header) + "\n")
 	sb.WriteString(RowDivider(w) + "\n")
-	end := t.Offset + t.Height
-	if end > len(t.Tasks) {
-		end = len(t.Tasks)
-	}
-	for i := t.Offset; i < end; i++ {
-		sb.WriteString(t.rowLine(i, numW, domW, areaW, typW, taskW, durW, stW, w))
-		if i < end-1 {
-			sb.WriteString("\n" + RowDivider(w) + "\n")
-		} else {
-			sb.WriteString("\n")
+	used := 2
+	end := t.Offset
+	for i := t.Offset; i < len(t.Tasks); i++ {
+		cost := t.lineCost(i)
+		add := cost
+		if i > t.Offset {
+			add++ // divider before this row
 		}
+		if used+add > t.Lines && i > t.Offset {
+			break
+		}
+		if i > t.Offset {
+			sb.WriteString(RowDivider(w) + "\n")
+			used++
+		}
+		for _, ln := range t.rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w) {
+			sb.WriteString(ln + "\n")
+		}
+		used += cost
+		end = i + 1
 	}
 	if t.Offset > 0 {
 		sb.WriteString(thHelp.Render("↑ more above") + "\n")
@@ -726,7 +826,12 @@ func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 	}
 }
 
-func (t TodayTaskTable) rowLine(i, numW, domW, areaW, typW, taskW, durW, stW, w int) string {
+// rowBlock renders logical row i as one or more physical lines. The TASK
+// column word-wraps; DUR and STATUS stay right-aligned on the first line;
+// continuation lines carry the wrapped task text. A selected row paints
+// every line of the block, so the highlight covers the full expanded width
+// and height as ONE component. j/k move between logical rows.
+func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w int) []string {
 	task := t.Tasks[i]
 	st := TaskTodo
 	if i < len(t.Status) {
@@ -743,8 +848,8 @@ func (t TodayTaskTable) rowLine(i, numW, domW, areaW, typW, taskW, durW, stW, w 
 	dom := PadToWidth(TruncateToWidth(string(task.Domain), domW), domW)
 	are := PadToWidth(TruncateToWidth(area, areaW), areaW)
 	ty := PadToWidth(TruncateToWidth(typ, typW), typW)
-	title := PadToWidth(TruncateToWidth(label, taskW), taskW)
-	dur := PadToWidth(TruncateToWidth(FormatDuration(task.PlannedSeconds), durW), durW)
+	tasks := wrapCell(label, taskW)
+	dur := PadToWidth(TruncateToWidth(FormatDurationLong(task.PlannedSeconds), durW), durW)
 	stTxt := "TODO"
 	switch st {
 	case TaskActive:
@@ -753,7 +858,8 @@ func (t TodayTaskTable) rowLine(i, numW, domW, areaW, typW, taskW, durW, stW, w 
 		stTxt = "DONE"
 	}
 	stCell := PadToWidth(stTxt, stW)
-	th, edged := rowThemeFor(i == t.Cursor, t.Focus && i == t.Cursor)
+	selected := i == t.Cursor
+	th, edged := rowThemeFor(selected, t.Focus && selected)
 	lead := " "
 	if edged {
 		lead = "▌"
@@ -762,26 +868,59 @@ func (t TodayTaskTable) rowLine(i, numW, domW, areaW, typW, taskW, durW, stW, w 
 	if string(task.Domain) == "GOV" || string(task.Domain) == "DSA" || string(task.Domain) == "SWE" {
 		domCell = th.domain(string(task.Domain), dom)
 	}
-	segs := []rowCell{
-		{lead, th.edge},
-		{num, th.main},
-		{"  ", th.gap},
-		domCell,
-		{"  ", th.gap},
-		{are, th.main},
-		{"  ", th.gap},
-		{ty, th.main},
-		{"  ", th.gap},
-		{title, th.main},
-		{"  ", th.gap},
-		{dur, th.main},
-		{"  ", th.gap},
-		{stCell, th.main},
+	gap := rowCell{"  ", th.gap}
+	blank := func(n int) rowCell {
+		if n < 0 {
+			n = 0
+		}
+		return rowCell{strings.Repeat(" ", n), th.gap}
 	}
-	out := paintCells(segs...)
-	if lipgloss.Width(out) > w {
-		out = ansi.Truncate(out, w, "…")
+	lines := make([]string, 0, len(tasks))
+	for li, tl := range tasks {
+		var segs []rowCell
+		if li == 0 {
+			segs = []rowCell{
+				{lead, th.edge},
+				{num, th.main},
+				{"  ", th.gap},
+				domCell,
+				{"  ", th.gap},
+				{are, th.main},
+				{"  ", th.gap},
+				{ty, th.main},
+				{"  ", th.gap},
+				{tl, th.main},
+				{"  ", th.gap},
+				{dur, th.main},
+				{"  ", th.gap},
+				{stCell, th.main},
+			}
+		} else {
+			// Continuation: wrapped task text under the TASK column;
+			// DUR/STATUS stay on the first line, aligned right.
+			segs = []rowCell{
+				{lead, th.edge},
+				blank(numW),
+				gap,
+				blank(domW),
+				gap,
+				blank(areaW),
+				gap,
+				blank(typW),
+				gap,
+				{tl, th.main},
+				gap,
+				blank(durW),
+				gap,
+				blank(stW),
+			}
+		}
+		out := paintCells(segs...)
+		if lipgloss.Width(out) > w {
+			out = ansi.Truncate(out, w, "…")
+		}
+		lines = append(lines, out)
 	}
-	return out
+	_ = gap
+	return lines
 }
-

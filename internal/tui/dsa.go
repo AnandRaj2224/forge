@@ -259,7 +259,7 @@ func (s *DSAScreen) problemBody(inner int) string {
 		sb.WriteString(MetaRow("Optimal", yn[d.Last.Optimal], 12) + "\n")
 		sb.WriteString(MetaRow("Hint used", yn[d.Last.HintUsed], 12) + "\n")
 		if d.Last.SolveTimeSeconds != nil {
-			sb.WriteString(MetaRow("Solve time", FormatDuration(*d.Last.SolveTimeSeconds), 12) + "\n")
+			sb.WriteString(MetaRow("Solve time", FormatDurationLong(*d.Last.SolveTimeSeconds), 12) + "\n")
 		} else {
 			sb.WriteString(MetaRow("Solve time", "—", 12) + "\n")
 		}

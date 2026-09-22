@@ -6,6 +6,7 @@ import (
 	"time"
 
 	db "forge/internal/db"
+	"forge/internal/db/catalog"
 )
 
 // History aggregates are derived entirely from existing runtime evidence
@@ -282,7 +283,8 @@ type WeeklyEvidence struct {
 	Planned      int
 	Actual       int
 	Sessions     int
-	Tasks        int
+	Tasks        int // distinct planned tasks with stopped-session evidence (DONE)
+	TasksTotal   int // distinct planned tasks in range (completion denominator)
 	GovSeconds   int
 	DSASeconds   int
 	SWESeconds   int
@@ -295,6 +297,117 @@ type WeeklyEvidence struct {
 	SWECompleted int
 	SWEPartial   int
 	SWEBlocked   int
+}
+
+// GovSubjectEvidence is one subject slice of GOV evidence: lectures plus
+// practice questions with accuracy. Only subjects with actual evidence in
+// the period are returned, ordered by subject sort order.
+type GovSubjectEvidence struct {
+	SubjectID db.ID
+	Subject   string
+	Lectures  int
+	Attempted int
+	Correct   int
+	Accuracy  float64 // 0 when nothing attempted
+}
+
+// ComputeWeeklyGovSubjects aggregates GOV lecture completions and practice
+// records per subject inside [weekStart, weekEnd] using existing tables:
+// completions join lectures to topics to subjects, records carry topic IDs.
+// NOTE: the DB pool allows a single open connection, so every rows result
+// is fully collected (and closed) before any follow-up lookup runs.
+// Nesting a query inside an open rows loop deadlocks permanently.
+func ComputeWeeklyGovSubjects(ctx context.Context, q db.DBTX, weekStart, weekEnd string) []GovSubjectEvidence {
+	lo := dayStart(weekStart)
+	hi := dayStart(weekEnd) + 86400
+	type agg struct {
+		subjectID db.ID
+		lectures  int
+		attempted int
+		correct   int
+	}
+	bySubject := map[string]*agg{}
+	accumulate := func(subjectID db.ID, lectures, attempted, correct int) {
+		a, ok := bySubject[string(subjectID)]
+		if !ok {
+			a = &agg{subjectID: subjectID}
+			bySubject[string(subjectID)] = a
+		}
+		a.lectures += lectures
+		a.attempted += attempted
+		a.correct += correct
+	}
+	subjectOfTopic := func(topicID string) (db.ID, bool) {
+		var subjectID string
+		if err := q.QueryRowContext(ctx, `SELECT subject_id FROM gov_topics WHERE id = ?`, topicID).Scan(&subjectID); err != nil {
+			return "", false
+		}
+		return db.ID(subjectID), true
+	}
+	// Lecture completions in range: collect IDs first, then map through
+	// lectures/topics with no open rows.
+	var lectureIDs []string
+	if rows, err := q.QueryContext(ctx, `SELECT lecture_id FROM gov_lecture_completions WHERE completed_at >= ? AND completed_at < ?`, lo, hi); err == nil {
+		func() {
+			defer rows.Close()
+			for rows.Next() {
+				var lectureID string
+				if rows.Scan(&lectureID) == nil {
+					lectureIDs = append(lectureIDs, lectureID)
+				}
+			}
+		}()
+	}
+	for _, lectureID := range lectureIDs {
+		var topicID string
+		if err := q.QueryRowContext(ctx, `SELECT topic_id FROM gov_lectures WHERE id = ?`, lectureID).Scan(&topicID); err != nil {
+			continue
+		}
+		if subjectID, ok := subjectOfTopic(topicID); ok {
+			accumulate(subjectID, 1, 0, 0)
+		}
+	}
+	// Practice records in range: collect rows first, then map topics.
+	type pracRow struct {
+		topicID string
+		att     int
+		corr    int
+	}
+	var pracRows []pracRow
+	if rows, err := q.QueryContext(ctx, `SELECT topic_id, attempted, correct FROM gov_practice_records WHERE recorded_at >= ? AND recorded_at < ?`, lo, hi); err == nil {
+		func() {
+			defer rows.Close()
+			for rows.Next() {
+				var r pracRow
+				if rows.Scan(&r.topicID, &r.att, &r.corr) == nil {
+					pracRows = append(pracRows, r)
+				}
+			}
+		}()
+	}
+	for _, r := range pracRows {
+		if subjectID, ok := subjectOfTopic(r.topicID); ok {
+			accumulate(subjectID, 0, r.att, r.corr)
+		}
+	}
+	// Order by subject sort order; resolve display names via catalog.
+	subjects, err := catalog.GetGovSubjects(ctx, q)
+	if err != nil {
+		return nil
+	}
+	out := make([]GovSubjectEvidence, 0, len(bySubject))
+	for _, s := range subjects {
+		a, ok := bySubject[string(s.ID)]
+		if !ok || (a.lectures == 0 && a.attempted == 0) {
+			continue
+		}
+		ev := GovSubjectEvidence{SubjectID: s.ID, Subject: s.Name, Lectures: a.lectures, Attempted: a.attempted, Correct: a.correct}
+		if a.attempted > 0 {
+			ev.Accuracy = float64(a.correct) / float64(a.attempted)
+		}
+		out = append(out, ev)
+	}
+	return out
 }
 
 // ComputeWeeklyEvidence aggregates evidence for an inclusive date range.
@@ -335,6 +448,7 @@ func ComputeWeeklyEvidence(ctx context.Context, q db.DBTX, weekStart, weekEnd st
 					if trows.Scan(&id, &planned) == nil && !seenTask[id] {
 						seenTask[id] = true
 						e.Planned += planned
+						e.TasksTotal++
 					}
 				}
 			}()

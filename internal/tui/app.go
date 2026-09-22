@@ -151,10 +151,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// always quit globally. q backs out only from non-text widgets.
 		inForm := a.tab == TabToday && a.today.zone == tzRight && a.today.right == "result" && a.today.result != nil
 		inMockForm := a.tab == TabMocks && a.mocks.ownsKeys()
+		inReviewEdit := a.tab == TabReviews && a.reviews.editing
 		if !IsQuit(ks) {
 			if inForm {
 				if IsBack(ks) && !a.today.result.textFocus() {
 					// fall through to Back below
+				} else {
+					break
+				}
+			} else if inReviewEdit {
+				if IsBack(ks) && !a.reviews.textFocus() {
+					// fall through to Back below (exits editing)
 				} else {
 					break
 				}
