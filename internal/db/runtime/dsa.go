@@ -130,9 +130,11 @@ ON CONFLICT(problem_id) DO UPDATE SET repeat_stage = excluded.repeat_stage, curr
 	return nil
 }
 
-// ListDSARepeatDue returns repeat states ordered by next_review_date.
-func ListDSARepeatDue(ctx context.Context, q db.DBTX) ([]db.DSARepeatState, error) {
-	rows, err := q.QueryContext(ctx, `SELECT problem_id, repeat_stage, current_interval_days, next_review_date, updated_at FROM dsa_repeat_state ORDER BY next_review_date`)
+// ListDSARepeatDue returns repeat states due on or before localDate
+// (YYYY-MM-DD), ordered by next_review_date. A due query respects the
+// requested local date; pass "9999-12-31" to list all rows.
+func ListDSARepeatDue(ctx context.Context, q db.DBTX, localDate string) ([]db.DSARepeatState, error) {
+	rows, err := q.QueryContext(ctx, `SELECT problem_id, repeat_stage, current_interval_days, next_review_date, updated_at FROM dsa_repeat_state WHERE next_review_date <= ? ORDER BY next_review_date`, localDate)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: list repeat due: %w", err)
 	}

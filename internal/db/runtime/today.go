@@ -113,8 +113,10 @@ FROM today_tasks WHERE id = ?`, id).Scan(
 	return t, nil
 }
 
-// CanStartTodayTask is the authoritative domain rule: a completed Today
-// task (stopped-session evidence persisted) must not be executable again.
+// CanStartTodayTask is a legacy any-evidence approximation kept for the
+// existing UI test. The authoritative rule is engine.EvaluateTodayTask
+// (exact bundle completion) enforced by engine.StartTodayTask, which the TUI
+// uses. Callers creating sessions must consult the engine, not this helper.
 // It returns false with a reason when starting is forbidden. The UI must
 // reflect this (no Start action) but must never be the only enforcement:
 // callers creating sessions must consult this first.

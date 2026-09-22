@@ -11,6 +11,7 @@ import (
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
 // MocksScreen: LEFT mock list, RIGHT dense mock detail with per-section
@@ -561,12 +562,35 @@ func (s *MocksScreen) saveCreate() bool {
 		Score: score, TotalScore: total, Attempted: attempted, TotalQuestions: totalQ,
 		Correct: correct, Incorrect: &incorrect, Unattempted: &unatt, RankValue: rankV,
 		Percentile: perc, Accuracy: acc, AvgSpeedSeconds: avg, CreatedAt: time.Now().UTC()}
-	if err := runtime.CreateMock(ctx, s.app.DB, m); err != nil {
+	// Engine metric validation (score<=total, correct<=attempted, etc.).
+	if err := engine.ValidateMockMetrics(m); err != nil {
 		s.cErr = err.Error()
 		return false
 	}
-	// Sections derive automatically from the exam's subjects.
-	secs := s.examSubjectSections(ctx, exam.ID, id)
+	// Atomic: mock + derived sections in ONE transaction. Sections carry the
+	// explicit GOV subject mapping (from coverage SubjectID, not inferred
+	// from the name string). The name remains the user-visible actual section
+	// name; the mapping is stored separately for the practice signal.
+	var secs []db.MockSection
+	if err := s.app.DB.WithTx(ctx, func(q db.DBTX) error {
+		if err := runtime.CreateMock(ctx, q, m); err != nil {
+			return err
+		}
+		derived, err := s.derivedSections(ctx, q, exam.ID, id)
+		if err != nil {
+			return err
+		}
+		for _, sec := range derived {
+			if err := runtime.CreateMockSection(ctx, q, sec); err != nil {
+				return err
+			}
+		}
+		secs = derived
+		return nil
+	}); err != nil {
+		s.cErr = err.Error()
+		return false
+	}
 	if len(secs) == 0 {
 		s.mode = "browse"
 		s.Reload()
@@ -580,27 +604,40 @@ func (s *MocksScreen) saveCreate() bool {
 	return true
 }
 
+// derivedSections builds one section per subject of the exam with the explicit
+// GOV subject mapping set (no name inference at save time).
+func (s *MocksScreen) derivedSections(ctx context.Context, q db.DBTX, examID, mockID db.ID) ([]db.MockSection, error) {
+	cov, err := ComputeExamCoverage(ctx, q, examID)
+	if err != nil {
+		return nil, err
+	}
+	secs := make([]db.MockSection, 0, len(cov.Subjects))
+	for i, sc := range cov.Subjects {
+		sid := sc.SubjectID
+		sec := db.MockSection{
+			ID: db.ID(fmt.Sprintf("msec-%d-%d", time.Now().UTC().UnixNano(), i)),
+			MockID: mockID, Name: sc.Subject, SortOrder: i + 1,
+			GovSubjectID: &sid,
+		}
+		secs = append(secs, sec)
+	}
+	return secs, nil
+}
+
 // examSubjectSections creates one mock section per subject of the exam,
 // ordered as the exam maps them. Names come from catalog subjects.
+// Kept for compat; new code uses derivedSections inside a transaction.
 func (s *MocksScreen) examSubjectSections(ctx context.Context, examID, mockID db.ID) []db.MockSection {
-	cov, err := ComputeExamCoverage(ctx, s.app.DB, examID)
+	secs, err := s.derivedSections(ctx, s.app.DB, examID, mockID)
 	if err != nil {
 		s.cErr = err.Error()
 		return nil
 	}
-	secs := make([]db.MockSection, 0, len(cov.Subjects))
-	for i, sc := range cov.Subjects {
-		sec := db.MockSection{
-			ID:        db.ID(fmt.Sprintf("msec-%d-%d", time.Now().UTC().UnixNano(), i)),
-			MockID:    mockID,
-			Name:      sc.Subject,
-			SortOrder: i + 1,
-		}
+	for _, sec := range secs {
 		if err := runtime.CreateMockSection(ctx, s.app.DB, sec); err != nil {
 			s.cErr = err.Error()
 			return nil
 		}
-		secs = append(secs, sec)
 	}
 	return secs
 }
@@ -620,10 +657,13 @@ func (s *MocksScreen) openWeakEditor() {
 }
 
 // openWeakFor opens the weak-topic editor for one concrete section.
-// Choices are real gov topics filtered to that section's subject.
+// Choices are real gov topics filtered to the section's explicit GOV subject
+// mapping AND the exam syllabus. The mapping is never inferred from the name
+// when gov_subject_id is present; legacy unmapped sections fall back to
+// name matching.
 func (s *MocksScreen) openWeakFor(m db.Mock, sec db.MockSection) {
 	ctx := context.Background()
-	choices, err := s.sectionTopicChoices(ctx, m.ExamID, sec.Name)
+	choices, err := s.sectionTopicChoicesFor(ctx, m.ExamID, sec)
 	if err != nil {
 		s.err = err.Error()
 		return
@@ -656,12 +696,25 @@ func (s *MocksScreen) openWeakFor(m db.Mock, sec db.MockSection) {
 	s.refreshWeakList()
 }
 
-// saveWeakTopics persists the staged ordered weak topics. Inside the
-// creation chain it advances to the next fresh section; otherwise it
-// returns to browsing.
+// saveWeakTopics persists the staged ordered weak topics atomically with full
+// subject+syllabus validation. Inside the creation chain it advances to the
+// next fresh section; otherwise it returns to browsing.
 func (s *MocksScreen) saveWeakTopics() {
 	ctx := context.Background()
-	if err := runtime.SetWeakTopics(ctx, s.app.DB, s.wMockID, s.wSection.ID, s.wStaged); err != nil {
+	subj := db.ID("")
+	if s.wSection.GovSubjectID != nil {
+		subj = *s.wSection.GovSubjectID
+	} else {
+		// Legacy unmapped section: resolve via name for validation.
+		if resolved, err := s.resolveSubjectForLegacy(ctx, s.wExamID, s.wSection.Name); err == nil {
+			subj = resolved
+		}
+	}
+	if subj == "" {
+		s.wErr = "section has no GOV subject mapping"
+		return
+	}
+	if err := engine.ReplaceWeakTopicsAtomic(ctx, s.app.DB, s.wMockID, s.wSection.ID, subj, s.wStaged); err != nil {
 		s.wErr = err.Error()
 		return
 	}
@@ -682,6 +735,43 @@ func (s *MocksScreen) saveWeakTopics() {
 	s.wChainSecs = nil
 	s.mode = "browse"
 	s.Reload()
+}
+
+// sectionTopicChoicesFor returns real gov topics for one section: the exam
+// topics belonging to the section's explicit subject mapping. It falls back
+// to name matching only for legacy sections without a mapping, and to every
+// exam topic when the section does not map to an exam subject.
+func (s *MocksScreen) sectionTopicChoicesFor(ctx context.Context, examID db.ID, sec db.MockSection) ([]db.GovTopic, error) {
+	all, err := runtime.ExamTopicChoices(ctx, s.app.DB, examID)
+	if err != nil {
+		return nil, err
+	}
+	if sec.GovSubjectID != nil && *sec.GovSubjectID != "" {
+		out := make([]db.GovTopic, 0)
+		for _, tp := range all {
+			if tp.SubjectID == *sec.GovSubjectID {
+				out = append(out, tp)
+			}
+		}
+		if len(out) > 0 {
+			return out, nil
+		}
+		return all, nil
+	}
+	return s.sectionTopicChoices(ctx, examID, sec.Name)
+}
+
+func (s *MocksScreen) resolveSubjectForLegacy(ctx context.Context, examID db.ID, section string) (db.ID, error) {
+	cov, err := ComputeExamCoverage(ctx, s.app.DB, examID)
+	if err != nil {
+		return "", err
+	}
+	for _, sc := range cov.Subjects {
+		if strings.EqualFold(sc.Subject, section) {
+			return sc.SubjectID, nil
+		}
+	}
+	return "", fmt.Errorf("no subject mapping for legacy section %q", section)
 }
 
 // sectionTopicChoices returns real gov topics for one section: the exam
@@ -968,6 +1058,7 @@ func (s *MocksScreen) mockBody(inner int) string {
 			head = thFocusMark.Render("▶ ") + thPanelTitle.Render(strings.ToUpper(sec.Name))
 		}
 		sb.WriteString(head + "\n")
+		sb.WriteString("  " + thMeta.Render("maps to "+s.sectionSubjectLabel(sec)) + "\n")
 		ws := s.weak[string(sec.ID)]
 		if len(ws) == 0 {
 			sb.WriteString("  " + thHelp.Render("—") + "\n")
@@ -993,6 +1084,21 @@ func (s *MocksScreen) mockBody(inner int) string {
 
 // createSubjects returns the cached subject names of the selected exam.
 func (s *MocksScreen) createSubjects() []string { return s.cSubjects }
+
+// sectionSubjectLabel renders the explicit GOV subject mapping for a section.
+func (s *MocksScreen) sectionSubjectLabel(sec db.MockSection) string {
+	if sec.GovSubjectID != nil && *sec.GovSubjectID != "" {
+		if nm, ok := s.examName[string(*sec.GovSubjectID)]; ok && nm != "" {
+			return nm
+		}
+		ctx := context.Background()
+		if g, err := catalog.GetGovSubject(ctx, s.app.DB, *sec.GovSubjectID); err == nil {
+			return g.Name
+		}
+		return string(*sec.GovSubjectID)
+	}
+	return "unmapped legacy"
+}
 
 func (s *MocksScreen) createView() string {
 	w, h := s.app.contentViewport()

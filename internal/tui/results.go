@@ -2,13 +2,14 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
-	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
 // PracticeRow is one editable topic row in the GOV practice result form.
@@ -42,19 +43,22 @@ type SWERow struct {
 
 // ResultForm is the domain-specific evidence form embedded in Today's
 // right-bottom panel. SAVE stays disabled until every bundled item validates.
+// Focus order, rendered position, and scroll position derive from one
+// structured field model (fieldDescriptors), never hard-coded line numbers.
 type ResultForm struct {
-	app       *App
-	sessionID string
-	task      *db.TodayTask
-	bundle    Bundle
-	kind      string
-	lecture   RadioGroup
-	prows     []PracticeRow
-	drows     []DSARow
-	srows     []SWERow
-	focus     int
-	save      Button
-	err       string
+	app           *App
+	sessionID     string
+	task          *db.TodayTask
+	bundle        Bundle
+	kind          string
+	lecture       RadioGroup
+	prows         []PracticeRow
+	drows         []DSARow
+	srows         []SWERow
+	focus         int
+	save          Button
+	err           string
+	satisfiedNote string // already-recorded items from prior sessions (read-only)
 }
 
 func NewResultForm(a *App) *ResultForm {
@@ -69,22 +73,46 @@ func (s *ResultForm) Reload(sessionID string, task db.TodayTask) {
 	s.kind = resultKindForTask(task)
 	s.focus, s.err = 0, ""
 	s.prows, s.drows, s.srows = nil, nil, nil
+	s.satisfiedNote = ""
 	s.lecture = NewRadio([]string{"YES", "NO"})
+	// Multi-session partials: already-satisfied target items are shown
+	// read-only; only missing items require new evidence.
+	missing := map[string]bool{}
+	var completed []string
+	if ev, err := engine.EvaluateTodayTask(ctx, s.app.DB, task.ID); err == nil {
+		for _, m := range ev.Missing {
+			missing[m] = true
+		}
+		completed = ev.Completed
+	}
+	onlyMissing := len(missing) > 0 || len(completed) > 0
+	if len(completed) > 0 {
+		s.satisfiedNote = fmt.Sprintf("%d already recorded · %d still needed", len(completed), len(missing))
+	}
 	switch s.kind {
 	case "PRACTICE":
 		for _, p := range s.bundle.Practice {
+			if onlyMissing && !missing[string(p.TopicID)] {
+				continue
+			}
 			s.prows = append(s.prows, PracticeRow{TopicID: p.TopicID, Topic: p.Topic,
-				Time: NewField("Time", "20m", 8), Att: NewField("Attempted", "20", 8),
-				Corr: NewField("Correct", "16", 8), Avg: NewField("Avg speed", "17.2", 8)})
+				Time: NewField("Time", "e.g. 20m", 10), Att: NewField("Attempted", "e.g. 20", 10),
+				Corr: NewField("Correct", "e.g. 16", 10), Avg: NewField("Avg speed", "e.g. 17.2s", 10)})
 		}
 	case "DSA":
 		for _, d := range s.bundle.DSA {
+			if onlyMissing && !missing[string(d.ProblemID)] {
+				continue
+			}
 			s.drows = append(s.drows, DSARow{ProblemID: d.ProblemID, Title: d.Title, Mode: d.Mode,
 				Indep: Checkbox{Label: "Independent"}, Optimal: Checkbox{Label: "Optimal"},
-				Hint: Checkbox{Label: "Hint used"}, Solve: NewField("Solve time", "5m", 8)})
+				Hint: Checkbox{Label: "Hint used"}, Solve: NewField("Solve time", "e.g. 5m", 10)})
 		}
 	case "SWE":
 		for _, sw := range s.bundle.SWE {
+			if sw.TaskID != nil && onlyMissing && !missing[string(*sw.TaskID)] {
+				continue
+			}
 			label := sw.Task
 			if label == "" {
 				label = sw.Area
@@ -136,7 +164,10 @@ func (s *ResultForm) revalidate() {
 			return
 		}
 		for _, r := range s.prows {
-			if _, _, _, _, msg := ValidatePracticeRow(r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value()); msg != "" {
+			// Authoritative engine rule: every required target item valid,
+			// including average speed (empty values are truly empty via
+			// "e.g." placeholders, never fake pre-filled values).
+			if _, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value(), true); msg != "" {
 				s.save.Disabled = true
 				return
 			}
@@ -255,40 +286,136 @@ func (s *ResultForm) moveFocus(d int) {
 	s.updateFocusVisual()
 }
 
-// focusLine returns the 0-based content line of the focused widget inside
-// ViewFor output (line count is width-independent: rows never wrap).
-func (s *ResultForm) focusLine() int {
-	f := s.focus
+// fieldDescriptors is the single structured field model: focus order,
+// rendered position, and scroll position all derive from it. Each entry is
+// one focusable widget; the SAVE button is always last.
+func (s *ResultForm) fieldDescriptors() []string {
+	var out []string
 	switch s.kind {
 	case "LECTURE":
-		if f <= 0 {
-			return 2 // first radio option
-		}
-		return 5 // SAVE box first line
+		out = []string{"lecture", "save"}
 	case "PRACTICE":
-		n := len(s.prows)
-		if f < n*4 {
-			r, c := f/4, f%4
-			base := 1 + r*5
-			if c < 2 {
-				return base + 2
-			}
-			return base + 3
+		for i := range s.prows {
+			out = append(out,
+				fmt.Sprintf("p%d-time", i), fmt.Sprintf("p%d-att", i),
+				fmt.Sprintf("p%d-corr", i), fmt.Sprintf("p%d-avg", i))
 		}
-		return n*5 + 2 // SAVE box first line
+		out = append(out, "save")
 	case "DSA":
-		m := len(s.drows)
-		if f < m*4 {
-			r, c := f/4, f%4
-			return 1 + r*7 + 2 + c
+		for i := range s.drows {
+			out = append(out,
+				fmt.Sprintf("d%d-indep", i), fmt.Sprintf("d%d-opt", i),
+				fmt.Sprintf("d%d-hint", i), fmt.Sprintf("d%d-solve", i))
 		}
-		return m*7 + 2 // SAVE box first line
+		out = append(out, "save")
 	case "SWE":
-		n := len(s.srows)
-		if f < n {
-			return 1 + f*6 + 2 // first radio option of task f
+		for i := range s.srows {
+			out = append(out, fmt.Sprintf("s%d-outcome", i))
 		}
-		return n*6 + 2 // SAVE box first line
+		out = append(out, "save")
+	default:
+		out = []string{"save"}
+	}
+	return out
+}
+
+// rowHeights returns per-item rendered heights (matching ViewFor) so
+// focusLine derives from the same layout as rendering.
+func (s *ResultForm) rowHeights() []int {
+	switch s.kind {
+	case "PRACTICE":
+		out := make([]int, len(s.prows))
+		for i := range out {
+			out[i] = 5 // divider + title + 2 field lines + validation
+		}
+		return out
+	case "DSA":
+		out := make([]int, len(s.drows))
+		for i := range out {
+			out[i] = 7 // divider + title + 3 checks + solve + validation
+		}
+		return out
+	case "SWE":
+		out := make([]int, len(s.srows))
+		for i := range out {
+			out[i] = 6 // divider + title + 3 radio options + status
+		}
+		return out
+	}
+	return nil
+}
+
+// focusLine returns the 0-based content line of the focused widget inside
+// ViewFor output, derived from the structured field model + row heights.
+func (s *ResultForm) focusLine() int {
+	f := s.focus
+	descs := s.fieldDescriptors()
+	if f < 0 || f >= len(descs) {
+		return 0
+	}
+	id := descs[f]
+	// Header lines before the first item: section header = 1.
+	header := 1
+	if id == "lecture" {
+		return header + 1 // divider + first option
+	}
+	if id == "save" {
+		total := header
+		for _, h := range s.rowHeights() {
+			total += h
+		}
+		return total + 1 // divider + save box
+	}
+	switch s.kind {
+	case "PRACTICE":
+		// p{r}-{field}: base = header + sum of prior rows.
+		var r, c int
+		fmt.Sscanf(id, "p%d-", &r)
+		for i, h := range s.rowHeights() {
+			if i >= r {
+				break
+			}
+			_ = h
+		}
+		base := header
+		for i := 0; i < r; i++ {
+			base += s.rowHeights()[i]
+		}
+		if strings.HasSuffix(id, "-time") || strings.HasSuffix(id, "-att") {
+			c = 0
+		} else {
+			c = 1
+		}
+		_ = c
+		if strings.HasSuffix(id, "-time") || strings.HasSuffix(id, "-att") {
+			return base + 2
+		}
+		return base + 3
+	case "DSA":
+		var r int
+		fmt.Sscanf(id, "d%d-", &r)
+		base := header
+		for i := 0; i < r; i++ {
+			base += s.rowHeights()[i]
+		}
+		switch {
+		case strings.HasSuffix(id, "-indep"):
+			return base + 2
+		case strings.HasSuffix(id, "-opt"):
+			return base + 3
+		case strings.HasSuffix(id, "-hint"):
+			return base + 4
+		default:
+			return base + 5
+		}
+	case "SWE":
+		var r int
+		fmt.Sscanf(id, "s%d-outcome", &r)
+		base := header
+		for i := 0; i < r; i++ {
+			base += s.rowHeights()[i]
+		}
+		return base + 2
 	}
 	return 0
 }
@@ -427,61 +554,65 @@ func (s *ResultForm) TrySave() (bool, string) {
 
 func (s *ResultForm) saveAll() error {
 	ctx := context.Background()
-	now := time.Now().UTC()
+	now := time.Now()
+	taskID := s.task.ID
+	sessionID := db.ID(s.sessionID)
 	switch s.kind {
 	case "LECTURE":
-		if s.lecture.Selected == 0 { // YES
-			lt, err := db.UnmarshalGovLectureTarget(*s.task.TargetJSON)
-			if err != nil {
-				return err
+		yes := s.lecture.Selected == 0
+		if s.lecture.Selected < 0 {
+			return fmt.Errorf("lecture outcome required")
+		}
+		_, err := engine.SaveGovLectureEvidence(ctx, s.app.DB, taskID, sessionID, yes, now)
+		if err != nil {
+			// NO without evidence is not an error path: engine returns the
+			// re-evaluated TODO state with nil error. Real failures propagate.
+			if errors.Is(err, engine.ErrAlreadySatisfied) {
+				return fmt.Errorf("lecture already complete — result is read-only")
 			}
-			return runtime.RecordLectureCompletion(ctx, s.app.DB, db.GovLectureCompletion{LectureID: lt.LectureID, SessionID: db.ID(s.sessionID), CompletedAt: now})
+			return err
 		}
 		return nil
 	case "PRACTICE":
-		return s.app.DB.WithTx(ctx, func(q db.DBTX) error {
-			for _, r := range s.prows {
-				tSecs, att, corr, avg, msg := ValidatePracticeRow(r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value())
-				if msg != "" {
-					return fmt.Errorf("%s: %s", r.Topic, msg)
-				}
-				id := db.ID(fmt.Sprintf("gpr-tui-%d-%s", now.UnixNano(), r.TopicID))
-				if err := runtime.InsertGovPracticeRecord(ctx, q, db.GovPracticeRecord{ID: id, SessionID: db.ID(s.sessionID), TopicID: r.TopicID, TimeSpentSeconds: tSecs, Attempted: att, Correct: corr, AvgQuestionSpeedSeconds: avg, RecordedAt: now}); err != nil {
-					return err
-				}
+		var inputs []engine.GovPracticeInput
+		for _, r := range s.prows {
+			in, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value(), true)
+			if msg != "" {
+				return fmt.Errorf("%s: %s", r.Topic, msg)
 			}
-			return nil
-		})
+			in.TopicID = r.TopicID
+			inputs = append(inputs, in)
+		}
+		_, err := engine.SaveGovPracticeEvidence(ctx, s.app.DB, taskID, sessionID, inputs, now)
+		return err
 	case "DSA":
-		return s.app.DB.WithTx(ctx, func(q db.DBTX) error {
-			for _, r := range s.drows {
-				_, solve, msg := ValidateSolveTime(r.Solve.Input.Value())
-				if msg != "" {
-					return fmt.Errorf("%s: %s", r.Title, msg)
-				}
-				existing, _ := runtime.GetDSAAttempts(ctx, q, r.ProblemID)
-				mode := DecideDSAAttemptMode(existing, r.Mode)
-				id := db.ID(fmt.Sprintf("datt-tui-%d-%s", now.UnixNano(), r.ProblemID))
-				if err := runtime.InsertDSAAttempt(ctx, q, db.DSAAttempt{ID: id, SessionID: db.ID(s.sessionID), ProblemID: r.ProblemID, Mode: mode, AttemptedAt: now, Independent: r.Indep.Checked, Optimal: r.Optimal.Checked, HintUsed: r.Hint.Checked, SolveTimeSeconds: solve}); err != nil {
-					return err
-				}
+		var inputs []engine.DSAAttemptInput
+		for _, r := range s.drows {
+			_, solve, msg := ValidateSolveTime(r.Solve.Input.Value())
+			if msg != "" {
+				return fmt.Errorf("%s: %s", r.Title, msg)
 			}
-			return nil
-		})
+			if solve == nil || *solve <= 0 {
+				return fmt.Errorf("%s: solve time must be > 0", r.Title)
+			}
+			inputs = append(inputs, engine.DSAAttemptInput{
+				ProblemID: r.ProblemID, Independent: r.Indep.Checked,
+				Optimal: r.Optimal.Checked, HintUsed: r.Hint.Checked, SolveSecs: *solve,
+			})
+		}
+		_, err := engine.SaveDSAEvidence(ctx, s.app.DB, taskID, sessionID, inputs, now)
+		return err
 	case "SWE":
-		return s.app.DB.WithTx(ctx, func(q db.DBTX) error {
-			for _, r := range s.srows {
-				if r.Radio.Selected < 0 {
-					return fmt.Errorf("%s: outcome required", r.Task)
-				}
-				st := db.SWEExecutionStatus(r.Radio.Options[r.Radio.Selected])
-				id := db.ID(fmt.Sprintf("swex-tui-%d-%s", now.UnixNano(), r.TaskID))
-				if err := runtime.InsertSWEExecution(ctx, q, db.SWEExecution{ID: id, SessionID: db.ID(s.sessionID), TaskID: r.TaskID, Status: st, RecordedAt: now}); err != nil {
-					return err
-				}
+		var inputs []engine.SWEOutcomeInput
+		for _, r := range s.srows {
+			if r.Radio.Selected < 0 {
+				return fmt.Errorf("%s: outcome required", r.Task)
 			}
-			return nil
-		})
+			st := db.SWEExecutionStatus(r.Radio.Options[r.Radio.Selected])
+			inputs = append(inputs, engine.SWEOutcomeInput{TaskID: r.TaskID, Status: st})
+		}
+		_, err := engine.SaveSWEEvidence(ctx, s.app.DB, taskID, sessionID, inputs, now)
+		return err
 	}
 	return fmt.Errorf("unknown result kind")
 }
@@ -497,6 +628,10 @@ func (s *ResultForm) ViewFor(inner int) string {
 	}
 	div := RowDivider(inner)
 	var sb strings.Builder
+	if s.satisfiedNote != "" {
+		sb.WriteString(thMeta.Render(s.satisfiedNote) + "\n")
+		sb.WriteString(div + "\n")
+	}
 	switch s.kind {
 	case "LECTURE":
 		sb.WriteString(SectionHeader("LECTURE COMPLETED?") + "\n")
@@ -508,12 +643,12 @@ func (s *ResultForm) ViewFor(inner int) string {
 			fbase := i * 4
 			sb.WriteString(div + "\n")
 			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(r.Topic, inner-4))) + "\n")
-			sb.WriteString("  " + r.Time.View(s.focus == fbase, 9) + "  " + r.Att.View(s.focus == fbase+1, 9) + "\n")
-			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 9) + "  " + r.Avg.View(s.focus == fbase+3, 9) + "\n")
-			if tSecs, _, _, _, msg := ValidatePracticeRow(r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value()); msg != "" {
+			sb.WriteString("  " + r.Time.View(s.focus == fbase, 11) + "  " + r.Att.View(s.focus == fbase+1, 11) + "\n")
+			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 11) + "  " + r.Avg.View(s.focus == fbase+3, 11) + "\n")
+			if in, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value(), true); msg != "" {
 				sb.WriteString("  " + thError.Render("✕ "+msg) + "\n")
 			} else {
-				sb.WriteString("  " + thSuccess.Render("✓ "+FormatDurationLong(tSecs)) + "\n")
+				sb.WriteString("  " + thSuccess.Render("✓ "+engine.FormatDurationLong(in.TimeSecs)) + "\n")
 			}
 		}
 	case "DSA":

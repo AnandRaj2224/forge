@@ -238,7 +238,8 @@ func DeleteMock(ctx context.Context, q db.DBTX, id db.ID) error {
 
 // ---- Mock sections ----
 
-// CreateMockSection inserts one section for a mock.
+// CreateMockSection inserts one section for a mock. When gov_subject_id
+// column exists it is persisted; legacy handles omit it.
 func CreateMockSection(ctx context.Context, q db.DBTX, s db.MockSection) error {
 	if strings.TrimSpace(s.Name) == "" {
 		return fmt.Errorf("runtime: section name required")
@@ -253,6 +254,17 @@ func CreateMockSection(ctx context.Context, q db.DBTX, s db.MockSection) error {
 			order = 1
 		}
 	}
+	if hasMockSubjectCol(ctx, q) {
+		var subj any
+		if s.GovSubjectID != nil {
+			subj = string(*s.GovSubjectID)
+		}
+		if _, err := q.ExecContext(ctx, `INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES (?, ?, ?, ?, ?)`,
+			string(s.ID), string(s.MockID), s.Name, order, subj); err != nil {
+			return fmt.Errorf("runtime: create mock section: %w", err)
+		}
+		return nil
+	}
 	if _, err := q.ExecContext(ctx, `INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES (?, ?, ?, ?)`,
 		string(s.ID), string(s.MockID), s.Name, order); err != nil {
 		return fmt.Errorf("runtime: create mock section: %w", err)
@@ -262,6 +274,27 @@ func CreateMockSection(ctx context.Context, q db.DBTX, s db.MockSection) error {
 
 // ListMockSections returns sections for a mock in order.
 func ListMockSections(ctx context.Context, q db.DBTX, mockID db.ID) ([]db.MockSection, error) {
+	if hasMockSubjectCol(ctx, q) {
+		rows, err := q.QueryContext(ctx, `SELECT id, mock_id, name, sort_order, gov_subject_id FROM mock_sections WHERE mock_id = ? ORDER BY sort_order`, string(mockID))
+		if err != nil {
+			return nil, fmt.Errorf("runtime: list mock sections: %w", err)
+		}
+		defer rows.Close()
+		var out []db.MockSection
+		for rows.Next() {
+			var s db.MockSection
+			var subj sql.NullString
+			if err := rows.Scan(&s.ID, &s.MockID, &s.Name, &s.SortOrder, &subj); err != nil {
+				return nil, fmt.Errorf("runtime: scan mock section: %w", err)
+			}
+			if subj.Valid {
+				v := db.ID(subj.String)
+				s.GovSubjectID = &v
+			}
+			out = append(out, s)
+		}
+		return out, rows.Err()
+	}
 	rows, err := q.QueryContext(ctx, `SELECT id, mock_id, name, sort_order FROM mock_sections WHERE mock_id = ? ORDER BY sort_order`, string(mockID))
 	if err != nil {
 		return nil, fmt.Errorf("runtime: list mock sections: %w", err)
@@ -276,6 +309,23 @@ func ListMockSections(ctx context.Context, q db.DBTX, mockID db.ID) ([]db.MockSe
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+// hasMockSubjectCol reports whether mock_sections.gov_subject_id exists
+// (post-migration 003). Keeps runtime working on pre-migration DBs.
+func hasMockSubjectCol(ctx context.Context, q db.DBTX) bool {
+	rows, err := q.QueryContext(ctx, `SELECT name FROM pragma_table_info('mock_sections')`)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if rows.Scan(&name) == nil && name == "gov_subject_id" {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteMockSection removes a section (weak topics cascade).

@@ -7,8 +7,10 @@
 PRAGMA foreign_keys = ON;
 BEGIN;
 
--- Settings
-INSERT INTO forge_settings (id, timezone, day_start_minute, created_at) VALUES (1, 'Asia/Kolkata', 600, 1788237000);
+-- Settings (Forge calendar: Asia/Kolkata, midnight day start)
+-- Idempotent: migration 003 already seeds id=1, so upsert here.
+INSERT INTO forge_settings (id, timezone, day_start_minute, created_at) VALUES (1, 'Asia/Kolkata', 0, 1788237000)
+ON CONFLICT(id) DO UPDATE SET timezone = 'Asia/Kolkata', day_start_minute = 0;
 
 -- GOV subjects
 INSERT INTO gov_subjects (id, name, sort_order) VALUES ('subj-quant', 'Quant', 1);
@@ -489,7 +491,6 @@ INSERT INTO sessions (id, today_task_id, domain, kind, title_snapshot, target_sn
 INSERT INTO sessions (id, today_task_id, domain, kind, title_snapshot, target_snapshot_json, planned_seconds, started_at, stopped_at, status) VALUES ('sess-h25-01', 'hist-2026-09-25-r1-task-01', 'GOV', 'PRACTICE', 'Quant practice • quick set', '{"subject_id":"subj-quant","topic_ids":["topic-percentage","topic-ratio","topic-number-system"]}', 3600, 1790319600, 1790322300, 'STOPPED');
 INSERT INTO sessions (id, today_task_id, domain, kind, title_snapshot, target_snapshot_json, planned_seconds, started_at, stopped_at, status) VALUES ('sess-h25-02', 'hist-2026-09-25-r1-task-02', 'DSA', 'DSA', 'DSA Practice • 2 repeat + 1 new', '{"problems":[{"problem_id":"dsa-020","mode":"REPEAT"},{"problem_id":"dsa-021","mode":"REPEAT"},{"problem_id":"dsa-022","mode":"NEW"}]}', 9000, 1790330400, 1790338200, 'STOPPED');
 INSERT INTO sessions (id, today_task_id, domain, kind, title_snapshot, target_snapshot_json, planned_seconds, started_at, stopped_at, status) VALUES ('sess-h26-01', 'hist-2026-09-26-r1-task-01', 'GOV', 'LECTURE', 'Science • Physics Basics • Core Concepts', '{"subject_id":"subj-science","topic_id":"topic-physics","lecture_id":"lec-physics-01"}', 3600, 1790413200, 1790416500, 'STOPPED');
-INSERT INTO sessions (id, today_task_id, domain, kind, title_snapshot, target_snapshot_json, planned_seconds, started_at, stopped_at, status) VALUES ('sess-h21-active', 'hist-2026-09-21-r1-task-01', 'GOV', 'LECTURE', 'Quant • Number System • Advanced Applications', '{"subject_id":"subj-quant","topic_id":"topic-number-system","lecture_id":"lec-number-system-03"}', 3600, 1789983000, NULL, 'ACTIVE');
 
 -- Lecture completions for current-week lecture sessions.
 INSERT INTO gov_lecture_completions (lecture_id, session_id, completed_at) VALUES ('lec-number-system-03', 'sess-h21-01', 1789973820);
@@ -557,22 +558,22 @@ INSERT INTO mocks (id, exam_id, name, mock_date, platform, score, total_score, r
 INSERT INTO mocks (id, exam_id, name, mock_date, platform, score, total_score, rank_value, percentile, accuracy, avg_speed_seconds, attempted, total_questions, correct, incorrect, unattempted, created_at) VALUES ('mock-ibps-02', 'exam-ibps-po', 'IBPS PO Mock 02', '2026-09-08', 'Self', 58, 100, NULL, NULL, 69.5, 29.3, 74, 100, 52, 22, 26, 1788890400);
 INSERT INTO mocks (id, exam_id, name, mock_date, platform, score, total_score, rank_value, percentile, accuracy, avg_speed_seconds, attempted, total_questions, correct, incorrect, unattempted, created_at) VALUES ('mock-afcat-06', 'exam-afcat', 'AFCAT Mock 06', '2026-09-04', 'Self', 65, 100, 2310, 79.1, 75.0, 27.4, 80, 100, 60, 20, 20, 1788544800);
 
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-afcat07-quant', 'mock-afcat-07', 'QUANT', 1);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-afcat07-reas', 'mock-afcat-07', 'REASONING', 2);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-afcat07-eng', 'mock-afcat-07', 'ENGLISH', 3);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-afcat07-ga', 'mock-afcat-07', 'GENERAL AWARENESS', 4);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-sbi03-quant', 'mock-sbi-03', 'QUANT', 1);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-sbi03-reas', 'mock-sbi-03', 'REASONING', 2);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-sbi03-eng', 'mock-sbi-03', 'ENGLISH', 3);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-ssc11-quant', 'mock-ssc-11', 'QUANT', 1);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-ssc11-reas', 'mock-ssc-11', 'REASONING', 2);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-ssc11-eng', 'mock-ssc-11', 'ENGLISH', 3);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-ssc11-ga', 'mock-ssc-11', 'GENERAL AWARENESS', 4);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-ibps02-quant', 'mock-ibps-02', 'QUANT', 1);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-ibps02-reas', 'mock-ibps-02', 'REASONING', 2);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-ibps02-eng', 'mock-ibps-02', 'ENGLISH', 3);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-afcat06-quant', 'mock-afcat-06', 'QUANT', 1);
-INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES ('msec-afcat06-reas', 'mock-afcat-06', 'REASONING', 2);
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-afcat07-quant', 'mock-afcat-07', 'QUANT', 1, 'subj-quant');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-afcat07-reas', 'mock-afcat-07', 'REASONING', 2, 'subj-reasoning');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-afcat07-eng', 'mock-afcat-07', 'ENGLISH', 3, 'subj-english');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-afcat07-ga', 'mock-afcat-07', 'GENERAL AWARENESS', 4, 'subj-ga');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-sbi03-quant', 'mock-sbi-03', 'QUANT', 1, 'subj-quant');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-sbi03-reas', 'mock-sbi-03', 'REASONING', 2, 'subj-reasoning');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-sbi03-eng', 'mock-sbi-03', 'ENGLISH', 3, 'subj-english');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-ssc11-quant', 'mock-ssc-11', 'QUANT', 1, 'subj-quant');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-ssc11-reas', 'mock-ssc-11', 'REASONING', 2, 'subj-reasoning');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-ssc11-eng', 'mock-ssc-11', 'ENGLISH', 3, 'subj-english');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-ssc11-ga', 'mock-ssc-11', 'GENERAL AWARENESS', 4, 'subj-ga');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-ibps02-quant', 'mock-ibps-02', 'QUANT', 1, 'subj-quant');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-ibps02-reas', 'mock-ibps-02', 'REASONING', 2, 'subj-reasoning');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-ibps02-eng', 'mock-ibps-02', 'ENGLISH', 3, 'subj-english');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-afcat06-quant', 'mock-afcat-06', 'QUANT', 1, 'subj-quant');
+INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES ('msec-afcat06-reas', 'mock-afcat-06', 'REASONING', 2, 'subj-reasoning');
 
 -- Weak topics: 0/1/2/3 per section, ordered, repeated across mocks.
 INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-afcat07-quant', 'topic-percentage', 1);
@@ -585,7 +586,6 @@ INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-sb
 INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-sbi03-quant', 'topic-ratio', 2);
 INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-sbi03-reas', 'topic-coding-decoding', 1);
 INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-sbi03-reas', 'topic-analogy', 2);
-INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-sbi03-reas', 'topic-series', 3);
 INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-sbi03-eng', 'topic-reading', 1);
 INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-ssc11-quant', 'topic-number-system', 1);
 INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES ('msec-ssc11-quant', 'topic-percentage', 2);

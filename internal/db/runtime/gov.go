@@ -23,9 +23,11 @@ func IsGovSubjectActive(ctx context.Context, q db.DBTX, subjectID db.ID) (bool, 
 	return count > 0, nil
 }
 
-// ActivateGovSubject marks a subject as active.
+// ActivateGovSubject marks a subject as active. Idempotent: a second
+// activation is a no-op (never a UNIQUE collision through normal operation).
 func ActivateGovSubject(ctx context.Context, q db.DBTX, subjectID db.ID, when time.Time) error {
-	if _, err := q.ExecContext(ctx, `INSERT INTO gov_subject_activation (subject_id, activated_at) VALUES (?, ?)`, subjectID, when.Unix()); err != nil {
+	if _, err := q.ExecContext(ctx, `INSERT INTO gov_subject_activation (subject_id, activated_at) VALUES (?, ?)
+ON CONFLICT(subject_id) DO NOTHING`, subjectID, when.Unix()); err != nil {
 		return fmt.Errorf("runtime: activate subject: %w", err)
 	}
 	return nil

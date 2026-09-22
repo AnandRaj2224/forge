@@ -12,6 +12,14 @@ import (
 // History aggregates are derived entirely from existing runtime evidence
 // (sessions, today snapshots/tasks, lecture completions, practice records,
 // DSA attempts, SWE executions). No invented values.
+//
+// NOTE: the authoritative reports live in internal/engine (DailyReport via
+// BuildDailyReport, WeeklyReport via BuildWeeklyDraft) on the Forge calendar
+// (Asia/Kolkata, midnight boundaries, cross-midnight session splitting,
+// latest-snapshot-per-day planned totals, weighted question speeds). The TUI
+// History/Reviews screens use the engine. The helpers below predate the
+// engine, use UTC date boundaries, and are kept only for backward
+// compatibility; new code must not build reports from them.
 
 // DailySummary is the operational "what actually happened on this day" view.
 type DailySummary struct {

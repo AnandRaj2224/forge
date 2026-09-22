@@ -8,28 +8,28 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	db "forge/internal/db"
-	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
-// HistoryScreen is the operational current-week view.
+// HistoryScreen is the operational current-week view (Forge calendar).
 // ONLY the current week (Mon..Sun) is displayed; older DB records are never
-// listed. Selecting a day updates the right daily-metrics panel. Panes
+// listed. Selecting a day updates the right daily-activity panel. Panes
 // scroll independently: the day list owns its viewport; the daily body
 // scrolls via the shared ScrollViewport when focused (H/L).
 type HistoryScreen struct {
-	app   *App
-	dates []string // YYYY-MM-DD Mon..Sun
-	list  Navigator
-	sums  map[string]runtime.DailySummary
-	focusR bool // right daily pane owns focus (H/L); j/k scrolls it
+	app        *App
+	dates      []string // YYYY-MM-DD Mon..Sun (Forge calendar)
+	list       Navigator
+	reports    map[string]engine.DailyReport
+	reportErr  map[string]string
+	focusR     bool // right daily pane owns focus (H/L); j/k scrolls it
 	bodyScroll ScrollViewport
-	nowFn func() time.Time
-	err   string
+	nowFn      func() time.Time
+	err        string
 }
 
 func NewHistoryScreen(a *App) *HistoryScreen {
-	return &HistoryScreen{app: a, list: NewNavigator(), sums: map[string]runtime.DailySummary{}, nowFn: time.Now}
+	return &HistoryScreen{app: a, list: NewNavigator(), reports: map[string]engine.DailyReport{}, reportErr: map[string]string{}, nowFn: time.Now}
 }
 
 func (s *HistoryScreen) now() time.Time {
@@ -42,8 +42,9 @@ func (s *HistoryScreen) now() time.Time {
 func (s *HistoryScreen) Reload() {
 	ctx := context.Background()
 	s.err = ""
-	s.dates = runtime.CurrentWeekDates(s.now())
-	todayStr := s.now().UTC().Format("2006-01-02")
+	cal := engine.DefaultCalendar()
+	s.dates = cal.CurrentWeek(s.now())
+	todayStr := cal.LocalDate(s.now())
 	items := make([]RowItem, 0, len(s.dates))
 	for _, d := range s.dates {
 		t, _ := time.Parse("2006-01-02", d)
@@ -52,14 +53,17 @@ func (s *HistoryScreen) Reload() {
 		if d == todayStr {
 			mark = "●"
 		}
-		sum, err := runtime.ComputeDailySummary(ctx, s.app.DB, d)
-		if err == nil {
-			s.sums[d] = sum
+		rep, err := engine.BuildDailyReport(ctx, s.app.DB, d)
+		if err != nil {
+			s.reportErr[d] = err.Error()
+		} else {
+			s.reports[d] = rep
+			delete(s.reportErr, d)
 		}
 		meta, sub := "", ""
-		if v, ok := s.sums[d]; ok && (v.Sessions > 0 || v.Planned > 0) {
-			meta = FormatDurationLong(v.Actual)
-			sub = "PLAN " + FormatDurationLong(v.Planned)
+		if v, ok := s.reports[d]; ok && (v.Sessions > 0 || v.Planned > 0) {
+			meta = engine.FormatDurationLong(v.Actual)
+			sub = "PLAN " + engine.FormatDurationLong(v.Planned)
 		}
 		items = append(items, RowItem{ID: d, Title: label, Meta: meta, MetaSub: sub, Mark: mark})
 	}
@@ -160,129 +164,122 @@ func (s *HistoryScreen) dayBody(inner int) string {
 	if d == "" {
 		return EmptyState("Select a day.")
 	}
-	sum := s.sums[d]
+	if msg, bad := s.reportErr[d]; bad {
+		return thError.Render("report unavailable · data error") + "\n" + thMeta.Render(msg)
+	}
+	rep, ok := s.reports[d]
+	if !ok {
+		return EmptyState("No data for this day.")
+	}
 	var sb strings.Builder
-	// TITLE + TIME CONTEXT on one line: WED · 16 SEP 2026 + DAILY REPORT.
-	// Explicit day context without extra height.
 	title := FormatDateISO(d)
 	if t, err := time.Parse("2006-01-02", d); err == nil {
 		title = strings.ToUpper(t.Format("Mon")) + " · " + strings.ToUpper(t.Format("02 Jan 2006"))
 	}
-	sb.WriteString(thScreenTitle.Render(title) + "  " + thMeta.Render("DAILY REPORT") + "\n")
+	sb.WriteString(thScreenTitle.Render(title) + "  " + thMeta.Render("DAILY ACTIVITY") + "\n")
 	sb.WriteString(SectionHeader("ACTIVITY") + "\n")
-	// HIGH-VALUE METRICS as a compact bento: task-count completion, never hours.
-	variance := formatSignedLong(sum.Actual - sum.Planned)
+	variance := engine.FormatSigned(rep.Actual - rep.Planned)
 	completion := "—"
 	tasksVal := "—"
-	if sum.TasksTotal > 0 {
-		completion = fmt.Sprintf("%.0f%%", float64(sum.TasksCompleted)/float64(sum.TasksTotal)*100)
-		tasksVal = fmt.Sprintf("%d of %d", sum.TasksCompleted, sum.TasksTotal)
+	if rep.TasksTotal > 0 {
+		completion = fmt.Sprintf("%.0f%%", float64(rep.TasksCompleted)/float64(rep.TasksTotal)*100)
+		tasksVal = fmt.Sprintf("%d of %d", rep.TasksCompleted, rep.TasksTotal)
 	}
 	cards := []MetricCard{
-		{Label: "PLANNED", Value: FormatDurationLong(sum.Planned)},
-		{Label: "ACTUAL", Value: FormatDurationLong(sum.Actual)},
+		{Label: "PLANNED", Value: engine.FormatDurationLong(rep.Planned)},
+		{Label: "ACTUAL", Value: engine.FormatDurationLong(rep.Actual)},
 		{Label: "VARIANCE", Value: variance},
 		{Label: "TASKS", Value: tasksVal},
-		{Label: "SESSIONS", Value: fmt.Sprint(sum.Sessions)},
+		{Label: "SESSIONS", Value: fmt.Sprint(rep.Sessions)},
 		{Label: "COMPLETION", Value: completion},
 	}
 	sb.WriteString(MetricGrid(cards, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
-	sb.WriteString(SectionHeader("TIME BY DOMAIN") + "\n")
-	total := sum.GovSeconds + sum.DSASeconds + sum.SWESeconds
+	sb.WriteString(SectionHeader("TIME BY DOMAIN · % OF TRACKED TIME") + "\n")
+	total := rep.GovSeconds + rep.DSASeconds + rep.SWESeconds
 	sb.WriteString(MetricGrid([]MetricCard{
-		{Label: "GOV", Value: FormatDurationLong(sum.GovSeconds) + " · " + pctOf(sum.GovSeconds, total) + " of day", Accent: cGov},
-		{Label: "DSA", Value: FormatDurationLong(sum.DSASeconds) + " · " + pctOf(sum.DSASeconds, total) + " of day", Accent: cDSA},
-		{Label: "SWE", Value: FormatDurationLong(sum.SWESeconds) + " · " + pctOf(sum.SWESeconds, total) + " of day", Accent: cSWE},
+		{Label: "GOV", Value: engine.FormatDurationLong(rep.GovSeconds) + " · " + pctOf(rep.GovSeconds, total) + " of tracked time", Accent: cGov},
+		{Label: "DSA", Value: engine.FormatDurationLong(rep.DSASeconds) + " · " + pctOf(rep.DSASeconds, total) + " of tracked time", Accent: cDSA},
+		{Label: "SWE", Value: engine.FormatDurationLong(rep.SWESeconds) + " · " + pctOf(rep.SWESeconds, total) + " of tracked time", Accent: cSWE},
 	}, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
-	// DOMAIN DETAIL as structured sections (not compressed prose). Every
-	// number states what it measures: lectures completed, questions
-	// attempted/correct/incorrect, accuracy, problems attempted/passed/
-	// not passed, SWE outcomes.
-	govBlock := DomainDetailBlock("GOV", "GOV ACTIVITY", []StatPair{
-		{"Lectures completed", fmt.Sprint(sum.GovLectures)},
-		{"Questions attempted", fmt.Sprint(sum.GovAttempted)},
-		{"Questions correct", fmt.Sprint(sum.GovCorrect)},
-		{"Questions incorrect", fmt.Sprint(sum.GovAttempted - sum.GovCorrect)},
-		{"Accuracy", fmtAcc(sum.GovAccuracy, sum.GovAttempted)},
-	})
-	dsaNotPassed := sum.DSAAttempts - sum.DSAPassed
-	if dsaNotPassed < 0 {
-		dsaNotPassed = 0
+	sb.WriteString(SectionHeader("DAILY WORK") + "\n")
+	sb.WriteString(s.dailyWorkView(inner, rep))
+	sb.WriteString("\n" + RowDivider(inner) + "\n")
+	govAcc := "—"
+	if rep.Gov.Accuracy != nil {
+		govAcc = fmt.Sprintf("%.1f%%", *rep.Gov.Accuracy*100)
 	}
+	govPairs := []StatPair{
+		{"Lectures completed", fmt.Sprint(rep.Gov.LecturesCompleted)},
+		{"Questions attempted", fmt.Sprint(rep.Gov.QuestionsAttempted)},
+		{"Questions correct", fmt.Sprint(rep.Gov.QuestionsCorrect)},
+		{"Questions incorrect", fmt.Sprint(rep.Gov.QuestionsIncorrect)},
+		{"Accuracy", govAcc},
+	}
+	if rep.Gov.HasSpeed && rep.Gov.AvgSpeed != nil {
+		govPairs = append(govPairs, StatPair{"Avg question speed", fmt.Sprintf("%.1fs", *rep.Gov.AvgSpeed)})
+	}
+	govBlock := DomainDetailBlock("GOV", "GOV ACTIVITY", govPairs)
 	dsaBlock := DomainDetailBlock("DSA", "DSA ACTIVITY", []StatPair{
-		{"Problems attempted", fmt.Sprint(sum.DSAAttempts)},
-		{"Passed", fmt.Sprint(sum.DSAPassed)},
-		{"Not passed", fmt.Sprint(dsaNotPassed)},
+		{"Problems attempted", fmt.Sprint(rep.DSA.Attempted)},
+		{"Problems passed", fmt.Sprint(rep.DSA.Passed)},
+		{"Problems not passed", fmt.Sprint(rep.DSA.NotPassed)},
 	})
 	sweBlock := DomainDetailBlock("SWE", "SWE ACTIVITY", []StatPair{
-		{"Completed", fmt.Sprint(sum.SWECompleted)},
-		{"Partial", fmt.Sprint(sum.SWEPartial)},
-		{"Blocked", fmt.Sprint(sum.SWEBlocked)},
+		{"Tasks completed", fmt.Sprint(rep.SWE.Completed)},
+		{"Tasks partial", fmt.Sprint(rep.SWE.Partial)},
+		{"Tasks blocked", fmt.Sprint(rep.SWE.Blocked)},
 	})
 	sb.WriteString(JoinDetailBlocks([]string{govBlock, dsaBlock, sweBlock}, inner))
-	// UNFINISHED: planned tasks with no persisted evidence (factual only).
 	sb.WriteString("\n" + RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("UNFINISHED") + "\n")
-	sb.WriteString(s.unfinishedView(inner, d))
+	sb.WriteString(s.unfinishedView(inner, rep))
 	return sb.String()
 }
 
-// unfinishedItem is one planned-but-incomplete task for a day.
-type unfinishedItem struct {
-	num     int
-	domain  string
-	area    string
-	typ     string
-	label   string
-	planned int
-}
-
-// unfinishedForDate returns snapshot tasks for dateStr with no persisted
-// evidence, in position order. It uses actual DB data only.
-func (s *HistoryScreen) unfinishedForDate(dateStr string) []unfinishedItem {
-	ctx := context.Background()
-	var snapID string
-	row := s.app.DB.QueryRowContext(ctx, `SELECT id FROM today_snapshots WHERE local_date = ? ORDER BY revision DESC LIMIT 1`, dateStr)
-	if err := row.Scan(&snapID); err != nil {
-		return nil
+// dailyWorkView lists the actual Today tasks from the selected day with
+// planned/actual/status so the screen answers what happened.
+func (s *HistoryScreen) dailyWorkView(inner int, rep engine.DailyReport) string {
+	if len(rep.Activities) == 0 {
+		return thMeta.Render("No planned tasks.")
 	}
-	tasks, err := runtime.GetTodayTasks(ctx, s.app.DB, db.ID(snapID))
-	if err != nil {
-		return nil
-	}
-	var out []unfinishedItem
-	n := 0
-	for _, t := range tasks {
-		if ComputeTaskStatus(ctx, s.app.DB, t.ID) == TaskCompleted {
-			continue
+	var sb strings.Builder
+	for i, a := range rep.Activities {
+		st := "TODO"
+		switch a.State {
+		case engine.StateCompleted:
+			st = "DONE"
+		case engine.StateActive:
+			st = "ACTIVE"
 		}
-		n++
-		b := ResolveBundle(ctx, s.app.DB, t)
-		area, typ, label := TaskColumns(t, b)
-		out = append(out, unfinishedItem{num: n, domain: string(t.Domain), area: area, typ: typ, label: label, planned: t.PlannedSeconds})
+		head := fmt.Sprintf("%02d  %s · %s · %s", a.Position, a.Domain, a.Kind, TruncateToWidth(a.Title, inner-20))
+		sb.WriteString(thPrimary.Render(head) + "\n")
+		sub := fmt.Sprintf("planned %s · actual %s · %s", engine.FormatDurationLong(a.Planned), engine.FormatDurationLong(a.Actual), st)
+		if a.Detail != "" && a.Detail != a.Title {
+			sub = TruncateToWidth(a.Detail, inner-4) + "\n" + thMeta.Render(sub)
+			sb.WriteString(thMeta.Render(TruncateToWidth(a.Detail, inner-4)) + "\n")
+			sb.WriteString(thMeta.Render(fmt.Sprintf("planned %s · actual %s · %s", engine.FormatDurationLong(a.Planned), engine.FormatDurationLong(a.Actual), st)))
+		} else {
+			sb.WriteString(thMeta.Render(sub))
+		}
+		if i < len(rep.Activities)-1 {
+			sb.WriteString("\n" + RowDivider(inner) + "\n")
+		}
 	}
-	return out
+	return sb.String()
 }
 
-func (s *HistoryScreen) unfinishedView(inner int, dateStr string) string {
-	items := s.unfinishedForDate(dateStr)
-	if len(items) == 0 {
+func (s *HistoryScreen) unfinishedView(inner int, rep engine.DailyReport) string {
+	if len(rep.Unfinished) == 0 {
 		return thMeta.Render("— all complete —")
 	}
 	var sb strings.Builder
-	for i, it := range items {
-		head := fmt.Sprintf("%02d · %s", it.num, it.domain)
-		if it.area != "" && it.area != "—" {
-			head += " · " + TruncateToWidth(it.area, 18)
-		}
-		if it.label != "" {
-			head += " · " + TruncateToWidth(it.label, inner-len(head)-4)
-		}
+	for i, a := range rep.Unfinished {
+		head := fmt.Sprintf("%02d · %s · %s", a.Position, a.Domain, TruncateToWidth(a.Title, inner-12))
 		sb.WriteString(thPrimary.Render(head) + "\n")
-		sb.WriteString(thMeta.Render(fmt.Sprintf("Planned %s · Not completed", FormatDurationLong(it.planned))))
-		if i < len(items)-1 {
+		sb.WriteString(thMeta.Render(fmt.Sprintf("Planned %s · Not completed", engine.FormatDurationLong(a.Planned))))
+		if i < len(rep.Unfinished)-1 {
 			sb.WriteString("\n" + RowDivider(inner) + "\n")
 		}
 	}
@@ -295,14 +292,6 @@ func pctOf(v, total int) string {
 	}
 	return fmt.Sprintf("%.0f%%", float64(v)/float64(total)*100)
 }
-
-func fmtAcc(acc float64, n int) string {
-	if n == 0 {
-		return "—"
-	}
-	return fmt.Sprintf("%.1f%%", acc*100)
-}
-
 
 // Ensure lipgloss import is used in small viewports.
 var _ = lipgloss.Top

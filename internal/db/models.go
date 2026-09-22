@@ -313,11 +313,15 @@ type Mock struct {
 }
 
 // MockSection is one exam section inside a mock (e.g. QUANT, REASONING).
+// Name is the actual user-entered section name. GovSubjectID is the explicit
+// user-selected global GOV subject mapping (nullable for legacy rows; new
+// sections must provide it). Never inferred from the name.
 type MockSection struct {
-	ID        ID
-	MockID    ID
-	Name      string
-	SortOrder int
+	ID           ID
+	MockID       ID
+	Name         string
+	SortOrder    int
+	GovSubjectID *ID
 }
 
 // MockWeakTopic is one ordered weakness: 1 = strongest, up to 3 per section.

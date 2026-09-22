@@ -11,6 +11,7 @@ import (
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
 // TaskStatus distinguishes presentation state of a Today task.
@@ -326,63 +327,31 @@ func ResolveSessionBundle(ctx context.Context, q db.DBTX, s db.Session, task db.
 	return ResolveBundle(ctx, q, task)
 }
 
-// ComputeTaskStatus derives TODO/ACTIVE/COMPLETED for a Today task.
-// ACTIVE wins; COMPLETED requires stopped-session evidence; else TODO.
-// Stopping without evidence stays TODO (stopping is not completion).
+// ComputeTaskStatus derives TODO/ACTIVE/COMPLETED for a Today task via the
+// authoritative engine evaluator (exact bundle completion, never
+// any-evidence). It is kept for test compatibility; the live Today workspace
+// uses ComputeTaskStatusE so DB failures surface as data errors instead of
+// silent TODO fallbacks.
 func ComputeTaskStatus(ctx context.Context, q db.DBTX, taskID db.ID) TaskStatus {
-	sessList, err := runtime.ListSessions(ctx, q)
-	if err != nil {
-		return TaskTodo
-	}
-	var hasActive, hasStopped bool
-	var stoppedIDs []db.ID
-	for _, s := range sessList {
-		if s.TodayTaskID != taskID {
-			continue
-		}
-		if s.Status == db.SessionStatusActive {
-			hasActive = true
-		} else {
-			hasStopped = true
-			stoppedIDs = append(stoppedIDs, s.ID)
-		}
-	}
-	if hasActive {
-		return TaskActive
-	}
-	if !hasStopped {
-		return TaskTodo
-	}
-	for _, sid := range stoppedIDs {
-		if sessionHasEvidence(ctx, q, sid) {
-			return TaskCompleted
-		}
-	}
-	return TaskTodo
+	st, _ := ComputeTaskStatusE(ctx, q, taskID)
+	return st
 }
 
-func sessionHasEvidence(ctx context.Context, q db.DBTX, sid db.ID) bool {
-	if pr, err := runtime.GetGovPracticeRecordsBySession(ctx, q, sid); err == nil && len(pr) > 0 {
-		return true
-	}
-	if da, err := runtime.GetDSAAttemptsBySession(ctx, q, sid); err == nil && len(da) > 0 {
-		return true
-	}
-	if se, err := runtime.GetSWEExecutionsBySession(ctx, q, sid); err == nil && len(se) > 0 {
-		return true
-	}
-	// Lecture completions are keyed by lecture; scan via sessions list is not
-	// directly supported, so check the completions table for this session.
-	rows, err := q.QueryContext(ctx, `SELECT COUNT(*) FROM gov_lecture_completions WHERE session_id = ?`, string(sid))
+// ComputeTaskStatusE is the error-propagating evaluator used by live UI:
+// DB failures return an error (never a default business state).
+func ComputeTaskStatusE(ctx context.Context, q db.DBTX, taskID db.ID) (TaskStatus, error) {
+	ev, err := engine.EvaluateTodayTask(ctx, q, taskID)
 	if err != nil {
-		return false
+		return TaskTodo, err
 	}
-	defer rows.Close()
-	var n int
-	if rows.Next() && rows.Scan(&n) == nil && n > 0 {
-		return true
+	switch ev.State {
+	case engine.StateCompleted:
+		return TaskCompleted, nil
+	case engine.StateActive:
+		return TaskActive, nil
+	default:
+		return TaskTodo, nil
 	}
-	return false
 }
 
 // ExamCoverage is pure syllabus (lecture) coverage: topics mapped to the exam
@@ -504,23 +473,23 @@ func ComputeTopicPracticeStats(ctx context.Context, q db.DBTX, topicID db.ID) To
 		return TopicPracticeStats{}
 	}
 	var st TopicPracticeStats
-	var speedSum float64
-	var speedN int
+	var weightedSum float64
+	var weightedN int
 	for _, r := range hist {
 		st.Rows++
 		st.Attempted += r.Attempted
 		st.Correct += r.Correct
 		if r.AvgQuestionSpeedSeconds != nil {
-			speedSum += *r.AvgQuestionSpeedSeconds
-			speedN++
+			weightedSum += *r.AvgQuestionSpeedSeconds * float64(r.Attempted)
+			weightedN += r.Attempted
 		}
 	}
 	st.Incorrect = st.Attempted - st.Correct
 	if st.Attempted > 0 {
 		st.Accuracy = float64(st.Correct) / float64(st.Attempted)
 	}
-	if speedN > 0 {
-		st.AvgSpeed = speedSum / float64(speedN)
+	if weightedN > 0 {
+		st.AvgSpeed = weightedSum / float64(weightedN)
 		st.HasSpeed = true
 	}
 	return st
@@ -568,16 +537,9 @@ func GroupDSAPatterns(problems []db.DSAProblem) []DSAPattern {
 	return out
 }
 
-// DSAPassUI reports whether any attempt passes (independent&&optimal&&!hint).
-// This is a display aggregation over raw evidence, not the future engine.
-func DSAPassUI(attempts []db.DSAAttempt) bool {
-	for _, a := range attempts {
-		if a.Independent && a.Optimal && !a.HintUsed {
-			return true
-		}
-	}
-	return false
-}
+// DSAPassUI reports whether any attempt passes via the authoritative engine
+// rule (independent AND optimal AND NOT hint_used).
+func DSAPassUI(attempts []db.DSAAttempt) bool { return engine.AnyPass(attempts) }
 
 func LastAttempt(attempts []db.DSAAttempt) *db.DSAAttempt {
 	if len(attempts) == 0 {

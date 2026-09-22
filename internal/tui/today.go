@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
 // Focus zones inside the Today workspace.
@@ -49,10 +50,11 @@ func NewTodayScreen(a *App) *TodayScreen {
 }
 
 func (s *TodayScreen) latestSnapshot(ctx context.Context) *db.TodaySnapshot {
-	// Prefer today's snapshot so future planned History days never hijack
-	// the home workspace; fall back to the latest snapshot on/before today,
-	// then to the global latest (dev/empty-DB edge).
-	todayStr := time.Now().UTC().Format("2006-01-02")
+	// Prefer today's snapshot in the Forge calendar (Asia/Kolkata midnight),
+	// so future planned History days never hijack the home workspace; fall
+	// back to the latest snapshot on/before today, then to the global latest.
+	cal := engine.DefaultCalendar()
+	todayStr := cal.LocalDate(time.Now())
 	if snap, err := runtime.GetLatestTodaySnapshot(ctx, s.app.DB, todayStr); err == nil {
 		return &snap
 	}
@@ -94,6 +96,15 @@ func (s *TodayScreen) Reload() {
 	s.notice = ""
 	snap := s.latestSnapshot(ctx)
 	if snap == nil {
+		// First run on a fresh DB: generate today's snapshot exactly once
+		// via EnsureToday (no-op when a snapshot already exists, so
+		// routine reloads never create revisions).
+		cal := engine.DefaultCalendar()
+		if nsnap, _, err := engine.EnsureToday(ctx, s.app.DB, cal.LocalDate(time.Now()), time.Now()); err == nil {
+			snap = &nsnap
+		}
+	}
+	if snap == nil {
 		s.err = "no today snapshots"
 		return
 	}
@@ -111,8 +122,25 @@ func (s *TodayScreen) Reload() {
 	s.status = make([]TaskStatus, len(tasks))
 	s.bundles = make([]Bundle, len(tasks))
 	for i, t := range tasks {
-		st := ComputeTaskStatus(ctx, s.app.DB, t.ID)
-		s.status[i] = st
+		// Authoritative engine evaluation; DB failures surface as a
+		// data-error state instead of a silent TODO fallback.
+		ev, err := engine.EvaluateTodayTask(ctx, s.app.DB, t.ID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			s.status[i] = TaskTodo
+		} else {
+			switch ev.State {
+			case engine.StateCompleted:
+				s.status[i] = TaskCompleted
+			case engine.StateActive:
+				s.status[i] = TaskActive
+			default:
+				s.status[i] = TaskTodo
+			}
+			if ev.ConfigError != "" {
+				s.err = "target error: " + ev.ConfigError
+			}
+		}
 		s.bundles[i] = ResolveBundle(ctx, s.app.DB, t)
 	}
 	s.tbl.SetData(s.tasks, s.status, s.bundles)
@@ -151,8 +179,8 @@ func (s *TodayScreen) syncButtons() {
 	s.startBtn.Focused = s.zone == tzRight && s.right == "detail" && !s.startBtn.Disabled
 }
 
-// startSelected creates the persisted ACTIVE session for the selected task.
-// The domain layer is authoritative: completed tasks never start again.
+// startSelected creates the persisted ACTIVE session for the selected task
+// via the authoritative engine operation. Completed tasks never start again.
 func (s *TodayScreen) startSelected() {
 	_, _, _, ok := s.selected()
 	if !ok {
@@ -160,29 +188,34 @@ func (s *TodayScreen) startSelected() {
 	}
 	task := s.tasks[s.tbl.CursorPos()]
 	ctx := context.Background()
-	if okStart, _ := runtime.CanStartTodayTask(ctx, s.app.DB, task.ID); !okStart {
+	ev, err := engine.EvaluateTodayTask(ctx, s.app.DB, task.ID)
+	if err != nil {
+		s.app.err = "data error: " + err.Error()
+		return
+	}
+	if ev.State == engine.StateCompleted {
 		// Normal state, not an error: a DONE task is simply non-actionable.
-		// No session is attempted, no DB path is reached, no red banner.
 		s.notice = "Completed · read-only"
 		s.syncButtons()
 		return
 	}
-	if _, err := runtime.GetActiveSession(ctx, s.app.DB); err == nil {
-		s.app.err = "another session is active — stop it first (x)"
+	if ev.State == engine.StateActive {
+		s.notice = "Already active"
+		s.syncButtons()
 		return
 	}
-	now := time.Now().UTC()
-	sid := db.ID(fmt.Sprintf("sess-tui-%d", now.UnixNano()))
-	var target *string
-	if task.TargetJSON != nil {
-		v := *task.TargetJSON
-		target = &v
-	}
-	sess := db.Session{ID: sid, TodayTaskID: task.ID, Domain: task.Domain, Kind: task.Kind,
-		TitleSnapshot: task.Title, TargetSnapshotJSON: target,
-		PlannedSeconds: task.PlannedSeconds, StartedAt: now, Status: db.SessionStatusActive}
-	if err := runtime.CreateSession(ctx, s.app.DB, sess); err != nil {
-		s.app.err = err.Error()
+	if _, err := engine.StartTodayTask(ctx, s.app.DB, task.ID, time.Now()); err != nil {
+		// Expected busy/completed states stay neutral; real failures surface.
+		msg := err.Error()
+		if isExpectedStartErr(err) {
+			s.notice = "Completed · read-only"
+			if containsBusy(msg) {
+				s.app.err = "another session is active — stop it first (x)"
+			}
+			s.syncButtons()
+			return
+		}
+		s.app.err = msg
 		return
 	}
 	s.right = "detail"
@@ -190,16 +223,29 @@ func (s *TodayScreen) startSelected() {
 	s.app.refreshActiveIndicator()
 }
 
-// stopActive stops the global session and swaps right-bottom to the form.
+func isExpectedStartErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return containsBusy(err.Error()) || containsDone(err.Error())
+}
+
+func containsBusy(msg string) bool {
+	l := strings.ToLower(msg)
+	return strings.Contains(l, "another session is active") || strings.Contains(l, "active")
+}
+
+func containsDone(msg string) bool {
+	l := strings.ToLower(msg)
+	return strings.Contains(l, "already complete") || strings.Contains(l, "already has an active")
+}
+
+// stopActive stops the global session via the engine and swaps right-bottom
+// to the form.
 func (s *TodayScreen) stopActive() {
 	ctx := context.Background()
-	sess, err := runtime.GetActiveSession(ctx, s.app.DB)
+	sess, err := engine.StopActiveSession(ctx, s.app.DB, time.Now())
 	if err != nil {
-		return
-	}
-	now := time.Now().UTC()
-	if err := runtime.StopSession(ctx, s.app.DB, sess.ID, now); err != nil {
-		s.app.err = err.Error()
 		return
 	}
 	task, terr := runtime.GetTodayTask(ctx, s.app.DB, sess.TodayTaskID)
