@@ -24,7 +24,9 @@ func seedMockHistoryDB(t *testing.T) *db.DB {
 	}
 	ctx := context.Background()
 	now := time.Date(2026, 9, 21, 10, 0, 0, 0, time.UTC) // Monday current week
-	_ = catalog.UpsertSettings(ctx, database, db.ForgeSettings{ID: 1, Timezone: "Asia/Kolkata", DayStartMinute: 600, CreatedAt: now})
+	// Canonical Forge calendar settings (Asia/Kolkata, midnight): the engine
+	// verifies these on Today generation, so fixtures must carry them.
+	_ = catalog.UpsertSettings(ctx, database, db.ForgeSettings{ID: 1, Timezone: "Asia/Kolkata", DayStartMinute: 0, CreatedAt: now})
 	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "subj-quant", Name: "Quant", SortOrder: 1})
 	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "subj-reasoning", Name: "Reasoning", SortOrder: 2})
 	_ = catalog.InsertGovTopic(ctx, database, db.GovTopic{ID: "topic-perc", SubjectID: "subj-quant", Name: "Percentage", SortOrder: 1})
@@ -148,7 +150,7 @@ func TestMocksScreenDetail(t *testing.T) {
 }
 
 func TestReviewsMetricsStructure(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 150, 40
 	app.goTab(TabReviews)
 	// Full report (unclipped) must read as an analytical weekly report with
@@ -344,7 +346,7 @@ func TestMockCreateValidation(t *testing.T) {
 // opens editing on the selected reflection, typing works, SAVE persists to
 // the stored review model, and reopening shows the saved text.
 func TestReviewReflectionEdit(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 150, 40
 	app.goTab(TabReviews)
 	testSend(app, "l")

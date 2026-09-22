@@ -22,7 +22,7 @@ func TestTrackedTimeWording(t *testing.T) {
 	if strings.Contains(strings.ToLower(h), "% of day") {
 		t.Fatalf("history must not use %% of day:\n%s", h)
 	}
-	app2 := NewApp(seedFlowDB(t))
+	app2 := newFlowApp(t)
 	app2.width, app2.height = 150, 40
 	app2.goTab(TabReviews)
 	r := stripANSIForTest(app2.reviews.reportView(90))
@@ -98,7 +98,7 @@ func TestMockWeakFilteredBySubject(t *testing.T) {
 
 // A broken database surfaces a panel data error, never a silent empty state.
 func TestTodayReloadDBError(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	_ = app.DB.Close()
 	app.today.Reload()
@@ -113,7 +113,7 @@ func TestTodayReloadDBError(t *testing.T) {
 // Starting while another session runs is a neutral notice: no new session,
 // no red banner.
 func TestBusyStartIsNeutral(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.reloadCurrent()
 	testSend(app, "s") // task1 lecture starts
@@ -154,7 +154,7 @@ func TestHistoryZeroVsMissing(t *testing.T) {
 
 // SAVE stays reachable by scrolling for a full 3-topic practice bundle.
 func TestPracticeSaveReachableFullBundle(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	prac, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-a", "topic-b", "topic-c"}})
 	rf := NewResultForm(app)
 	rf.Reload("sess-x", db.TodayTask{ID: "t-prac3", Domain: db.DomainGOV, Kind: db.SessionKindPractice, Title: "P", PlannedSeconds: 3600, TargetJSON: &prac})

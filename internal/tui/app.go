@@ -62,6 +62,12 @@ type App struct {
 	width  int
 	height int
 	now    time.Time
+	// err is the reserved global error line, rendered inside the main
+	// viewport above content. It is intentionally unused: every screen
+	// owns panel-local error states (data errors render inside the
+	// relevant panel), so no path sets this today. Kept so a future
+	// shell-level failure has a layout-safe slot that cannot break
+	// shell geometry.
 	err    string
 
 	today   *TodayScreen

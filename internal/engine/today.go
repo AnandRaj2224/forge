@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	db "forge/internal/db"
@@ -11,9 +12,19 @@ import (
 	"forge/internal/db/runtime"
 )
 
+// todayGenMu serializes Today ensure/generation in-process so concurrent
+// EnsureToday calls for one date converge on a single snapshot instead of
+// racing check-then-insert into multiple revisions. The UNIQUE
+// (local_date, revision) index remains the cross-process safety net; a
+// collision there resolves to the existing authoritative snapshot, never
+// a second revision.
+var todayGenMu sync.Mutex
+
 // GenerateToday creates a new Today snapshot revision for localDate with
 // exact target_json per the locked scheduling rules. It preserves old
-// snapshots (new revision) and never mutates sessions.
+// snapshots (new revision) and never mutates sessions. On a uniqueness
+// collision with a concurrent writer it returns the existing authoritative
+// snapshot instead of a second revision (see EnsureToday).
 //
 // Generation is two-phase:
 //
@@ -35,9 +46,16 @@ import (
 //   - SWE: one 2h block, daily combination from routine areas, current
 //     unfinished task per area.
 func GenerateToday(ctx context.Context, database *db.DB, localDate string, now time.Time) (db.TodaySnapshot, []db.TodayTask, error) {
-	cal := DefaultCalendar()
+	cal, err := VerifyCalendarSettings(ctx, database)
+	if err != nil {
+		return db.TodaySnapshot{}, nil, err
+	}
 	if _, err := cal.StartOfDay(localDate); err != nil {
 		return db.TodaySnapshot{}, nil, wrapErr("generate", ErrValidation, "bad local date")
+	}
+	plan, err := planDay(ctx, database, localDate, now)
+	if err != nil {
+		return db.TodaySnapshot{}, nil, err
 	}
 	rev, err := nextRevision(ctx, database, localDate)
 	if err != nil {
@@ -47,11 +65,8 @@ func GenerateToday(ctx context.Context, database *db.DB, localDate string, now t
 		ID: db.ID(fmt.Sprintf("today-%s-r%d", localDate, rev)),
 		LocalDate: localDate, Revision: rev, GeneratedAt: now,
 	}
-	plan, err := planDay(ctx, database, localDate, now)
-	if err != nil {
-		return db.TodaySnapshot{}, nil, err
-	}
-	tasks := plan.tasks
+	tasks := make([]db.TodayTask, len(plan.tasks))
+	copy(tasks, plan.tasks)
 	for i := range tasks {
 		tasks[i].SnapshotID = snap.ID
 		tasks[i].Position = i + 1
@@ -78,16 +93,38 @@ func GenerateToday(ctx context.Context, database *db.DB, localDate string, now t
 		}
 		return nil
 	})
-	if err != nil {
+	if err == nil {
+		return snap, tasks, nil
+	}
+	if !isUniqueConflict(err) {
 		return db.TodaySnapshot{}, nil, fmt.Errorf("engine: generate today: %w", err)
 	}
-	return snap, tasks, nil
+	// Uniqueness collision: another writer won the date. Return the
+	// existing authoritative snapshot (idempotent ensure) instead of
+	// minting a second revision.
+	existing, rerr := runtime.GetLatestTodaySnapshot(ctx, database, localDate)
+	if rerr != nil {
+		return db.TodaySnapshot{}, nil, fmt.Errorf("engine: generate today (revision conflict): %w", err)
+	}
+	existingTasks, rerr := runtime.GetTodayTasks(ctx, database, existing.ID)
+	if rerr != nil {
+		return db.TodaySnapshot{}, nil, fmt.Errorf("engine: load today tasks: %w", rerr)
+	}
+	return existing, existingTasks, nil
 }
 
 // EnsureToday returns the latest snapshot for localDate, generating only
 // when no snapshot row exists. A genuine no-row result means "generate";
 // a real DB/query failure propagates and never triggers generation.
+//
+// Idempotent under repeated/concurrent calls: the check-and-generate
+// sequence is serialized in-process, and a uniqueness collision against a
+// concurrent writer resolves to the same authoritative snapshot instead of
+// a second revision. Explicit regeneration still goes through
+// GenerateToday.
 func EnsureToday(ctx context.Context, database *db.DB, localDate string, now time.Time) (db.TodaySnapshot, []db.TodayTask, error) {
+	todayGenMu.Lock()
+	defer todayGenMu.Unlock()
 	snap, err := runtime.GetLatestTodaySnapshot(ctx, database, localDate)
 	if err == nil {
 		tasks, err := runtime.GetTodayTasks(ctx, database, snap.ID)
@@ -164,7 +201,10 @@ func planLectureSlots(ctx context.Context, database *db.DB) ([]db.TodayTask, []d
 		return nil, nil, fmt.Errorf("engine: gov subjects: %w", err)
 	}
 	routine, err := catalog.GetGovLectureRoutine(ctx, database)
-	if err != nil || len(routine) == 0 {
+	if err != nil {
+		return nil, nil, fmt.Errorf("engine: gov lecture routine: %w", err)
+	}
+	if len(routine) == 0 {
 		// Default 3 x 1h when routine missing.
 		routine = []db.GovLectureRoutineSlot{{SlotOrder: 1, DurationSeconds: 3600}, {SlotOrder: 2, DurationSeconds: 3600}, {SlotOrder: 3, DurationSeconds: 3600}}
 	}
@@ -219,7 +259,7 @@ func firstIncompleteLecture(ctx context.Context, q db.DBTX, subjects []db.GovSub
 				continue
 			}
 			for _, l := range lecs {
-				done, err := runtime.IsLectureComplete(ctx, q, l.ID)
+				done, err := IsLectureComplete(ctx, q, l.ID)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("engine: lecture complete: %w", err)
 				}
@@ -262,7 +302,7 @@ func PracticeEligibleTopics(ctx context.Context, q db.DBTX, subjectID db.ID) ([]
 		}
 		complete := true
 		for _, l := range lecs {
-			done, err := runtime.IsLectureComplete(ctx, q, l.ID)
+			done, err := IsLectureComplete(ctx, q, l.ID)
 			if err != nil {
 				return nil, fmt.Errorf("engine: lecture complete: %w", err)
 			}
@@ -289,7 +329,10 @@ func subjectIsActive(ctx context.Context, q db.DBTX, subjectID db.ID, extra map[
 
 func planPracticeSlots(ctx context.Context, database *db.DB, extraActive map[db.ID]bool, now time.Time) ([]db.TodayTask, *db.GovPracticeRotationState, error) {
 	routine, err := catalog.GetGovPracticeRoutine(ctx, database)
-	if err != nil || len(routine) == 0 {
+	if err != nil {
+		return nil, nil, fmt.Errorf("engine: gov practice routine: %w", err)
+	}
+	if len(routine) == 0 {
 		return nil, nil, nil
 	}
 	sort.Slice(routine, func(i, j int) bool { return routine[i].SlotOrder < routine[j].SlotOrder })
@@ -444,7 +487,13 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 		return nil, nil
 	}
 	planned := 9000
-	if r, err := catalog.GetDSARoutine(ctx, q); err == nil && r.PlannedSeconds > 0 {
+	if r, err := catalog.GetDSARoutine(ctx, q); err != nil {
+		if !isNotFoundErr(err) {
+			return nil, fmt.Errorf("engine: dsa routine: %w", err)
+		}
+		// No routine row yet: keep the default. A genuine absence is
+		// normal on fresh DBs; only real query failures propagate.
+	} else if r.PlannedSeconds > 0 {
 		planned = r.PlannedSeconds
 	}
 	due, err := dueRepeats(ctx, q, localDate)
@@ -600,7 +649,10 @@ func planSWEBlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 		forgeWD = 7
 	}
 	slots, err := catalog.GetSWERoutine(ctx, q, forgeWD)
-	if err != nil || len(slots) == 0 {
+	if err != nil {
+		return nil, fmt.Errorf("engine: swe routine: %w", err)
+	}
+	if len(slots) == 0 {
 		return nil, nil
 	}
 	var bundle []db.SWETaskTarget
@@ -635,8 +687,10 @@ func planSWEBlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 }
 
 // currentUnfinishedSWETask selects the first task in area order without a
-// COMPLETED execution (same task may repeat on different days when nothing
-// is unfinished? then return the first task). DB failures propagate.
+// COMPLETED execution. When every task in the area is complete it returns
+// (nil, nil): the planner skips that area rather than scheduling an
+// already-completed task as unfinished work. There is no implicit repeat
+// rule for SWE in this model. DB failures propagate.
 func currentUnfinishedSWETask(ctx context.Context, q db.DBTX, areaID db.ID) (*db.SWETask, error) {
 	tasks, err := catalog.GetSWETasks(ctx, q, areaID)
 	if err != nil {
@@ -646,7 +700,7 @@ func currentUnfinishedSWETask(ctx context.Context, q db.DBTX, areaID db.ID) (*db
 		return nil, nil
 	}
 	for _, t := range tasks {
-		done, err := runtime.IsSWETaskComplete(ctx, q, t.ID)
+		done, err := IsSWETaskComplete(ctx, q, t.ID)
 		if err != nil {
 			return nil, fmt.Errorf("engine: swe completion: %w", err)
 		}
@@ -655,8 +709,7 @@ func currentUnfinishedSWETask(ctx context.Context, q db.DBTX, areaID db.ID) (*db
 			return &c, nil
 		}
 	}
-	c := tasks[0]
-	return &c, nil
+	return nil, nil
 }
 
 func joinPlus(xs []string) string {

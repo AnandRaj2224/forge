@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,12 +91,14 @@ func (s *MocksScreen) Reload() {
 	ctx := context.Background()
 	s.err = ""
 	exams, err := catalog.GetGovExams(ctx, s.app.DB)
-	if err == nil {
-		s.exams = exams
-		s.examName = map[string]string{}
-		for _, e := range exams {
-			s.examName[string(e.ID)] = e.Name
-		}
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
+	s.exams = exams
+	s.examName = map[string]string{}
+	for _, e := range exams {
+		s.examName[string(e.ID)] = e.Name
 	}
 	mocks, err := runtime.ListMocks(ctx, s.app.DB)
 	if err != nil {
@@ -135,10 +139,18 @@ func (s *MocksScreen) syncDetail() {
 	if m == nil {
 		return
 	}
-	secs, _ := runtime.ListMockSections(ctx, s.app.DB, m.ID)
+	secs, err := runtime.ListMockSections(ctx, s.app.DB, m.ID)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
 	s.sections = secs
 	for _, sec := range secs {
-		ws, _ := runtime.ListWeakTopics(ctx, s.app.DB, sec.ID)
+		ws, err := runtime.ListWeakTopics(ctx, s.app.DB, sec.ID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			return
+		}
 		s.weak[string(sec.ID)] = ws
 		for _, w := range ws {
 			if _, ok := s.topNames[string(w.TopicID)]; !ok {
@@ -312,7 +324,11 @@ func (s *MocksScreen) deleteSelected() {
 		return
 	}
 	ctx := context.Background()
-	_ = runtime.DeleteMock(ctx, s.app.DB, m.ID)
+	// Engine-owned mutation (existence-checked); runtime performs SQL only.
+	if err := engine.DeleteMock(ctx, s.app.DB, m.ID); err != nil {
+		s.err = err.Error()
+		return
+	}
 	s.focusR = false
 	s.Reload()
 }
@@ -525,8 +541,10 @@ func parseOptInt(v string) (*int, error) {
 	if v == "" {
 		return nil, nil
 	}
-	var n int
-	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
+	// Strict full-consumption parsing: the entire input must be an
+	// integer ("100abc", "10 20" and "1.5" are rejected, not truncated).
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
 		return nil, fmt.Errorf("must be int >= 0")
 	}
 	return &n, nil
@@ -537,8 +555,10 @@ func parseOptFloat(v string) (*float64, error) {
 	if v == "" {
 		return nil, nil
 	}
-	var f float64
-	if _, err := fmt.Sscanf(v, "%f", &f); err != nil {
+	// Strict full-consumption parsing: "100abc" is rejected, "100.5" is
+	// accepted; non-finite values are never metrics.
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
 		return nil, fmt.Errorf("must be number")
 	}
 	return &f, nil
@@ -716,11 +736,19 @@ func (s *MocksScreen) openWeakFor(m db.Mock, sec db.MockSection) {
 	s.wExamID = m.ExamID
 	s.wChoices = choices
 	s.wSubjName = map[string]string{}
-	subjs, _ := catalog.GetGovSubjects(ctx, s.app.DB)
+	subjs, err := catalog.GetGovSubjects(ctx, s.app.DB)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
 	for _, g := range subjs {
 		s.wSubjName[string(g.ID)] = g.Name
 	}
-	exist, _ := runtime.ListWeakTopics(ctx, s.app.DB, sec.ID)
+	exist, err := runtime.ListWeakTopics(ctx, s.app.DB, sec.ID)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
 	s.wStaged = make([]db.ID, 0, len(exist))
 	for _, w := range exist {
 		s.wStaged = append(s.wStaged, w.TopicID)
@@ -769,7 +797,11 @@ func (s *MocksScreen) openWeakForStaged(idx int) {
 	s.wExamID = exam.ID
 	s.wChoices = choices
 	s.wSubjName = map[string]string{}
-	subjs, _ := catalog.GetGovSubjects(ctx, s.app.DB)
+	subjs, err := catalog.GetGovSubjects(ctx, s.app.DB)
+	if err != nil {
+		s.cErr = "data error: " + err.Error()
+		return
+	}
 	for _, g := range subjs {
 		s.wSubjName[string(g.ID)] = g.Name
 	}

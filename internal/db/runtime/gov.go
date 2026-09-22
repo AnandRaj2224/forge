@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	db "forge/internal/db"
@@ -11,9 +12,25 @@ import (
 
 func unixToTime(sec int64) time.Time { return time.Unix(sec, 0).UTC() }
 
+// isUniqueViolation reports a SQLite uniqueness conflict (PRIMARY KEY or
+// UNIQUE index), used to translate persistence races into domain state
+// instead of leaking raw storage errors.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "UNIQUE CONSTRAINT FAILED") || strings.Contains(msg, "PRIMARY KEY")
+}
+
 // ---- Gov subject activation ----
 
-// IsGovSubjectActive reports whether a subject has entered preparation.
+// IsGovSubjectActive reports whether a subject-activation row exists.
+//
+// Persistence primitive for the Engine: activation gating decisions live
+// in engine planning; product code must not treat this as a business
+// verdict on its own. DB failures are returned as errors, never silent
+// false.
 func IsGovSubjectActive(ctx context.Context, q db.DBTX, subjectID db.ID) (bool, error) {
 	var count int
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation WHERE subject_id = ?`, subjectID).Scan(&count)
@@ -47,7 +64,11 @@ func GetGovSubjectActivation(ctx context.Context, q db.DBTX, subjectID db.ID) (d
 
 // ---- Gov lecture completions ----
 
-// IsLectureComplete reports whether a lecture is completed.
+// IsLectureComplete reports whether a lecture has a completion row.
+//
+// Persistence primitive for the Engine: product code must use
+// engine.IsLectureComplete (the authoritative product notion), never this
+// helper directly. DB failures are returned as errors, never silent false.
 func IsLectureComplete(ctx context.Context, q db.DBTX, lectureID db.ID) (bool, error) {
 	var count int
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_lecture_completions WHERE lecture_id = ?`, lectureID).Scan(&count)
@@ -61,13 +82,24 @@ func IsLectureComplete(ctx context.Context, q db.DBTX, lectureID db.ID) (bool, e
 // Lectures complete once: a duplicate completion is rejected here so a
 // completed lecture can never reach the UNIQUE save path twice through
 // normal operation (the Today CanStart rule blocks it first).
+//
+// The pre-check distinguishes absence from failure: a query failure
+// propagates as a DB error and never reads as "not complete". The insert
+// itself stays the persistence primitive: a uniqueness conflict there
+// maps to the already-complete domain state, never a raw storage error.
 func RecordLectureCompletion(ctx context.Context, q db.DBTX, c db.GovLectureCompletion) error {
 	var count int
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_lecture_completions WHERE lecture_id = ?`, c.LectureID).Scan(&count); err == nil && count > 0 {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_lecture_completions WHERE lecture_id = ?`, c.LectureID).Scan(&count); err != nil {
+		return fmt.Errorf("runtime: lecture completion check: %w", err)
+	}
+	if count > 0 {
 		return fmt.Errorf("runtime: lecture %q already complete — result is read-only", c.LectureID)
 	}
 	if _, err := q.ExecContext(ctx, `INSERT INTO gov_lecture_completions (lecture_id, session_id, completed_at) VALUES (?, ?, ?)`,
 		c.LectureID, c.SessionID, c.CompletedAt.Unix()); err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("runtime: lecture %q already complete — result is read-only", c.LectureID)
+		}
 		return fmt.Errorf("runtime: record lecture completion: %w", err)
 	}
 	return nil

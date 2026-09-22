@@ -1,7 +1,12 @@
 package engine
 
 import (
+	"context"
+	"fmt"
 	"time"
+
+	db "forge/internal/db"
+	"forge/internal/db/catalog"
 )
 
 // ForgeCalendar is the single authoritative calendar abstraction.
@@ -26,6 +31,31 @@ func DefaultCalendar() ForgeCalendar {
 		loc = time.FixedZone("Asia/Kolkata", 5*60*60+30*60)
 	}
 	return ForgeCalendar{loc: loc}
+}
+
+// VerifyCalendarSettings is the single reconciliation point between the
+// stored forge_settings row and the fixed Forge calendar. Forge is
+// intentionally fixed to Asia/Kolkata + midnight; the settings row is NOT
+// an independently configurable timezone. This check makes that explicit:
+// it loads the row (DB failures propagate) and rejects a silently
+// diverging configuration instead of maintaining two sources of truth.
+// Callers that need calendar assurance (e.g. Today generation entry
+// points) use the returned calendar; a mismatch is a hard error.
+func VerifyCalendarSettings(ctx context.Context, q db.DBTX) (ForgeCalendar, error) {
+	cal := DefaultCalendar()
+	s, err := catalog.GetSettings(ctx, q)
+	if err != nil {
+		return ForgeCalendar{}, fmt.Errorf("engine: load calendar settings: %w", err)
+	}
+	if s.Timezone != "Asia/Kolkata" {
+		return ForgeCalendar{}, wrapErr("calendar", ErrValidation,
+			fmt.Sprintf("unsupported timezone %q: Forge is fixed to Asia/Kolkata", s.Timezone))
+	}
+	if s.DayStartMinute != 0 {
+		return ForgeCalendar{}, wrapErr("calendar", ErrValidation,
+			fmt.Sprintf("unsupported day_start_minute %d: Forge day boundary is fixed to midnight", s.DayStartMinute))
+	}
+	return cal, nil
 }
 
 // Location exposes the underlying location (for tests/formatting).

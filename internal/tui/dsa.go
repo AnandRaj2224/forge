@@ -76,7 +76,13 @@ func (s *DSAScreen) reloadQuestions() {
 	}
 	items := make([]RowItem, 0, len(p.Problems))
 	for _, q := range p.Problems {
-		att, _ := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID)
+		// Presentation-only pass mark via the authoritative engine rule
+		// (engine.AnyPass). A lookup failure surfaces as a data error
+		// instead of a silent unpassed mark.
+		att, err := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+		}
 		mark := "○"
 		if DSAPassUI(att) {
 			mark = "✓"
@@ -93,7 +99,10 @@ func (s *DSAScreen) openProblem(pid string) {
 		s.err = err.Error()
 		return
 	}
-	att, _ := runtime.GetDSAAttempts(ctx, s.app.DB, p.ID)
+	att, err := runtime.GetDSAAttempts(ctx, s.app.DB, p.ID)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+	}
 	var rev *db.DSARepeatState
 	if rs, err := runtime.GetDSARepeatState(ctx, s.app.DB, p.ID); err == nil {
 		rev = &rs
@@ -120,7 +129,12 @@ func (s *DSAScreen) patternProgress(p *DSAPattern) (int, int) {
 	ctx := context.Background()
 	done := 0
 	for _, q := range p.Problems {
-		if att, _ := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID); DSAPassUI(att) {
+		att, err := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			continue
+		}
+		if DSAPassUI(att) {
 			done++
 		}
 	}

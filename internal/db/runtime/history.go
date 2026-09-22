@@ -209,6 +209,10 @@ func ComputeDailySummary(ctx context.Context, q db.DBTX, dateStr string) (DailyS
 					var indep, opt, hint int
 					if rows.Scan(&indep, &opt, &hint) == nil {
 						s.DSAAttempts++
+						// Legacy report only (deprecated, UTC boundaries, unused
+						// by product screens). The authoritative pass rule is
+						// engine.IsDSAPass; this inline copy cannot call it
+						// (engine imports runtime) and must not be reused.
 						if indep == 1 && opt == 1 && hint == 0 {
 							s.DSAPassed++
 						}
@@ -574,6 +578,9 @@ func ComputeWeeklyEvidence(ctx context.Context, q db.DBTX, weekStart, weekEnd st
 					var indep, opt, hint int
 					if rows.Scan(&indep, &opt, &hint) == nil {
 						e.DSAAttempts++
+						// Legacy report only (deprecated; see note above on
+						// ComputeDailySummary). Authoritative rule is
+						// engine.IsDSAPass.
 						if indep == 1 && opt == 1 && hint == 0 {
 							e.DSAPassed++
 						}

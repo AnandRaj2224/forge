@@ -10,6 +10,7 @@ import (
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
 // ---------- SWE: persistent two-panel areas workspace ----------
@@ -82,7 +83,14 @@ func (s *SWEScreen) reloadTasks() {
 	}
 	items := make([]RowItem, 0, len(tasks))
 	for _, t := range tasks {
-		done, _ := runtime.IsSWETaskComplete(ctx, s.app.DB, t.ID)
+		// Presentation-only completion mark via the authoritative Engine
+		// predicate (engine.IsSWETaskComplete). A lookup failure surfaces
+		// as a data error instead of a silent TODO.
+		done, err := engine.IsSWETaskComplete(ctx, s.app.DB, t.ID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			done = false
+		}
 		mark := "○"
 		if done {
 			mark = "✓"
@@ -116,8 +124,14 @@ func (s *SWEScreen) openTask(areaID, taskID string) {
 	}
 	for _, t := range tasks {
 		if string(t.ID) == taskID {
-			hist, _ := runtime.GetSWEExecutionHistory(ctx, s.app.DB, t.ID)
-			done, _ := runtime.IsSWETaskComplete(ctx, s.app.DB, t.ID)
+			hist, err := runtime.GetSWEExecutionHistory(ctx, s.app.DB, t.ID)
+			if err != nil {
+				s.err = "data error: " + err.Error()
+			}
+			done, err := engine.IsSWETaskComplete(ctx, s.app.DB, t.ID)
+			if err != nil {
+				s.err = "data error: " + err.Error()
+			}
 			s.detail = &SWETaskDetail{Area: area, Task: t, History: hist, Done: done}
 			s.showing = "task"
 			s.detailScroll.Reset()
@@ -233,7 +247,11 @@ func (s *SWEScreen) View() string {
 	if s.showing == "task" {
 		right = PanelFixed("TASK", ViewportView(s.taskBody(rw-6), &s.detailScroll, innerH), rw, bodyH, true)
 	} else if a := s.selArea(); a != nil {
-		pr := ComputeSWEProgress(context.Background(), s.app.DB, *a)
+		pr, err := ComputeSWEProgressE(context.Background(), s.app.DB, *a)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			pr = SWEAreaProgress{Area: *a}
+		}
 		r := 0.0
 		if pr.Total > 0 {
 			r = float64(pr.Done) / float64(pr.Total)

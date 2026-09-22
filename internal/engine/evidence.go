@@ -70,7 +70,7 @@ func SaveGovLectureEvidence(ctx context.Context, database *db.DB, taskID, sessio
 		// NO means NOT completed: insert nothing, task stays TODO.
 		return EvaluateTodayTask(ctx, database, taskID)
 	}
-	done, err := runtime.IsLectureComplete(ctx, database, lt.LectureID)
+	done, err := IsLectureComplete(ctx, database, lt.LectureID)
 	if err != nil {
 		return TaskEvaluation{}, fmt.Errorf("engine: lecture check: %w", err)
 	}
@@ -257,7 +257,10 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 	if err != nil {
 		return TaskEvaluation{}, wrapErr("dsa save", ErrInvalidTarget, err.Error())
 	}
-	if err := ValidateDSATarget(ctx, database, dt); err != nil {
+	// Current Today tasks save under strict current-target semantics
+	// (exactly 3 distinct problems: 2 REPEAT + 1 NEW, or the truthful
+	// 3×NEW bootstrap) — never the generic legacy validator alone.
+	if err := ValidateDSACurrentBundle(ctx, database, dt); err != nil {
 		return TaskEvaluation{}, err
 	}
 	sess, err := runtime.GetSession(ctx, database, sessionID)
@@ -307,8 +310,10 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 		}
 	}
 	// Strict mode truthfulness: a persisted target that says NEW for an
-	// already-introduced problem is stale. Never mutate it silently into
-	// REPEAT; surface the stale target instead.
+	// already-introduced problem is stale. Introduction means a NEW
+	// attempt OR repeat scheduling state (repeat-state-only introduction
+	// counts). Never mutate the plan silently into REPEAT; surface the
+	// stale target instead. Planned semantics are immutable.
 	for _, in := range inputs {
 		if targetMode[in.ProblemID] != db.DSAModeNew {
 			continue
@@ -321,6 +326,11 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 			if a.Mode == db.DSAModeNew {
 				return TaskEvaluation{}, wrapErr("dsa save", ErrInvalidTarget, fmt.Sprintf("stale target: problem %q labeled NEW but already introduced", string(in.ProblemID)))
 			}
+		}
+		if _, err := runtime.GetDSARepeatState(ctx, database, in.ProblemID); err == nil {
+			return TaskEvaluation{}, wrapErr("dsa save", ErrInvalidTarget, fmt.Sprintf("stale target: problem %q labeled NEW but already introduced", string(in.ProblemID)))
+		} else if !isNotFoundErr(err) {
+			return TaskEvaluation{}, fmt.Errorf("engine: repeat state: %w", err)
 		}
 	}
 	cal := DefaultCalendar()
@@ -337,7 +347,7 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 			}); err != nil {
 				return err
 			}
-			pass := in.Independent && in.Optimal && !in.HintUsed
+			pass := IsDSAPass(db.DSAAttempt{Independent: in.Independent, Optimal: in.Optimal, HintUsed: in.HintUsed})
 			if err := applyRepeatProgress(ctx, q, in.ProblemID, mode, pass, localDate, now); err != nil {
 				return err
 			}
@@ -351,7 +361,13 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 }
 
 func applyRepeatProgress(ctx context.Context, q db.DBTX, problemID db.ID, mode db.DSAMode, pass bool, localDate string, now time.Time) error {
+	// A genuine no-row result means "no scheduling state yet" (initialize
+	// below); any other DB/query failure propagates instead of being
+	// treated as nonexistent state.
 	cur, err := runtime.GetDSARepeatState(ctx, q, problemID)
+	if err != nil && !isNotFoundErr(err) {
+		return fmt.Errorf("engine: repeat state: %w", err)
+	}
 	curExists := err == nil
 	var stage, interval int
 	if mode == db.DSAModeNew {

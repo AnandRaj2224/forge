@@ -52,6 +52,14 @@ func StartTodayTask(ctx context.Context, database *db.DB, taskID db.ID, now time
 		PlannedSeconds: task.PlannedSeconds, StartedAt: now, Status: db.SessionStatusActive,
 	}
 	if err := runtime.CreateSession(ctx, database, sess); err != nil {
+		// The partial unique index on ACTIVE sessions is the final
+		// concurrency guard: a race that slips past the check above
+		// surfaces here as a uniqueness conflict, translated into the
+		// domain-level busy error (never a raw SQLite message, never a
+		// duplicate session).
+		if isUniqueConflict(err) {
+			return db.Session{}, wrapErr("start", ErrActiveSessionBusy, "stop the active session first")
+		}
 		return db.Session{}, fmt.Errorf("engine: create session: %w", err)
 	}
 	created, err := runtime.GetSession(ctx, database, sid)

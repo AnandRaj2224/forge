@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	db "forge/internal/db"
@@ -85,8 +86,21 @@ func evaluateAt(ctx context.Context, q db.DBTX, taskID db.ID, cutoff int64) (Tas
 	}
 }
 
+// configOrDataErr sorts a target-validation result: a genuine domain
+// verdict (ErrInvalidTarget/ErrValidation) becomes a ConfigError string
+// for the UI, while a database/query failure propagates as an error so it
+// can never masquerade as a target problem.
+func configOrDataErr(err error) (string, error) {
+	if errors.Is(err, ErrInvalidTarget) || errors.Is(err, ErrValidation) {
+		return err.Error(), nil
+	}
+	return "", err
+}
+
 // isActiveAsOf reports whether a session counts as active at the cutoff:
 // currently ACTIVE, or (historically) still running at the cutoff bound.
+// Half-open interval semantics: a session stopped exactly AT the cutoff
+// completed the previous interval and is NOT active there.
 func isActiveAsOf(s db.Session, cutoff int64) bool {
 	if cutoff == 0 {
 		return s.Status == db.SessionStatusActive
@@ -97,7 +111,7 @@ func isActiveAsOf(s db.Session, cutoff int64) bool {
 	if s.Status == db.SessionStatusActive {
 		return true
 	}
-	return s.StoppedAt != nil && s.StoppedAt.Unix() >= cutoff
+	return s.StoppedAt != nil && s.StoppedAt.Unix() > cutoff
 }
 
 // evidenceSessions returns stopped sessions whose evidence may count:
@@ -148,8 +162,12 @@ func evalGovLecture(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.T
 		return ev, nil
 	}
 	if err := ValidateGovLectureTarget(ctx, q, lt); err != nil {
-		ev.ConfigError = err.Error()
-		return ev, nil
+		if msg, derr := configOrDataErr(err); derr != nil {
+			return TaskEvaluation{}, derr
+		} else {
+			ev.ConfigError = msg
+			return ev, nil
+		}
 	}
 	ev.Total = 1
 	// Lecture completion is timestamped: historically only completions
@@ -192,8 +210,12 @@ func evalGovPractice(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.
 		return ev, nil
 	}
 	if err := ValidateGovPracticeTarget(ctx, q, pt); err != nil {
-		ev.ConfigError = err.Error()
-		return ev, nil
+		if msg, derr := configOrDataErr(err); derr != nil {
+			return TaskEvaluation{}, derr
+		} else {
+			ev.ConfigError = msg
+			return ev, nil
+		}
 	}
 	ev.Total = len(pt.TopicIDs)
 	satisfied := map[string]bool{}
@@ -258,8 +280,12 @@ func evalDSA(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 		return ev, nil
 	}
 	if err := ValidateDSATarget(ctx, q, dt); err != nil {
-		ev.ConfigError = err.Error()
-		return ev, nil
+		if msg, derr := configOrDataErr(err); derr != nil {
+			return TaskEvaluation{}, derr
+		} else {
+			ev.ConfigError = msg
+			return ev, nil
+		}
 	}
 	items := dt.Items()
 	ev.Total = len(items)
@@ -308,8 +334,12 @@ func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 		return ev, nil
 	}
 	if err := ValidateSWETarget(ctx, q, st); err != nil {
-		ev.ConfigError = err.Error()
-		return ev, nil
+		if msg, derr := configOrDataErr(err); derr != nil {
+			return TaskEvaluation{}, derr
+		} else {
+			ev.ConfigError = msg
+			return ev, nil
+		}
 	}
 	items := st.Items()
 	ev.Total = len(items)

@@ -160,7 +160,11 @@ func (s *GovScreen) reloadExamTopics() {
 	if s.coverage == nil {
 		return
 	}
-	syll, _ := catalog.GetGovExamSyllabus(ctx, s.app.DB, s.coverage.ExamID)
+	syll, err := catalog.GetGovExamSyllabus(ctx, s.app.DB, s.coverage.ExamID)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
 	inExam := map[db.ID]bool{}
 	for _, mp := range syll {
 		inExam[mp.TopicID] = true
@@ -173,7 +177,11 @@ func (s *GovScreen) reloadExamTopics() {
 	}
 	items := []RowItem{}
 	if subjID != "" {
-		topics, _ := catalog.GetGovTopics(ctx, s.app.DB, subjID)
+		topics, err := catalog.GetGovTopics(ctx, s.app.DB, subjID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			return
+		}
 		for _, t := range topics {
 			if !inExam[t.ID] {
 				continue

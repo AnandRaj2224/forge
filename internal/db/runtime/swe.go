@@ -62,7 +62,11 @@ func GetSWEExecutionsBySession(ctx context.Context, q db.DBTX, sessionID db.ID) 
 	return out, rows.Err()
 }
 
-// IsSWETaskComplete derives completion: true once a COMPLETED execution exists.
+// IsSWETaskComplete reports whether a COMPLETED execution row exists.
+//
+// Persistence primitive for the Engine: product code must use
+// engine.IsSWETaskComplete (the authoritative product notion), never this
+// helper directly. DB failures are returned as errors, never silent false.
 func IsSWETaskComplete(ctx context.Context, q db.DBTX, taskID db.ID) (bool, error) {
 	var count int
 	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM swe_executions WHERE task_id = ? AND status = 'COMPLETED'`, taskID).Scan(&count)

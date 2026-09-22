@@ -441,7 +441,7 @@ func topicLectureCompleteE(ctx context.Context, q db.DBTX, topicID db.ID) (bool,
 		return true, nil // zero lectures: track satisfied
 	}
 	for _, l := range lecs {
-		ok, err := runtime.IsLectureComplete(ctx, q, l.ID)
+		ok, err := engine.IsLectureComplete(ctx, q, l.ID)
 		if err != nil {
 			return false, err
 		}
@@ -461,7 +461,7 @@ func TopicLectureProgressE(ctx context.Context, q db.DBTX, topicID db.ID) (done,
 	}
 	total = len(lecs)
 	for _, l := range lecs {
-		ok, err := runtime.IsLectureComplete(ctx, q, l.ID)
+		ok, err := engine.IsLectureComplete(ctx, q, l.ID)
 		if err != nil {
 			return 0, 0, nil, nil, err
 		}
@@ -572,23 +572,45 @@ func LastAttempt(attempts []db.DSAAttempt) *db.DSAAttempt {
 }
 
 // SWEAreaProgress: done = tasks with a COMPLETED execution (derived rule).
+//
+// The authoritative product predicate is engine.IsSWETaskComplete; Today
+// startability and bundle completion additionally require exact target
+// satisfaction via engine.EvaluateTodayTask. This helper is presentation
+// aggregation for the SWE browser only and must never gate starting,
+// completion, or evidence.
 type SWEAreaProgress struct {
 	Area  db.SWEArea
 	Total int
 	Done  int
 }
 
-func ComputeSWEProgress(ctx context.Context, q db.DBTX, area db.SWEArea) SWEAreaProgress {
+// ComputeSWEProgressE aggregates area progress; DB failures propagate and
+// must surface as data errors instead of silent undercounts.
+func ComputeSWEProgressE(ctx context.Context, q db.DBTX, area db.SWEArea) (SWEAreaProgress, error) {
 	tasks, err := catalog.GetSWETasks(ctx, q, area.ID)
 	if err != nil {
-		return SWEAreaProgress{Area: area}
+		return SWEAreaProgress{Area: area}, err
 	}
 	pr := SWEAreaProgress{Area: area, Total: len(tasks)}
 	for _, t := range tasks {
-		if done, _ := runtime.IsSWETaskComplete(ctx, q, t.ID); done {
+		done, err := engine.IsSWETaskComplete(ctx, q, t.ID)
+		if err != nil {
+			return pr, err
+		}
+		if done {
 			pr.Done++
 		}
 	}
+	return pr, nil
+}
+
+// ComputeSWEProgress is the silent-compat wrapper.
+//
+// Deprecated: non-authoritative presentation helper that swallows lookup
+// failures as TODO. New code must use ComputeSWEProgressE (or the engine
+// evaluator for task state) and surface errors as data errors.
+func ComputeSWEProgress(ctx context.Context, q db.DBTX, area db.SWEArea) SWEAreaProgress {
+	pr, _ := ComputeSWEProgressE(ctx, q, area)
 	return pr
 }
 

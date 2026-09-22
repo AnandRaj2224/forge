@@ -185,8 +185,9 @@ func (s *ReviewsScreen) syncSelected() {
 }
 
 // saveDraft persists the current draft snapshot explicitly (metrics +
-// structured report_json). Stored reviews render the persisted snapshot and
-// never silently change when underlying rows change.
+// structured report_json) via the engine, which validates and freezes the
+// metric snapshot. Stored reviews render the persisted snapshot and never
+// silently change when underlying rows change. Runtime performs SQL only.
 func (s *ReviewsScreen) saveDraft() {
 	if s.selected == nil {
 		return
@@ -198,8 +199,6 @@ func (s *ReviewsScreen) saveDraft() {
 		}
 	}
 	r := *s.selected
-	r.GeneratedAt = s.nowFn()
-	r.UpdatedAt = r.GeneratedAt
 	if r.ReportJSON == "" || r.ReportJSON == "{}" {
 		if draft, err := engine.BuildWeeklyDraft(s.app.ctx(), s.app.DB, r.ID, r.WeekStart, r.WeekEnd); err == nil {
 			if js, err := engine.MarshalWeeklySnapshot(draft); err == nil {
@@ -210,7 +209,7 @@ func (s *ReviewsScreen) saveDraft() {
 			}
 		}
 	}
-	if err := runtime.UpsertWeeklyReview(s.app.ctx(), s.app.DB, r); err != nil {
+	if _, err := engine.SaveWeeklyReviewSnapshot(s.app.ctx(), s.app.DB, r, s.nowFn()); err != nil {
 		s.err = err.Error()
 		return
 	}
@@ -284,32 +283,18 @@ func (s *ReviewsScreen) updateEditFocus() {
 	}
 }
 
-// saveReflections persists only the edited reflections. The saved metric
-// snapshot (planned/actual/report_json) is untouched so stored reviews stay
-// stable when underlying rows later change.
+// saveReflections persists only the edited reflections via the engine. The
+// saved metric snapshot (planned/actual/report_json) is untouched so stored
+// reviews stay stable when underlying rows later change. Runtime performs
+// SQL only.
 func (s *ReviewsScreen) saveReflections() {
 	if s.selected == nil {
 		return
 	}
-	// Preserve the stored metric snapshot: reload the persisted row when it
-	// exists and only overwrite reflections + updated_at.
 	r := *s.selected
-	if stored, err := runtime.GetWeeklyReview(s.app.ctx(), s.app.DB, r.ID); err == nil {
-		r.PlannedSeconds = stored.PlannedSeconds
-		r.ElapsedSeconds = stored.ElapsedSeconds
-		r.OverrunSeconds = stored.OverrunSeconds
-		r.ReportJSON = stored.ReportJSON
-		r.GeneratedAt = stored.GeneratedAt
-		r.WeekStart = stored.WeekStart
-		r.WeekEnd = stored.WeekEnd
-	}
-	r.ReflectionWorked = strings.TrimSpace(s.editIn[0].Value())
-	r.ReflectionChange = strings.TrimSpace(s.editIn[1].Value())
-	r.UpdatedAt = s.nowFn()
-	if r.GeneratedAt.IsZero() {
-		r.GeneratedAt = r.UpdatedAt
-	}
-	if err := runtime.UpsertWeeklyReview(s.app.ctx(), s.app.DB, r); err != nil {
+	worked := s.editIn[0].Value()
+	change := s.editIn[1].Value()
+	if _, err := engine.SaveReviewReflections(s.app.ctx(), s.app.DB, r, worked, change, s.nowFn()); err != nil {
 		s.err = err.Error()
 		return
 	}

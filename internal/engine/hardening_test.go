@@ -585,9 +585,16 @@ func TestDSAStrictValidation(t *testing.T) {
 		t.Fatal("3-repeat bundle must fail strict validation")
 	}
 	// Fake NEW (problem already introduced) rejected, even in 2R+1N shape.
+	// dsa-1 starts genuinely new here (no attempts, no repeat state).
 	now := time.Now()
-	_ = runtime.UpsertDSARepeatState(ctx, d, db.DSARepeatState{ProblemID: "dsa-1", RepeatStage: 1, CurrentIntervalDays: 3, NextReviewDate: "2026-09-21", UpdatedAt: now})
-	mkTask(t, ctx, d, "intro", "2026-09-20", db.DomainDSA, db.SessionKindDSA, mustDSATarget(t, "dsa-1", db.DSAModeNew))
+	// Introduce dsa-1 through a strict 2R+1N bundle (partial save of the
+	// NEW item only: current saves require strict targets).
+	intro3, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
+		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
+		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
+	}})
+	mkTask(t, ctx, d, "intro", "2026-09-20", db.DomainDSA, db.SessionKindDSA, intro3)
 	sess, _ := engine.StartTodayTask(ctx, d, "intro", now)
 	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
 	if _, err := engine.SaveDSAEvidence(ctx, d, "intro", sess.ID, []engine.DSAAttemptInput{
@@ -622,8 +629,14 @@ func TestDSAStaleNewRejectedOnSave(t *testing.T) {
 	ctx := context.Background()
 	seedDSA(t, ctx, d)
 	now := time.Now()
-	// Introduce dsa-1 as NEW through one task.
-	mkTask(t, ctx, d, "new1", "2026-09-20", db.DomainDSA, db.SessionKindDSA, mustDSATarget(t, "dsa-1", db.DSAModeNew))
+	// Introduce dsa-1 as NEW through a strict 2R+1N bundle (partial save
+	// of the NEW item only: current saves require strict targets).
+	new3, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
+		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
+		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
+	}})
+	mkTask(t, ctx, d, "new1", "2026-09-20", db.DomainDSA, db.SessionKindDSA, new3)
 	s1, _ := engine.StartTodayTask(ctx, d, "new1", now)
 	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
 	if _, err := engine.SaveDSAEvidence(ctx, d, "new1", s1.ID, []engine.DSAAttemptInput{
@@ -632,7 +645,12 @@ func TestDSAStaleNewRejectedOnSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A stale persisted target still saying NEW must surface, never convert.
-	mkTask(t, ctx, d, "new2", "2026-09-21", db.DomainDSA, db.SessionKindDSA, mustDSATarget(t, "dsa-1", db.DSAModeNew))
+	stale3, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
+		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
+		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
+	}})
+	mkTask(t, ctx, d, "new2", "2026-09-21", db.DomainDSA, db.SessionKindDSA, stale3)
 	s2, err := engine.StartTodayTask(ctx, d, "new2", now.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)

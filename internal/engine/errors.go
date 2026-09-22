@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Domain errors. Engine returns these for expected business states so the
@@ -38,4 +39,17 @@ func (e *DomainError) Unwrap() error { return e.Err }
 
 func wrapErr(op string, sentinel error, detail string) *DomainError {
 	return &DomainError{Op: op, Err: sentinel, Detail: detail}
+}
+
+// isUniqueConflict reports whether err is a SQLite uniqueness violation
+// (single-active-session index, snapshot revision uniqueness, DSA NEW
+// uniqueness, ...). The DB stays the final concurrency guard; the engine
+// translates its conflict into the appropriate domain error instead of
+// leaking a raw storage message.
+func isUniqueConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "UNIQUE CONSTRAINT FAILED")
 }

@@ -9,6 +9,15 @@ import (
 	"forge/internal/db/runtime"
 )
 
+// Validation rules below distinguish two cases for every catalogue lookup:
+//
+//	subject/topic/lecture/problem genuinely absent (sql.ErrNoRows)
+//	    → ErrInvalidTarget (the target itself is invalid)
+//
+//	actual database/query failure
+//	    → plain wrapped error that propagates to the caller as a data
+//	      error, never folded into an "invalid target" verdict.
+
 // ValidateGovLectureTarget semantically validates a lecture target: non-empty
 // IDs, subject/topic/lecture existence and relationship chain.
 func ValidateGovLectureTarget(ctx context.Context, q db.DBTX, lt db.GovLectureTarget) error {
@@ -17,19 +26,25 @@ func ValidateGovLectureTarget(ctx context.Context, q db.DBTX, lt db.GovLectureTa
 	}
 	subj, err := catalog.GetGovSubject(ctx, q, lt.SubjectID)
 	if err != nil {
-		return wrapErr("lecture target", ErrInvalidTarget, fmt.Sprintf("unknown subject %q", string(lt.SubjectID)))
+		if isNotFoundErr(err) {
+			return wrapErr("lecture target", ErrInvalidTarget, fmt.Sprintf("unknown subject %q", string(lt.SubjectID)))
+		}
+		return fmt.Errorf("engine: gov subject lookup: %w", err)
 	}
 	_ = subj
 	tp, err := catalog.GetGovTopic(ctx, q, lt.TopicID)
 	if err != nil {
-		return wrapErr("lecture target", ErrInvalidTarget, fmt.Sprintf("unknown topic %q", string(lt.TopicID)))
+		if isNotFoundErr(err) {
+			return wrapErr("lecture target", ErrInvalidTarget, fmt.Sprintf("unknown topic %q", string(lt.TopicID)))
+		}
+		return fmt.Errorf("engine: gov topic lookup: %w", err)
 	}
 	if tp.SubjectID != lt.SubjectID {
 		return wrapErr("lecture target", ErrInvalidTarget, "topic does not belong to subject")
 	}
 	lecs, err := catalog.GetGovLectures(ctx, q, lt.TopicID)
 	if err != nil {
-		return wrapErr("lecture target", ErrInvalidTarget, "lecture lookup failed")
+		return fmt.Errorf("engine: gov lectures lookup: %w", err)
 	}
 	for _, l := range lecs {
 		if l.ID == lt.LectureID {
@@ -49,7 +64,10 @@ func ValidateGovPracticeTarget(ctx context.Context, q db.DBTX, pt db.GovPractice
 		return wrapErr("practice target", ErrInvalidTarget, "empty topic bundle")
 	}
 	if _, err := catalog.GetGovSubject(ctx, q, pt.SubjectID); err != nil {
-		return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("unknown subject %q", string(pt.SubjectID)))
+		if isNotFoundErr(err) {
+			return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("unknown subject %q", string(pt.SubjectID)))
+		}
+		return fmt.Errorf("engine: gov subject lookup: %w", err)
 	}
 	seen := map[db.ID]bool{}
 	for _, tid := range pt.TopicIDs {
@@ -62,7 +80,10 @@ func ValidateGovPracticeTarget(ctx context.Context, q db.DBTX, pt db.GovPractice
 		seen[tid] = true
 		tp, err := catalog.GetGovTopic(ctx, q, tid)
 		if err != nil {
-			return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("unknown topic %q", string(tid)))
+			if isNotFoundErr(err) {
+				return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("unknown topic %q", string(tid)))
+			}
+			return fmt.Errorf("engine: gov topic lookup: %w", err)
 		}
 		if tp.SubjectID != pt.SubjectID {
 			return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("topic %q not in subject", string(tid)))
@@ -91,7 +112,10 @@ func ValidateDSATarget(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
 			return wrapErr("dsa target", ErrInvalidTarget, fmt.Sprintf("invalid mode %q", string(it.Mode)))
 		}
 		if _, err := catalog.GetDSAProblem(ctx, q, it.ProblemID); err != nil {
-			return wrapErr("dsa target", ErrInvalidTarget, fmt.Sprintf("unknown problem %q", string(it.ProblemID)))
+			if isNotFoundErr(err) {
+				return wrapErr("dsa target", ErrInvalidTarget, fmt.Sprintf("unknown problem %q", string(it.ProblemID)))
+			}
+			return fmt.Errorf("engine: dsa problem lookup: %w", err)
 		}
 	}
 	return nil
@@ -136,7 +160,10 @@ func ValidateDSACurrentBundle(ctx context.Context, q db.DBTX, dt db.DSATarget) e
 }
 
 // requireGenuinelyNew rejects a NEW label for an already-introduced
-// problem instead of silently converting it to REPEAT at save time.
+// problem instead of silently converting it to REPEAT at save time. A
+// problem is introduced once it has a NEW attempt OR repeat state; either
+// makes a persisted NEW label stale. Catalogue/DB failures propagate and
+// never read as "genuinely new".
 func requireGenuinelyNew(ctx context.Context, q db.DBTX, problemID db.ID) error {
 	atts, err := runtime.GetDSAAttempts(ctx, q, problemID)
 	if err != nil {
@@ -146,6 +173,11 @@ func requireGenuinelyNew(ctx context.Context, q db.DBTX, problemID db.ID) error 
 		if a.Mode == db.DSAModeNew {
 			return wrapErr("dsa target", ErrInvalidTarget, fmt.Sprintf("stale target: problem %q labeled NEW but already introduced", string(problemID)))
 		}
+	}
+	if _, err := runtime.GetDSARepeatState(ctx, q, problemID); err == nil {
+		return wrapErr("dsa target", ErrInvalidTarget, fmt.Sprintf("stale target: problem %q labeled NEW but already introduced", string(problemID)))
+	} else if !isNotFoundErr(err) {
+		return fmt.Errorf("engine: repeat state: %w", err)
 	}
 	return nil
 }

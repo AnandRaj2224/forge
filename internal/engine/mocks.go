@@ -19,8 +19,20 @@ type MockSectionInput struct {
 }
 
 // ValidateMockMetrics checks score/total/correct/attempted consistency for the
-// provided fields. Nil fields are skipped.
+// provided fields. Nil fields are skipped (missing metrics are never
+// fabricated). Negative values are rejected for every count-like field
+// before any DB write; percentile/accuracy stay 0..100; avg speed stays
+// positive where supplied.
 func ValidateMockMetrics(m db.Mock) error {
+	for name, v := range map[string]*int{
+		"score": m.Score, "total_score": m.TotalScore, "rank": m.RankValue,
+		"attempted": m.Attempted, "total_questions": m.TotalQuestions,
+		"correct": m.Correct, "incorrect": m.Incorrect, "unattempted": m.Unattempted,
+	} {
+		if v != nil && *v < 0 {
+			return wrapErr("mock", ErrValidation, name+" must be >= 0")
+		}
+	}
 	if m.Score != nil && m.TotalScore != nil && *m.Score > *m.TotalScore {
 		return wrapErr("mock", ErrValidation, "score <= total_score required")
 	}
@@ -66,7 +78,10 @@ func ValidateMockSection(ctx context.Context, q db.DBTX, examID db.ID, sec MockS
 		return wrapErr("mock section", ErrValidation, "GOV subject mapping required")
 	}
 	if _, err := catalog.GetGovSubject(ctx, q, sec.GovSubjectID); err != nil {
-		return wrapErr("mock section", ErrValidation, fmt.Sprintf("unknown GOV subject %q", string(sec.GovSubjectID)))
+		if isNotFoundErr(err) {
+			return wrapErr("mock section", ErrValidation, fmt.Sprintf("unknown GOV subject %q", string(sec.GovSubjectID)))
+		}
+		return fmt.Errorf("engine: gov subject lookup: %w", err)
 	}
 	if len(sec.WeakTopics) > 3 {
 		return wrapErr("mock section", ErrValidation, "at most 3 weak topics per section")
@@ -82,7 +97,10 @@ func ValidateMockSection(ctx context.Context, q db.DBTX, examID db.ID, sec MockS
 		seen[tid] = true
 		tp, err := catalog.GetGovTopic(ctx, q, tid)
 		if err != nil {
-			return wrapErr("mock section", ErrValidation, fmt.Sprintf("unknown topic %q", string(tid)))
+			if isNotFoundErr(err) {
+				return wrapErr("mock section", ErrValidation, fmt.Sprintf("unknown topic %q", string(tid)))
+			}
+			return fmt.Errorf("engine: gov topic lookup: %w", err)
 		}
 		if tp.SubjectID != sec.GovSubjectID {
 			return wrapErr("mock section", ErrValidation, fmt.Sprintf("topic %q does not belong to mapped subject", string(tid)))
@@ -185,6 +203,21 @@ func insertMockSectionWithSubject(ctx context.Context, q db.DBTX, s db.MockSecti
 	if _, err := q.ExecContext(ctx, `INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES (?, ?, ?, ?)`,
 		string(s.ID), string(s.MockID), s.Name, s.SortOrder); err != nil {
 		return fmt.Errorf("engine: create mock section: %w", err)
+	}
+	return nil
+}
+
+// DeleteMock deletes a mock (sections/weak topics cascade). It is the only
+// normal path to mock deletion; the TUI must use it.
+func DeleteMock(ctx context.Context, database *db.DB, mockID db.ID) error {
+	if _, err := runtime.GetMock(ctx, database, mockID); err != nil {
+		if isNotFoundErr(err) {
+			return wrapErr("mock delete", ErrNotFound, fmt.Sprintf("unknown mock %q", string(mockID)))
+		}
+		return fmt.Errorf("engine: get mock: %w", err)
+	}
+	if err := runtime.DeleteMock(ctx, database, mockID); err != nil {
+		return fmt.Errorf("engine: delete mock: %w", err)
 	}
 	return nil
 }

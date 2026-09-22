@@ -12,7 +12,7 @@ import (
 
 // q in normal navigation quits; Esc backs out (never quits); Ctrl+C quits.
 func TestNormalQQuitsEscBacks(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.goTab(TabGOV)
 	testSend(app, "enter") // exam workspace
@@ -45,7 +45,7 @@ func TestNormalQQuitsEscBacks(t *testing.T) {
 
 // Typing q produces q; Esc cancels the form (never quits); Enter saves.
 func TestFormQTypesEscCancelsEnterSaves(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.reloadCurrent()
 	testSend(app, "j") // task2 = practice
@@ -86,7 +86,7 @@ func TestFormQTypesEscCancelsEnterSaves(t *testing.T) {
 
 // Completed tasks: viewable read-only, never startable (domain + UI).
 func TestCompletedTaskCannotStart(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.reloadCurrent()
 	// Complete the lecture task.
@@ -148,7 +148,7 @@ func TestCompletedTaskCannotStart(t *testing.T) {
 
 // Practice bundle: explicit Save, all-or-nothing, then read-only DONE.
 func TestPracticeSaveBecomesReadOnlyDone(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.reloadCurrent()
 	testSend(app, "j")
@@ -242,7 +242,7 @@ func TestScrollablePanes(t *testing.T) {
 		t.Fatal("offset must advance")
 	}
 	// History body scrolls when focused.
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 150, 40
 	app.goTab(TabHistory)
 	testSend(app, "l")
@@ -265,7 +265,7 @@ func TestScrollablePanes(t *testing.T) {
 // Form j/k: types inside text fields, moves between non-text widgets, and
 // the focused field is never hidden below the viewport.
 func TestFormJKBehavior(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.reloadCurrent()
 	// Practice form: first focus is a text field — j/k must type.
@@ -310,7 +310,7 @@ func TestFormJKBehavior(t *testing.T) {
 		t.Fatalf("SAVE line %d hidden (offset %d, lines %d)", fl, vp.Offset, len(lines))
 	}
 	// History shows unfinished planned work factually.
-	app2 := NewApp(seedFlowDB(t))
+	app2 := newFlowApp(t)
 	app2.width, app2.height = 150, 40
 	app2.history.nowFn = func() time.Time { return time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC) }
 	app2.goTab(TabHistory)

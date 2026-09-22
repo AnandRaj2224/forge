@@ -61,7 +61,9 @@ func seedFlowDB(t *testing.T) *db.DB {
 	}
 	ctx := context.Background()
 	now := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
-	_ = catalog.UpsertSettings(ctx, database, db.ForgeSettings{ID: 1, Timezone: "Asia/Kolkata", DayStartMinute: 600, CreatedAt: now})
+	// Canonical Forge calendar settings (Asia/Kolkata, midnight): the engine
+	// verifies these on Today generation, so fixtures must carry them.
+	_ = catalog.UpsertSettings(ctx, database, db.ForgeSettings{ID: 1, Timezone: "Asia/Kolkata", DayStartMinute: 0, CreatedAt: now})
 	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "subj-quant", Name: "Quant", SortOrder: 1})
 	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "subj-reasoning", Name: "Reasoning", SortOrder: 2})
 	_ = catalog.InsertGovTopic(ctx, database, db.GovTopic{ID: "topic-a", SubjectID: "subj-quant", Name: "Number System", SortOrder: 1})
@@ -82,9 +84,20 @@ func seedFlowDB(t *testing.T) *db.DB {
 	return database
 }
 
+// newFlowApp builds the Today workspace on the flow fixture with the clock
+// pinned to the fixture date (2026-09-20): the Today screen resolves its
+// date exclusively through engine.EnsureToday, so tests pin time instead of
+// relying on any snapshot fallback (there is none).
+func newFlowApp(t *testing.T) *App {
+	t.Helper()
+	app := NewApp(seedFlowDB(t))
+	app.today.nowFn = func() time.Time { return time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC) }
+	return app
+}
+
 // Today workspace: selection drives detail, start/stop/result stay in place.
 func TestTodayWorkspaceFlow(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.reloadCurrent()
 
@@ -119,7 +132,7 @@ func TestTodayWorkspaceFlow(t *testing.T) {
 
 // GOV: dashboard cards -> exam workspace -> topic detail, context kept.
 func TestGovDashboardFlow(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 140, 40
 	app.goTab(TabGOV)
 	if app.gov.level != govDashboard {
@@ -158,7 +171,7 @@ func TestGovDashboardFlow(t *testing.T) {
 // Practice form: digits reach inputs (not global 1-5 tab shortcuts),
 // every bundled topic validates, SAVE persists all rows.
 func TestPracticeFormTypingAndSave(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 120, 36
 	app.reloadCurrent()
 	testSend(app, "j") // task2 = practice
@@ -197,7 +210,7 @@ func countRows(app *App, q string) (int, error) {
 // Every top-level workspace renders at desktop and narrow widths with no
 // row exceeding the viewport and no fake-text controls.
 func TestWorkspacesFitViewport(t *testing.T) {
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	fakes := []string{"[ START SESSION ]", "[ STOP SESSION ]", "[ SAVE ]", "[ YES ] [ NO ]", "1:TODAY", "EXAMS (tab:"}
 	for _, size := range [][2]int{{120, 36}, {70, 24}} {
 		app.width, app.height = size[0], size[1]
@@ -236,7 +249,7 @@ func TestWorkspacesFitViewport(t *testing.T) {
 func TestGlobalFooterAndColumns(t *testing.T) {
 	for _, size := range [][2]int{{170, 44}, {120, 36}} {
 		w, h := size[0], size[1]
-		app := NewApp(seedFlowDB(t))
+		app := newFlowApp(t)
 		app.width, app.height = w, h
 		var footerRef string
 		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabMocks, TabHistory, TabReviews} {
@@ -270,7 +283,7 @@ func TestGlobalFooterAndColumns(t *testing.T) {
 			}
 		}
 	}
-	app := NewApp(seedFlowDB(t))
+	app := newFlowApp(t)
 	app.width, app.height = 170, 44
 	app.goTab(TabToday)
 	v := stripANSIForTest(app.View().Content)

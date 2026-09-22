@@ -211,7 +211,14 @@ func taskDetail(ctx context.Context, q db.DBTX, t db.TodayTask) string {
 		var names []string
 		for _, it := range st.Items() {
 			if it.TaskID != nil {
-				tasks, _ := catalog.GetSWETasks(ctx, q, it.AreaID)
+				tasks, err := catalog.GetSWETasks(ctx, q, it.AreaID)
+				if err != nil {
+					// Read-only enrichment only: a catalogue failure
+					// degrades this detail line to the title rather than
+					// failing the whole report. Domain state is decided
+					// by the evaluator, never here.
+					continue
+				}
 				for _, tk := range tasks {
 					if tk.ID == *it.TaskID {
 						names = append(names, tk.Title)
@@ -403,6 +410,13 @@ type WeeklyReport struct {
 
 // BuildWeeklyDraft generates a live draft for [weekStart, weekEnd] using the
 // latest snapshot per day for planned totals and actual session intervals.
+//
+// Historical semantics: task completion is evaluated as of the week-end
+// boundary (exclusive), so work completed after the week never rewrites the
+// week's completion. Evidence inclusion stays bounded by recorded timestamps
+// in range. Session counts use interval overlap: any stopped session whose
+// [started, stopped) interval overlaps the week counts, with its actual time
+// split at local day boundaries into the week.
 func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd string) (WeeklyReport, error) {
 	rep := WeeklyReport{WeekID: weekID, WeekStart: weekStart, WeekEnd: weekEnd}
 	cal := DefaultCalendar()
@@ -414,6 +428,10 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 	if err != nil {
 		return WeeklyReport{}, wrapErr("weekly", ErrValidation, "bad week end")
 	}
+	// Exclusive week-end cutoff (start of the day after weekEnd). Task state
+	// and evidence strictly before this bound belong to the week; anything
+	// at or after it does not.
+	weekEndCutoff := end.AddDate(0, 0, 1).Unix()
 	// Planned: latest snapshot per day in range. A genuine no-row result
 	// means "no plan that day" (skip); a real DB failure propagates.
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
@@ -433,9 +451,10 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 			rep.Planned += t.PlannedSeconds
 			rep.TasksTotal++
 		}
-		// Completion via authoritative evaluation (latest snapshot tasks).
+		// Completion via authoritative evaluation as of the week-end
+		// cutoff (never today's state).
 		for _, t := range tasks {
-			ev, err := EvaluateTodayTask(ctx, q, t.ID)
+			ev, err := EvaluateTodayTaskAt(ctx, q, t.ID, weekEndCutoff)
 			if err != nil {
 				return WeeklyReport{}, err
 			}
@@ -477,9 +496,10 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 				rep.SWESeconds += int(secs)
 			}
 		}
-		// Session counts when its start falls in the week (start-date attribution
-		// for counts; time itself is split above).
-		if cal.LocalDateOfUnix(s.StartedAt.Unix()) >= weekStart && cal.LocalDateOfUnix(s.StartedAt.Unix()) <= weekEnd {
+		// Session counts when its time interval overlaps the week (same
+		// overlap semantics as the actual-time split above): a session
+		// spanning the week boundary counts for the week it touches.
+		if s.StartedAt.Unix() < hi && s.StoppedAt.Unix() > lo {
 			rep.Sessions++
 		}
 	}
@@ -581,34 +601,17 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 		v := float64(rep.GovCorrect) / float64(rep.GovAttempted)
 		rep.GovAccuracy = &v
 	}
-	// Per-subject lectures + names in global order.
+	// Per-subject lectures + names in global order. Every lookup failure
+	// propagates: a weekly report is either complete or a data error,
+	// never a partially correct-looking snapshot with quietly dropped
+	// lectures.
 	subjects, err := catalog.GetGovSubjects(ctx, q)
 	if err != nil {
 		return fmt.Errorf("engine: subjects: %w", err)
 	}
 	lecBySubject := map[string]int{}
-	lrows, err := q.QueryContext(ctx, `SELECT lecture_id FROM gov_lecture_completions WHERE completed_at >= ? AND completed_at < ?`, lo, hi)
-	if err == nil {
-		var lids []string
-		for lrows.Next() {
-			var lid string
-			if lrows.Scan(&lid) == nil {
-				lids = append(lids, lid)
-			}
-		}
-		lrows.Close()
-		for _, lid := range lids {
-			var topicID string
-			if err := q.QueryRowContext(ctx, `SELECT topic_id FROM gov_lectures WHERE id = ?`, lid).Scan(&topicID); err != nil {
-				continue
-			}
-			if sid, err := topicSubject(ctx, q, topicID); err == nil {
-				lecBySubject[string(sid)]++
-			}
-		}
-	} else {
-		// Query failure must propagate, not silently empty.
-		return fmt.Errorf("engine: weekly lecture ids: %w", err)
+	if err := collectWeeklyLectureSubjects(ctx, q, lo, hi, lecBySubject); err != nil {
+		return err
 	}
 	for _, s := range subjects {
 		ag, ok := bySubject[string(s.ID)]
@@ -687,6 +690,49 @@ func topicSubject(ctx context.Context, q db.DBTX, topicID string) (db.ID, error)
 		return "", err
 	}
 	return db.ID(sid), nil
+}
+
+// collectWeeklyLectureSubjects maps in-week lecture completions to subject
+// IDs for the per-subject breakdown. Single-connection discipline: rows
+// are fully collected (and closed) before follow-up lookups run. Every
+// scan/lookup failure propagates — a dropped lecture here would silently
+// undercount a subject in a stored review.
+func collectWeeklyLectureSubjects(ctx context.Context, q db.DBTX, lo, hi int64, lecBySubject map[string]int) error {
+	lrows, err := q.QueryContext(ctx, `SELECT lecture_id FROM gov_lecture_completions WHERE completed_at >= ? AND completed_at < ?`, lo, hi)
+	if err != nil {
+		return fmt.Errorf("engine: weekly lecture ids: %w", err)
+	}
+	var lids []string
+	var scanErr error
+	func() {
+		defer lrows.Close()
+		for lrows.Next() {
+			var lid string
+			if err := lrows.Scan(&lid); err != nil {
+				scanErr = fmt.Errorf("engine: scan weekly lecture id: %w", err)
+				return
+			}
+			lids = append(lids, lid)
+		}
+	}()
+	if scanErr != nil {
+		return scanErr
+	}
+	if err := lrows.Err(); err != nil {
+		return fmt.Errorf("engine: weekly lecture rows: %w", err)
+	}
+	for _, lid := range lids {
+		var topicID string
+		if err := q.QueryRowContext(ctx, `SELECT topic_id FROM gov_lectures WHERE id = ?`, lid).Scan(&topicID); err != nil {
+			return fmt.Errorf("engine: weekly lecture topic: %w", err)
+		}
+		sid, err := topicSubject(ctx, q, topicID)
+		if err != nil {
+			return fmt.Errorf("engine: weekly topic subject: %w", err)
+		}
+		lecBySubject[string(sid)]++
+	}
+	return nil
 }
 
 // MarshalWeeklySnapshot serializes the structured weekly snapshot for storage.
