@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,6 +87,7 @@ func FormatDurationLong(secs int) string {
 // changing the stored meaning (seconds). Accepts:
 //   - plain integers as seconds: "300" -> 300 (back-compat)
 //   - duration strings: "30s", "5m", "1h", "1h 15m", "1h15m", "1m 30s"
+//
 // Units are h/m/s, case-insensitive, spaces optional. Returns seconds or
 // an error message fragment.
 func ParseDurationSeconds(s string) (int, string) {
@@ -379,6 +381,9 @@ func (e ExamCoverage) Percent() float64 {
 }
 
 // ComputeExamCoverage aggregates only existing DB rows; no invented formulas.
+// Lecture completion is resolved in batch: one lectures query for all
+// syllabus topics plus one completion-map query, then progress is computed
+// in memory (no per-lecture completion polling).
 func ComputeExamCoverage(ctx context.Context, q db.DBTX, examID db.ID) (ExamCoverage, error) {
 	exams, err := catalog.GetGovExams(ctx, q)
 	if err != nil {
@@ -396,33 +401,71 @@ func ComputeExamCoverage(ctx context.Context, q db.DBTX, examID db.ID) (ExamCove
 		return ExamCoverage{}, err
 	}
 	cov.Total = len(syll)
-	bySubject := map[db.ID]*SubjectCoverage{}
-	order := []db.ID{}
+	// Topic subjects: one lookup per syllabus topic (bounded, syllabus-sized).
+	type topicInfo struct {
+		subjectID db.ID
+	}
+	topicSubject := make(map[db.ID]db.ID, len(syll))
+	var topicIDs []db.ID
 	for _, s := range syll {
 		tp, err := catalog.GetGovTopic(ctx, q, s.TopicID)
 		if err != nil {
 			continue
 		}
-		sc, ok := bySubject[tp.SubjectID]
+		topicSubject[s.TopicID] = tp.SubjectID
+		topicIDs = append(topicIDs, s.TopicID)
+	}
+	// Batch lectures + batch completions (2 queries total for progress).
+	lecturesByTopic, err := catalog.GetGovLecturesByTopics(ctx, q, topicIDs)
+	if err != nil {
+		return ExamCoverage{}, err
+	}
+	var allLectureIDs []db.ID
+	for _, tids := range lecturesByTopic {
+		for _, l := range tids {
+			allLectureIDs = append(allLectureIDs, l.ID)
+		}
+	}
+	compMap, err := runtime.GetLectureCompletionMap(ctx, q, allLectureIDs)
+	if err != nil {
+		return ExamCoverage{}, err
+	}
+	bySubject := map[db.ID]*SubjectCoverage{}
+	order := []db.ID{}
+	for _, s := range syll {
+		subjID, ok := topicSubject[s.TopicID]
 		if !ok {
-			name := string(tp.SubjectID)
-			if subj, err := catalog.GetGovSubject(ctx, q, tp.SubjectID); err == nil {
+			continue
+		}
+		sc, ok := bySubject[subjID]
+		if !ok {
+			name := string(subjID)
+			if subj, err := catalog.GetGovSubject(ctx, q, subjID); err == nil {
 				name = subj.Name
 			}
-			sc = &SubjectCoverage{SubjectID: tp.SubjectID, Subject: name}
-			bySubject[tp.SubjectID] = sc
-			order = append(order, tp.SubjectID)
+			sc = &SubjectCoverage{SubjectID: subjID, Subject: name}
+			bySubject[subjID] = sc
+			order = append(order, subjID)
 		}
 		sc.Total++
-		done, err := topicLectureCompleteE(ctx, q, s.TopicID)
-		if err != nil {
-			return ExamCoverage{}, err
+		lecs := lecturesByTopic[s.TopicID]
+		done := true
+		if len(lecs) > 0 {
+			for _, l := range lecs {
+				if !compMap[l.ID] {
+					done = false
+					break
+				}
+			}
+		} else {
+			done = true // zero lectures: track satisfied
 		}
 		if done {
 			cov.Done++
 			sc.Done++
 		}
 	}
+	_ = topicInfo{}
 	for _, id := range order {
 		cov.Subjects = append(cov.Subjects, *bySubject[id])
 	}
@@ -432,6 +475,7 @@ func ComputeExamCoverage(ctx context.Context, q db.DBTX, examID db.ID) (ExamCove
 // topicLectureCompleteE reports whether every lecture of a topic is
 // complete (zero lectures counts as complete). DB failures propagate;
 // callers must surface them as data errors instead of defaulting.
+// Implemented via one lectures query + one completion-map query.
 func topicLectureCompleteE(ctx context.Context, q db.DBTX, topicID db.ID) (bool, error) {
 	lecs, err := catalog.GetGovLectures(ctx, q, topicID)
 	if err != nil {
@@ -440,12 +484,16 @@ func topicLectureCompleteE(ctx context.Context, q db.DBTX, topicID db.ID) (bool,
 	if len(lecs) == 0 {
 		return true, nil // zero lectures: track satisfied
 	}
+	ids := make([]db.ID, 0, len(lecs))
 	for _, l := range lecs {
-		ok, err := engine.IsLectureComplete(ctx, q, l.ID)
-		if err != nil {
-			return false, err
-		}
-		if !ok {
+		ids = append(ids, l.ID)
+	}
+	compMap, err := runtime.GetLectureCompletionMap(ctx, q, ids)
+	if err != nil {
+		return false, err
+	}
+	for _, l := range lecs {
+		if !compMap[l.ID] {
 			return false, nil
 		}
 	}
@@ -454,23 +502,89 @@ func topicLectureCompleteE(ctx context.Context, q db.DBTX, topicID db.ID) (bool,
 
 // TopicLectureProgressE returns done/total plus per-lecture done flags.
 // DB failures propagate; callers must surface them as data errors.
+// Implemented via one lectures query + one completion-map query.
 func TopicLectureProgressE(ctx context.Context, q db.DBTX, topicID db.ID) (done, total int, flags []bool, lectures []db.GovLecture, err error) {
 	lecs, err := catalog.GetGovLectures(ctx, q, topicID)
 	if err != nil {
 		return 0, 0, nil, nil, err
 	}
 	total = len(lecs)
+	if total == 0 {
+		return 0, 0, nil, lecs, nil
+	}
+	ids := make([]db.ID, 0, len(lecs))
 	for _, l := range lecs {
-		ok, err := engine.IsLectureComplete(ctx, q, l.ID)
-		if err != nil {
-			return 0, 0, nil, nil, err
-		}
+		ids = append(ids, l.ID)
+	}
+	compMap, err := runtime.GetLectureCompletionMap(ctx, q, ids)
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+	for _, l := range lecs {
+		ok := compMap[l.ID]
 		flags = append(flags, ok)
 		if ok {
 			done++
 		}
 	}
 	return done, total, flags, lecs, nil
+}
+
+// TopicLectureProgressMap returns done/total for a bounded set of topics in
+// batch: one lectures query + one completion query, progress computed in
+// memory. Used by GOV reload paths to avoid per-topic N+1 polling.
+func TopicLectureProgressMap(ctx context.Context, q db.DBTX, topicIDs []db.ID) (map[db.ID]struct {
+	Done  int
+	Total int
+}, error) {
+	out := make(map[db.ID]struct {
+		Done  int
+		Total int
+	}, len(topicIDs))
+	for _, id := range topicIDs {
+		out[id] = struct {
+			Done  int
+			Total int
+		}{}
+	}
+	if len(topicIDs) == 0 {
+		return out, nil
+	}
+	lecturesByTopic, err := catalog.GetGovLecturesByTopics(ctx, q, topicIDs)
+	if err != nil {
+		return nil, err
+	}
+	var allIDs []db.ID
+	for _, lecs := range lecturesByTopic {
+		for _, l := range lecs {
+			allIDs = append(allIDs, l.ID)
+		}
+	}
+	compMap, err := runtime.GetLectureCompletionMap(ctx, q, allIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, tid := range topicIDs {
+		lecs := lecturesByTopic[tid]
+		if len(lecs) == 0 {
+			out[tid] = struct {
+				Done  int
+				Total int
+			}{Done: 0, Total: 0}
+			continue
+		}
+		done := 0
+		for _, l := range lecs {
+			if compMap[l.ID] {
+				done++
+			}
+		}
+		out[tid] = struct {
+			Done  int
+			Total int
+		}{Done: done, Total: len(lecs)}
+	}
+	return out, nil
 }
 
 // TopicPracticeStats aggregates raw practice rows; no progression formula.
@@ -586,18 +700,26 @@ type SWEAreaProgress struct {
 
 // ComputeSWEProgressE aggregates area progress; DB failures propagate and
 // must surface as data errors instead of silent undercounts.
+// Implemented via one tasks query + one completion-map query.
 func ComputeSWEProgressE(ctx context.Context, q db.DBTX, area db.SWEArea) (SWEAreaProgress, error) {
 	tasks, err := catalog.GetSWETasks(ctx, q, area.ID)
 	if err != nil {
 		return SWEAreaProgress{Area: area}, err
 	}
 	pr := SWEAreaProgress{Area: area, Total: len(tasks)}
+	if len(tasks) == 0 {
+		return pr, nil
+	}
+	ids := make([]db.ID, 0, len(tasks))
 	for _, t := range tasks {
-		done, err := engine.IsSWETaskComplete(ctx, q, t.ID)
-		if err != nil {
-			return pr, err
-		}
-		if done {
+		ids = append(ids, t.ID)
+	}
+	compMap, err := runtime.GetSWETaskCompletionMap(ctx, q, ids)
+	if err != nil {
+		return pr, err
+	}
+	for _, t := range tasks {
+		if compMap[t.ID] {
 			pr.Done++
 		}
 	}
@@ -641,7 +763,7 @@ func ValidatePracticeRow(timeS, attS, corrS, avgS string) (tSecs, att, corr int,
 	avgS = strings.TrimSpace(avgS)
 	if avgS != "" {
 		v, err := strconv.ParseFloat(avgS, 64)
-		if err != nil || v <= 0 {
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
 			return 0, 0, 0, nil, "average speed must be > 0"
 		}
 		avg = &v

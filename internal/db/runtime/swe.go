@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	db "forge/internal/db"
@@ -47,6 +49,30 @@ func GetSWEExecutionsBySession(ctx context.Context, q db.DBTX, sessionID db.ID) 
 		return nil, fmt.Errorf("runtime: swe by session: %w", err)
 	}
 	defer rows.Close()
+	return scanSWEExecutions(rows)
+}
+
+// GetSWEExecutionsBySessions returns executions for a bounded set of
+// sessions in ONE query (batch alternative to per-session lookups).
+func GetSWEExecutionsBySessions(ctx context.Context, q db.DBTX, sessionIDs []db.ID) ([]db.SWEExecution, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	place := make([]string, 0, len(sessionIDs))
+	args := make([]any, 0, len(sessionIDs))
+	for _, id := range sessionIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `SELECT id, session_id, task_id, status, recorded_at FROM swe_executions WHERE session_id IN (`+strings.Join(place, ",")+`) ORDER BY recorded_at`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: swe by sessions: %w", err)
+	}
+	defer rows.Close()
+	return scanSWEExecutions(rows)
+}
+
+func scanSWEExecutions(rows *sql.Rows) ([]db.SWEExecution, error) {
 	var out []db.SWEExecution
 	for rows.Next() {
 		var e db.SWEExecution
@@ -74,4 +100,43 @@ func IsSWETaskComplete(ctx context.Context, q db.DBTX, taskID db.ID) (bool, erro
 		return false, fmt.Errorf("runtime: is swe task complete: %w", err)
 	}
 	return count > 0, nil
+}
+
+// GetSWETaskCompletionMap returns COMPLETED presence for a bounded set of
+// task IDs in ONE query: task IDs → one completion query → map[taskID]bool.
+func GetSWETaskCompletionMap(ctx context.Context, q db.DBTX, taskIDs []db.ID) (map[db.ID]bool, error) {
+	out := make(map[db.ID]bool, len(taskIDs))
+	for _, id := range taskIDs {
+		out[id] = false
+	}
+	if len(taskIDs) == 0 {
+		return out, nil
+	}
+	place := make([]string, 0, len(taskIDs))
+	args := make([]any, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `SELECT DISTINCT task_id FROM swe_executions WHERE status = 'COMPLETED' AND task_id IN (`+strings.Join(place, ",")+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: swe completion map: %w", err)
+	}
+	var found []string
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var tid string
+			if err := rows.Scan(&tid); err == nil {
+				found = append(found, tid)
+			}
+		}
+	}()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("runtime: swe completion map rows: %w", err)
+	}
+	for _, tid := range found {
+		out[db.ID(tid)] = true
+	}
+	return out, nil
 }

@@ -23,19 +23,24 @@ type SWETaskDetail struct {
 }
 
 type SWEScreen struct {
-	app      *App
-	areas    []db.SWEArea
-	areaList Navigator
-	taskList Navigator
-	focusR   bool
-	detail   *SWETaskDetail
+	app          *App
+	areas        []db.SWEArea
+	areaList     Navigator
+	taskList     Navigator
+	focusR       bool
+	detail       *SWETaskDetail
 	detailScroll ScrollViewport // task pane scrolls independently when overflowing
-	showing  string // "area" or "task"
-	err      string
+	showing      string         // "area" or "task"
+	err          string
+	// areaProgress caches per-area progress loaded in Reload/reloadTasks so
+	// View rendering performs no database access.
+	areaProgress map[string]SWEAreaProgress
+	// taskDone caches per-task completion marks for the selected area.
+	taskDone map[string]bool
 }
 
 func NewSWEScreen(a *App) *SWEScreen {
-	return &SWEScreen{app: a, areaList: NewNavigator(), taskList: NewNavigator(), showing: "area"}
+	return &SWEScreen{app: a, areaList: NewNavigator(), taskList: NewNavigator(), showing: "area", areaProgress: map[string]SWEAreaProgress{}, taskDone: map[string]bool{}}
 }
 
 func (s *SWEScreen) Reload() {
@@ -53,6 +58,20 @@ func (s *SWEScreen) Reload() {
 	}
 	s.areaList.SetItems(items)
 	s.showing = "area"
+	// Batch area progress for all areas (one tasks query per area is
+	// catalog-bounded; completion resolved via one map query per area inside
+	// ComputeSWEProgressE). Cache for render-pure View.
+	if s.areaProgress == nil {
+		s.areaProgress = map[string]SWEAreaProgress{}
+	}
+	for _, a := range areas {
+		if pr, err := ComputeSWEProgressE(ctx, s.app.DB, a); err == nil {
+			s.areaProgress[string(a.ID)] = pr
+		} else {
+			s.err = "data error: " + err.Error()
+			s.areaProgress[string(a.ID)] = SWEAreaProgress{Area: a}
+		}
+	}
 	s.reloadTasks()
 }
 
@@ -74,6 +93,13 @@ func (s *SWEScreen) reloadTasks() {
 	a := s.selArea()
 	if a == nil {
 		s.taskList.SetItems(nil)
+		if s.taskDone == nil {
+			s.taskDone = map[string]bool{}
+		} else {
+			for k := range s.taskDone {
+				delete(s.taskDone, k)
+			}
+		}
 		return
 	}
 	tasks, err := catalog.GetSWETasks(ctx, s.app.DB, a.ID)
@@ -81,16 +107,27 @@ func (s *SWEScreen) reloadTasks() {
 		s.err = err.Error()
 		return
 	}
+	// Batch completion marks for the selected area (one map query).
+	ids := make([]db.ID, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
+	}
+	compMap, err := runtime.GetSWETaskCompletionMap(ctx, s.app.DB, ids)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		compMap = map[db.ID]bool{}
+	}
+	if s.taskDone == nil {
+		s.taskDone = map[string]bool{}
+	} else {
+		for k := range s.taskDone {
+			delete(s.taskDone, k)
+		}
+	}
 	items := make([]RowItem, 0, len(tasks))
 	for _, t := range tasks {
-		// Presentation-only completion mark via the authoritative Engine
-		// predicate (engine.IsSWETaskComplete). A lookup failure surfaces
-		// as a data error instead of a silent TODO.
-		done, err := engine.IsSWETaskComplete(ctx, s.app.DB, t.ID)
-		if err != nil {
-			s.err = "data error: " + err.Error()
-			done = false
-		}
+		done := compMap[t.ID]
+		s.taskDone[string(t.ID)] = done
 		mark := "○"
 		if done {
 			mark = "✓"
@@ -98,6 +135,17 @@ func (s *SWEScreen) reloadTasks() {
 		items = append(items, RowItem{ID: string(t.ID), Title: t.Title, Mark: mark})
 	}
 	s.taskList.SetItems(items)
+	// Keep the area progress cache consistent with the same batch result.
+	if s.areaProgress == nil {
+		s.areaProgress = map[string]SWEAreaProgress{}
+	}
+	done := 0
+	for _, t := range tasks {
+		if compMap[t.ID] {
+			done++
+		}
+	}
+	s.areaProgress[string(a.ID)] = SWEAreaProgress{Area: *a, Total: len(tasks), Done: done}
 }
 
 func (s *SWEScreen) openTask(areaID, taskID string) {
@@ -247,9 +295,10 @@ func (s *SWEScreen) View() string {
 	if s.showing == "task" {
 		right = PanelFixed("TASK", ViewportView(s.taskBody(rw-6), &s.detailScroll, innerH), rw, bodyH, true)
 	} else if a := s.selArea(); a != nil {
-		pr, err := ComputeSWEProgressE(context.Background(), s.app.DB, *a)
-		if err != nil {
-			s.err = "data error: " + err.Error()
+		// Render-pure: progress comes from the reload-time cache. Never
+		// queries SQLite and never mutates s.err during render.
+		pr, ok := s.areaProgress[string(a.ID)]
+		if !ok {
 			pr = SWEAreaProgress{Area: *a}
 		}
 		r := 0.0
@@ -319,4 +368,3 @@ func (s *SWEScreen) taskBody(inner int) string {
 	sb.WriteString(thHelp.Render("Work starts from Today only."))
 	return sb.String()
 }
-

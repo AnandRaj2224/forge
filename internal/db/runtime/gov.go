@@ -117,6 +117,48 @@ func GetLectureCompletion(ctx context.Context, q db.DBTX, lectureID db.ID) (db.G
 	return c, nil
 }
 
+// GetLectureCompletionMap returns completion presence for a bounded set of
+// lecture IDs in ONE query: lecture IDs → one completion query →
+// map[lectureID]bool. Missing keys mean incomplete. It preserves the
+// rows-consume-then-query invariant (rows fully consumed and closed before
+// any follow-up query).
+func GetLectureCompletionMap(ctx context.Context, q db.DBTX, lectureIDs []db.ID) (map[db.ID]bool, error) {
+	out := make(map[db.ID]bool, len(lectureIDs))
+	for _, id := range lectureIDs {
+		out[id] = false
+	}
+	if len(lectureIDs) == 0 {
+		return out, nil
+	}
+	place := make([]string, 0, len(lectureIDs))
+	args := make([]any, 0, len(lectureIDs))
+	for _, id := range lectureIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `SELECT lecture_id FROM gov_lecture_completions WHERE lecture_id IN (`+strings.Join(place, ",")+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: lecture completion map: %w", err)
+	}
+	var found []string
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var lid string
+			if err := rows.Scan(&lid); err == nil {
+				found = append(found, lid)
+			}
+		}
+	}()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("runtime: lecture completion map rows: %w", err)
+	}
+	for _, lid := range found {
+		out[db.ID(lid)] = true
+	}
+	return out, nil
+}
+
 // ---- Gov practice records ----
 
 // InsertGovPracticeRecord inserts one topic-practiced row.
@@ -176,6 +218,30 @@ func scanPracticeRecords(rows *sql.Rows) ([]db.GovPracticeRecord, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GetGovPracticeRecordsBySessions returns practice rows for a bounded set of
+// sessions in ONE query (batch alternative to per-session
+// GetGovPracticeRecordsBySession). Rows are fully consumed before return;
+// callers must not nest queries inside the scan.
+func GetGovPracticeRecordsBySessions(ctx context.Context, q db.DBTX, sessionIDs []db.ID) ([]db.GovPracticeRecord, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	place := make([]string, 0, len(sessionIDs))
+	args := make([]any, 0, len(sessionIDs))
+	for _, id := range sessionIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `
+SELECT id, session_id, topic_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+FROM gov_practice_records WHERE session_id IN (`+strings.Join(place, ",")+`) ORDER BY topic_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: practice by sessions: %w", err)
+	}
+	defer rows.Close()
+	return scanPracticeRecords(rows)
 }
 
 // ---- Gov practice rotation state ----

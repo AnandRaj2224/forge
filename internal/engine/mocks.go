@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -22,7 +23,8 @@ type MockSectionInput struct {
 // provided fields. Nil fields are skipped (missing metrics are never
 // fabricated). Negative values are rejected for every count-like field
 // before any DB write; percentile/accuracy stay 0..100; avg speed stays
-// positive where supplied.
+// positive where supplied. NaN/±Inf are explicitly rejected (ordinary
+// ordering comparisons would otherwise let NaN through).
 func ValidateMockMetrics(m db.Mock) error {
 	for name, v := range map[string]*int{
 		"score": m.Score, "total_score": m.TotalScore, "rank": m.RankValue,
@@ -33,11 +35,21 @@ func ValidateMockMetrics(m db.Mock) error {
 			return wrapErr("mock", ErrValidation, name+" must be >= 0")
 		}
 	}
+	for name, v := range map[string]*float64{
+		"percentile": m.Percentile, "accuracy": m.Accuracy, "avg_speed": m.AvgSpeedSeconds,
+	} {
+		if v != nil && (math.IsNaN(*v) || math.IsInf(*v, 0)) {
+			return wrapErr("mock", ErrValidation, name+" must be a finite number")
+		}
+	}
 	if m.Score != nil && m.TotalScore != nil && *m.Score > *m.TotalScore {
 		return wrapErr("mock", ErrValidation, "score <= total_score required")
 	}
 	if m.Correct != nil && m.Attempted != nil && *m.Correct > *m.Attempted {
 		return wrapErr("mock", ErrValidation, "correct <= attempted required")
+	}
+	if m.Attempted != nil && m.TotalQuestions != nil && *m.Attempted > *m.TotalQuestions {
+		return wrapErr("mock", ErrValidation, "attempted <= total_questions required")
 	}
 	if m.Incorrect != nil && m.Attempted != nil && *m.Incorrect > *m.Attempted {
 		return wrapErr("mock", ErrValidation, "incorrect <= attempted required")

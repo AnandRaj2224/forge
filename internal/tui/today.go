@@ -43,6 +43,17 @@ type TodayScreen struct {
 	err          string
 	ready        bool
 	nowFn        func() time.Time
+	// evidence caches completed-task evidence loaded once in Reload so
+	// View rendering performs no database access.
+	evidence map[db.ID]*todayEvidence
+}
+
+// todayEvidence holds preloaded read-only evidence for one task.
+type todayEvidence struct {
+	lectureComp     *db.GovLectureCompletion
+	practiceByTopic map[string]db.GovPracticeRecord
+	dsaLatest       map[string]db.DSAAttempt
+	sweLatest       map[string]string
 }
 
 func NewTodayScreen(a *App) *TodayScreen {
@@ -140,8 +151,97 @@ func (s *TodayScreen) Reload() {
 		return
 	}
 	s.active = sess
+	// Preload completed-task evidence once (batch) so View stays render-pure.
+	s.preloadEvidence(ctx)
+	// Sync the single in-memory active session for the app indicator.
+	s.app.active = s.active
+	s.app.updateActiveIndicator()
 	s.syncButtons()
 	s.ready = true
+}
+
+// preloadEvidence loads read-only evidence for all tasks in batch (one
+// sessions list + one query per evidence domain). It never surfaces
+// evidence errors as screen errors: View renders fallbacks (— / ✓
+// Completed) exactly as before, but without performing I/O.
+func (s *TodayScreen) preloadEvidence(ctx context.Context) {
+	s.evidence = make(map[db.ID]*todayEvidence, len(s.tasks))
+	if len(s.tasks) == 0 {
+		return
+	}
+	sessList, err := runtime.ListSessions(ctx, s.app.DB)
+	if err != nil {
+		return
+	}
+	sessToTask := make(map[db.ID]db.ID, len(sessList))
+	sessionsByTask := make(map[db.ID][]db.ID, len(s.tasks))
+	for _, sess := range sessList {
+		if sess.Status == db.SessionStatusActive {
+			continue
+		}
+		sessToTask[sess.ID] = sess.TodayTaskID
+		sessionsByTask[sess.TodayTaskID] = append(sessionsByTask[sess.TodayTaskID], sess.ID)
+	}
+	var allSIDs []db.ID
+	for _, sids := range sessionsByTask {
+		allSIDs = append(allSIDs, sids...)
+	}
+	// One batch query per domain (bounded, task-count independent).
+	practiceRecs, _ := runtime.GetGovPracticeRecordsBySessions(ctx, s.app.DB, allSIDs)
+	dsaAtts, _ := runtime.GetDSAAttemptsBySessions(ctx, s.app.DB, allSIDs)
+	sweExecs, _ := runtime.GetSWEExecutionsBySessions(ctx, s.app.DB, allSIDs)
+	for _, t := range s.tasks {
+		ev := &todayEvidence{
+			practiceByTopic: map[string]db.GovPracticeRecord{},
+			dsaLatest:       map[string]db.DSAAttempt{},
+			sweLatest:       map[string]string{},
+		}
+		idx := -1
+		for i, tt := range s.tasks {
+			if tt.ID == t.ID {
+				idx = i
+				break
+			}
+		}
+		var b Bundle
+		if idx >= 0 && idx < len(s.bundles) {
+			b = s.bundles[idx]
+		}
+		if b.Lecture != nil {
+			if comp, err := runtime.GetLectureCompletion(ctx, s.app.DB, b.Lecture.LectureID); err == nil {
+				c := comp
+				ev.lectureComp = &c
+			}
+		}
+		s.evidence[t.ID] = ev
+	}
+	// Distribute batch rows to their tasks (last-wins matches previous
+	// per-session append + map-overwrite semantics; DSA picks latest by
+	// AttemptedAt, SWE picks last recorded).
+	for _, r := range practiceRecs {
+		if taskID, ok := sessToTask[r.SessionID]; ok {
+			if ev, ok := s.evidence[taskID]; ok {
+				ev.practiceByTopic[string(r.TopicID)] = r
+			}
+		}
+	}
+	for _, a := range dsaAtts {
+		if taskID, ok := sessToTask[a.SessionID]; ok {
+			if ev, ok := s.evidence[taskID]; ok {
+				k := string(a.ProblemID)
+				if cur, exists := ev.dsaLatest[k]; !exists || !a.AttemptedAt.Before(cur.AttemptedAt) {
+					ev.dsaLatest[k] = a
+				}
+			}
+		}
+	}
+	for _, e := range sweExecs {
+		if taskID, ok := sessToTask[e.SessionID]; ok {
+			if ev, ok := s.evidence[taskID]; ok {
+				ev.sweLatest[string(e.TaskID)] = string(e.Status)
+			}
+		}
+	}
 }
 
 func (s *TodayScreen) selected() (db.TodayTask, TaskStatus, Bundle, bool) {
@@ -153,8 +253,9 @@ func (s *TodayScreen) selected() (db.TodayTask, TaskStatus, Bundle, bool) {
 }
 
 func (s *TodayScreen) syncButtons() {
-	_, aerr := runtime.GetActiveSession(context.Background(), s.app.DB)
-	hasActive := aerr == nil
+	// Pure in-memory: button state derives from the cached active session
+	// and selection. Never queries SQLite (previously polled per keystroke).
+	hasActive := s.active != nil
 	s.stopBtn.Disabled = !hasActive
 	s.stopBtn.Focused = s.zone == tzActive && hasActive
 	_, st, _, ok := s.selected()
@@ -648,9 +749,11 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 // completedEvidenceView renders persisted evidence for a DONE task as
 // human-readable read-only rows (no inputs, no SAVE, no Start). Durations
 // always carry units; raw storage integers are never exposed.
+// Render-pure: it reads only the preloaded s.evidence cache (populated in
+// Reload) and never performs database/runtime/catalog/engine queries.
 func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bundle) string {
-	ctx := context.Background()
 	var sb strings.Builder
+	ev := s.evidence[task.ID]
 	switch {
 	case b.Lecture != nil:
 		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Lecture.Subject, inner))) + "\n")
@@ -659,18 +762,17 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 		if b.Lecture.Lecture != "" {
 			sb.WriteString(thMeta.Render(TruncateToWidth(b.Lecture.Lecture, inner)) + "\n")
 		}
-		if comp, err := runtime.GetLectureCompletion(ctx, s.app.DB, b.Lecture.LectureID); err == nil {
-			sb.WriteString(MetaRow("Completed", FormatDate(comp.CompletedAt), 10))
+		if ev != nil && ev.lectureComp != nil {
+			sb.WriteString(MetaRow("Completed", FormatDate(ev.lectureComp.CompletedAt), 10))
 		} else {
 			sb.WriteString(thSuccess.Render("✓ Completed"))
 		}
 	case len(b.Practice) > 0:
 		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Practice[0].Subject, inner))) + "\n")
 		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TOPICS", len(b.Practice))) + "\n")
-		recs := s.practiceRecordsForTask(ctx, task.ID)
 		byTopic := map[string]db.GovPracticeRecord{}
-		for _, r := range recs {
-			byTopic[string(r.TopicID)] = r
+		if ev != nil {
+			byTopic = ev.practiceByTopic
 		}
 		for i, p := range b.Practice {
 			if i > 0 {
@@ -692,13 +794,9 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 		}
 	case len(b.DSA) > 0:
 		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d PROBLEMS", len(b.DSA))) + "\n")
-		atts := s.dsaAttemptsForTask(ctx, task.ID)
 		latest := map[string]db.DSAAttempt{}
-		for _, a := range atts {
-			k := string(a.ProblemID)
-			if cur, ok := latest[k]; !ok || !a.AttemptedAt.Before(cur.AttemptedAt) {
-				latest[k] = a
-			}
+		if ev != nil {
+			latest = ev.dsaLatest
 		}
 		for i, d := range b.DSA {
 			if i > 0 {
@@ -720,10 +818,9 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 		}
 	case len(b.SWE) > 0:
 		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TASKS", len(b.SWE))) + "\n")
-		execs := s.sweExecutionsForTask(ctx, task.ID)
 		latest := map[string]string{}
-		for _, e := range execs {
-			latest[string(e.TaskID)] = string(e.Status)
+		if ev != nil {
+			latest = ev.sweLatest
 		}
 		for i, sw := range b.SWE {
 			if i > 0 {
@@ -754,50 +851,6 @@ func (s *TodayScreen) readOnlyCheckbox(label string, checked bool) string {
 		glyph = thSuccess.Render("■")
 	}
 	return "  " + glyph + "  " + thPrimary.Render(label)
-}
-
-func (s *TodayScreen) taskSessionIDs(ctx context.Context, taskID db.ID) []db.ID {
-	sessList, err := runtime.ListSessions(ctx, s.app.DB)
-	if err != nil {
-		return nil
-	}
-	var out []db.ID
-	for _, sess := range sessList {
-		if sess.TodayTaskID == taskID && sess.Status != db.SessionStatusActive {
-			out = append(out, sess.ID)
-		}
-	}
-	return out
-}
-
-func (s *TodayScreen) practiceRecordsForTask(ctx context.Context, taskID db.ID) []db.GovPracticeRecord {
-	var out []db.GovPracticeRecord
-	for _, sid := range s.taskSessionIDs(ctx, taskID) {
-		if recs, err := runtime.GetGovPracticeRecordsBySession(ctx, s.app.DB, sid); err == nil {
-			out = append(out, recs...)
-		}
-	}
-	return out
-}
-
-func (s *TodayScreen) dsaAttemptsForTask(ctx context.Context, taskID db.ID) []db.DSAAttempt {
-	var out []db.DSAAttempt
-	for _, sid := range s.taskSessionIDs(ctx, taskID) {
-		if atts, err := runtime.GetDSAAttemptsBySession(ctx, s.app.DB, sid); err == nil {
-			out = append(out, atts...)
-		}
-	}
-	return out
-}
-
-func (s *TodayScreen) sweExecutionsForTask(ctx context.Context, taskID db.ID) []db.SWEExecution {
-	var out []db.SWEExecution
-	for _, sid := range s.taskSessionIDs(ctx, taskID) {
-		if execs, err := runtime.GetSWEExecutionsBySession(ctx, s.app.DB, sid); err == nil {
-			out = append(out, execs...)
-		}
-	}
-	return out
 }
 
 // stepZone moves pane focus left/right across tasks, session, detail.

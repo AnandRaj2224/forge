@@ -35,6 +35,11 @@ type ReviewsScreen struct {
 	bodyScroll ScrollViewport // report pane scrolls independently when overflowing
 	nowFn      func() time.Time
 	err        string
+	// liveReport caches the live weekly draft for the selected unstored week
+	// (populated in syncSelected). View renders from this cache and never
+	// queries the database.
+	liveReport *engine.WeeklyReport
+	liveErr    string
 }
 
 func NewReviewsScreen(a *App) *ReviewsScreen {
@@ -162,6 +167,8 @@ func (s *ReviewsScreen) syncSelected() {
 	s.editing = false
 	s.editCur = 0
 	s.bodyScroll.Reset()
+	s.liveReport = nil
+	s.liveErr = ""
 	id := s.weeks.SelectedID()
 	if id == "" {
 		s.selected = nil
@@ -177,6 +184,8 @@ func (s *ReviewsScreen) syncSelected() {
 	// Metrics stay automatically updated as the week progresses; the
 	// structured snapshot is frozen only on explicit SAVE. Internal
 	// live-vs-saved distinction never surfaces as draft language.
+	// The draft is loaded once here (Reload/selection change); View renders
+	// purely from the s.selected snapshot + s.liveReport cache.
 	for _, e := range s.entries {
 		if e.ID != id {
 			continue
@@ -185,8 +194,11 @@ func (s *ReviewsScreen) syncSelected() {
 		live, err := engine.BuildWeeklyDraft(s.app.ctx(), s.app.DB, e.ID, e.Start, e.End)
 		if err != nil {
 			s.err = "data error: " + err.Error()
+			s.liveErr = err.Error()
 			return
 		}
+		cached := live
+		s.liveReport = &cached
 		js, _ := engine.MarshalWeeklySnapshot(live)
 		if js == "" {
 			js = "{}"
@@ -442,8 +454,8 @@ func (s *ReviewsScreen) reportView(inner int) string {
 	}
 	r := s.selected
 	// Stored reviews render the persisted snapshot; the live current week
-	// renders automatically updated engine calculations. Never recompute a
-	// stored review silently.
+	// renders the cached draft loaded in syncSelected. Never recompute a
+	// stored review silently, and never query the database during render.
 	var rep engine.WeeklyReport
 	stored := false
 	for _, sr := range s.reports {
@@ -461,11 +473,22 @@ func (s *ReviewsScreen) reportView(inner int) string {
 	} else if stored {
 		rep = snapshotFromRow(r)
 	} else {
-		live, err := engine.BuildWeeklyDraft(s.app.ctx(), s.app.DB, r.ID, r.WeekStart, r.WeekEnd)
-		if err != nil {
-			return thError.Render("report unavailable · data error") + "\n" + thMeta.Render(err.Error())
+		// Live week: render purely from the syncSelected cache. The cache
+		// holds the authoritative draft; View performs no I/O.
+		if s.liveErr != "" {
+			return thError.Render("report unavailable · data error") + "\n" + thMeta.Render(s.liveErr)
 		}
-		rep = live
+		if s.liveReport != nil {
+			rep = *s.liveReport
+		} else if r.ReportJSON != "" && r.ReportJSON != "{}" {
+			if parsed, err := engine.UnmarshalWeeklySnapshot(r.ReportJSON); err == nil {
+				rep = parsed
+			} else {
+				rep = snapshotFromRow(r)
+			}
+		} else {
+			rep = snapshotFromRow(r)
+		}
 	}
 	completion := "—"
 	tasksValue := "—"

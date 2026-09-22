@@ -19,12 +19,13 @@ var (
 	ErrAlreadySatisfied  = errors.New("target item already satisfied")
 	ErrDuplicate         = errors.New("duplicate target result")
 	ErrNotFound          = errors.New("not found")
+	ErrLegacyTarget      = errors.New("legacy target is read-only")
 )
 
 // DomainError wraps a sentinel with context for a specific operation.
 type DomainError struct {
-	Op   string
-	Err  error
+	Op     string
+	Err    error
 	Detail string
 }
 

@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	db "forge/internal/db"
@@ -97,6 +98,46 @@ func GetGovLectures(ctx context.Context, q db.DBTX, topicID db.ID) ([]db.GovLect
 		out = append(out, l)
 	}
 	return out, rows.Err()
+}
+
+// GetGovLecturesByTopics returns lectures for a bounded set of topics in ONE
+// query, grouped by topic ID. It preserves the rows-consume-then-query
+// invariant (rows fully consumed and closed before any follow-up query).
+func GetGovLecturesByTopics(ctx context.Context, q db.DBTX, topicIDs []db.ID) (map[db.ID][]db.GovLecture, error) {
+	out := make(map[db.ID][]db.GovLecture, len(topicIDs))
+	for _, id := range topicIDs {
+		out[id] = nil
+	}
+	if len(topicIDs) == 0 {
+		return out, nil
+	}
+	place := make([]string, 0, len(topicIDs))
+	args := make([]any, 0, len(topicIDs))
+	for _, id := range topicIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `SELECT id, topic_id, title, sort_order FROM gov_lectures WHERE topic_id IN (`+strings.Join(place, ",")+`) ORDER BY topic_id, sort_order`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list gov lectures by topics: %w", err)
+	}
+	var all []db.GovLecture
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var l db.GovLecture
+			if err := rows.Scan(&l.ID, &l.TopicID, &l.Title, &l.SortOrder); err == nil {
+				all = append(all, l)
+			}
+		}
+	}()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("catalog: scan gov lectures by topics: %w", err)
+	}
+	for _, l := range all {
+		out[l.TopicID] = append(out[l.TopicID], l)
+	}
+	return out, nil
 }
 
 func InsertGovLecture(ctx context.Context, q db.DBTX, l db.GovLecture) error {

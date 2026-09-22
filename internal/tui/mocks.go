@@ -30,9 +30,12 @@ type MocksScreen struct {
 	sections []db.MockSection
 	weak     map[string][]db.MockWeakTopic
 	topNames map[string]string
-	secCur   int
-	mode     string // browse, create, weak, section
-	err      string
+	// subjNames caches GOV subject display names for render-pure detail
+	// rendering (populated in Reload, never queried in View).
+	subjNames map[string]string
+	secCur    int
+	mode      string // browse, create, weak, section
+	err       string
 
 	// create form
 	cExamCur int
@@ -86,7 +89,7 @@ type stagedSubject struct {
 type stagedSection = stagedSubject
 
 func NewMocksScreen(a *App) *MocksScreen {
-	return &MocksScreen{app: a, list: NewNavigator(), weak: map[string][]db.MockWeakTopic{}, topNames: map[string]string{}, mode: "browse"}
+	return &MocksScreen{app: a, list: NewNavigator(), weak: map[string][]db.MockWeakTopic{}, topNames: map[string]string{}, subjNames: map[string]string{}, mode: "browse"}
 }
 
 func (s *MocksScreen) ownsKeys() bool {
@@ -105,6 +108,15 @@ func (s *MocksScreen) Reload() {
 	s.examName = map[string]string{}
 	for _, e := range exams {
 		s.examName[string(e.ID)] = e.Name
+	}
+	// Cache GOV subject names once for render-pure detail rendering.
+	if s.subjNames == nil {
+		s.subjNames = map[string]string{}
+	}
+	if subjs, err := catalog.GetGovSubjects(ctx, s.app.DB); err == nil {
+		for _, g := range subjs {
+			s.subjNames[string(g.ID)] = g.Name
+		}
 	}
 	mocks, err := runtime.ListMocks(ctx, s.app.DB)
 	if err != nil {
@@ -151,6 +163,11 @@ func (s *MocksScreen) syncDetail() {
 		return
 	}
 	s.sections = secs
+	// Collect uncached topic IDs first, then resolve in batch with a single
+	// follow-up pass (no nested query while rows are open; cache prevents
+	// repeated lookups for static catalogue data).
+	var missing []db.ID
+	seenMissing := map[string]bool{}
 	for _, sec := range secs {
 		ws, err := runtime.ListWeakTopics(ctx, s.app.DB, sec.ID)
 		if err != nil {
@@ -159,11 +176,28 @@ func (s *MocksScreen) syncDetail() {
 		}
 		s.weak[string(sec.ID)] = ws
 		for _, w := range ws {
-			if _, ok := s.topNames[string(w.TopicID)]; !ok {
-				if tp, err := catalog.GetGovTopic(ctx, s.app.DB, w.TopicID); err == nil {
-					s.topNames[string(w.TopicID)] = tp.Name
-				} else {
-					s.topNames[string(w.TopicID)] = string(w.TopicID)
+			if _, ok := s.topNames[string(w.TopicID)]; !ok && !seenMissing[string(w.TopicID)] {
+				seenMissing[string(w.TopicID)] = true
+				missing = append(missing, w.TopicID)
+			}
+		}
+	}
+	for _, tid := range missing {
+		if tp, err := catalog.GetGovTopic(ctx, s.app.DB, tid); err == nil {
+			s.topNames[string(tid)] = tp.Name
+		} else {
+			s.topNames[string(tid)] = string(tid)
+		}
+	}
+	// Keep the subject-name cache warm for any mapped sections.
+	if s.subjNames == nil {
+		s.subjNames = map[string]string{}
+	}
+	for _, sec := range secs {
+		if sec.GovSubjectID != nil && *sec.GovSubjectID != "" {
+			if _, ok := s.subjNames[string(*sec.GovSubjectID)]; !ok {
+				if g, err := catalog.GetGovSubject(ctx, s.app.DB, *sec.GovSubjectID); err == nil {
+					s.subjNames[string(*sec.GovSubjectID)] = g.Name
 				}
 			}
 		}
@@ -366,6 +400,12 @@ func (s *MocksScreen) startCreate() {
 		s.cErr = "data error: " + err.Error()
 	} else {
 		s.govSubjects = subjs
+		if s.subjNames == nil {
+			s.subjNames = map[string]string{}
+		}
+		for _, g := range subjs {
+			s.subjNames[string(g.ID)] = g.Name
+		}
 	}
 	s.cFocus = 0 // 0 = exam selector, 1..11 inputs, 12 subject, 13 add, 14 save
 	s.cErr = ""
@@ -624,34 +664,43 @@ func (s *MocksScreen) saveCreate() bool {
 		s.cErr = "average speed " + err.Error()
 		return false
 	}
-	// Raw facts must compose: correct within attempted within total.
-	att, corr, tot := 0, 0, 0
-	if attempted != nil {
-		att = *attempted
+	// Optional-metric semantics: omitted values stay unknown (nil) and are
+	// never treated as numeric zero. Only enforce correct <= attempted when
+	// both are supplied, and attempted <= total_questions only when the
+	// total is actually supplied. Derived values are produced only when all
+	// required inputs exist; otherwise they stay nil (never negative or
+	// manufactured zeros).
+	if correct != nil && attempted != nil && *correct > *attempted {
+		s.cErr = "need correct <= attempted"
+		return false
 	}
-	if correct != nil {
-		corr = *correct
-	}
-	if totalQ != nil {
-		tot = *totalQ
-	}
-	if corr > att || att > tot {
-		s.cErr = "need 0 <= correct <= attempted <= total"
+	if attempted != nil && totalQ != nil && *attempted > *totalQ {
+		s.cErr = "need attempted <= total questions"
 		return false
 	}
 	// Derived metrics (never entered): incorrect, unattempted, accuracy.
-	incorrect := att - corr
-	unatt := tot - att
+	// incorrect requires both attempted and correct; unattempted requires
+	// both total and attempted; accuracy requires attempted > 0 with both
+	// attempted and correct known.
+	var incorrect, unatt *int
+	if attempted != nil && correct != nil {
+		v := *attempted - *correct
+		incorrect = &v
+	}
+	if totalQ != nil && attempted != nil {
+		v := *totalQ - *attempted
+		unatt = &v
+	}
 	var acc *float64
-	if att > 0 {
-		a := float64(corr) / float64(att) * 100
+	if attempted != nil && correct != nil && *attempted > 0 {
+		a := float64(*correct) / float64(*attempted) * 100
 		acc = &a
 	}
 	exam := s.exams[s.cExamCur%len(s.exams)]
 	id := db.ID(fmt.Sprintf("mock-%d", time.Now().UTC().UnixNano()))
 	m := db.Mock{ID: id, ExamID: exam.ID, Name: name, MockDate: date, Platform: platform,
 		Score: score, TotalScore: total, Attempted: attempted, TotalQuestions: totalQ,
-		Correct: correct, Incorrect: &incorrect, Unattempted: &unatt, RankValue: rankV,
+		Correct: correct, Incorrect: incorrect, Unattempted: unatt, RankValue: rankV,
 		Percentile: perc, Accuracy: acc, AvgSpeedSeconds: avg, CreatedAt: time.Now().UTC()}
 	// One atomic engine path: mock + GOV-subject sections + weak topics in
 	// ONE transaction (TUI input -> Engine CreateMockAtomic -> SQLite).
@@ -1217,11 +1266,22 @@ func (s *MocksScreen) mockBody(inner int) string {
 	return sb.String()
 }
 
-// govSubjectName resolves a GOV subject ID to its display name.
+// govSubjectName resolves a GOV subject ID to its display name purely from
+// the reload-time cache (plus the create-flow govSubjects slice). It never
+// performs database access, so it is safe to call from View.
 func (s *MocksScreen) govSubjectName(id db.ID) string {
-	ctx := context.Background()
-	if g, err := catalog.GetGovSubject(ctx, s.app.DB, id); err == nil {
-		return g.Name
+	if nm, ok := s.subjNames[string(id)]; ok && nm != "" {
+		return nm
+	}
+	for _, g := range s.govSubjects {
+		if g.ID == id {
+			return g.Name
+		}
+	}
+	if s.wSubjName != nil {
+		if nm, ok := s.wSubjName[string(id)]; ok && nm != "" {
+			return nm
+		}
 	}
 	return string(id)
 }
@@ -1246,13 +1306,15 @@ func (s *MocksScreen) stagedSummary(inner int) string {
 }
 
 func (s *MocksScreen) sectionSubjectLabel(sec db.MockSection) string {
+	// Render-pure: subject names come from the reload-time cache only.
 	if sec.GovSubjectID != nil && *sec.GovSubjectID != "" {
-		if nm, ok := s.examName[string(*sec.GovSubjectID)]; ok && nm != "" {
+		if nm, ok := s.subjNames[string(*sec.GovSubjectID)]; ok && nm != "" {
 			return nm
 		}
-		ctx := context.Background()
-		if g, err := catalog.GetGovSubject(ctx, s.app.DB, *sec.GovSubjectID); err == nil {
-			return g.Name
+		for _, g := range s.govSubjects {
+			if g.ID == *sec.GovSubjectID {
+				return g.Name
+			}
 		}
 		return string(*sec.GovSubjectID)
 	}
@@ -1357,12 +1419,18 @@ func (s *MocksScreen) weakView() string {
 	if len(s.wStaged) == 0 {
 		rb.WriteString(thHelp.Render("none yet — Enter toggles") + "\n")
 	}
-	ctx := context.Background()
+	// Render-pure topic names: prefer the editor choices (already loaded),
+	// then the browse-time topNames cache. Never queries SQLite in View.
+	choiceNames := make(map[string]string, len(s.wChoices))
+	for _, tp := range s.wChoices {
+		choiceNames[string(tp.ID)] = tp.Name
+	}
 	for i, tid := range s.wStaged {
-		nm := ""
-		if tp, err := catalog.GetGovTopic(ctx, s.app.DB, tid); err == nil {
-			nm = tp.Name
-		} else {
+		nm := choiceNames[string(tid)]
+		if nm == "" {
+			nm = s.topNames[string(tid)]
+		}
+		if nm == "" {
 			nm = string(tid)
 		}
 		rb.WriteString(thPrimary.Render(fmt.Sprintf("%02d  %s", i+1, TruncateToWidth(nm, rw-12))) + "\n")

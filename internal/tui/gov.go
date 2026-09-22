@@ -48,10 +48,16 @@ type GovScreen struct {
 	subTopicList Navigator
 	subZone      int
 
-	detail   *GovTopicView
+	detail       *GovTopicView
 	detailScroll ScrollViewport // topic pane scrolls independently when overflowing
-	returnTo string
-	err      string
+	returnTo     string
+	err          string
+	// browser cache for render-pure subjectsView right pane (populated in
+	// reloadBrowserTopics, never queried in View).
+	browserName        string
+	browserDone        int
+	browserTotal       int
+	browserUnavailable bool
 }
 
 type GovTopicView struct {
@@ -182,16 +188,41 @@ func (s *GovScreen) reloadExamTopics() {
 			s.err = "data error: " + err.Error()
 			return
 		}
+		// Batch lecture completion for all exam-filtered topics (one
+		// lectures query + one completion query, progress in memory).
+		var tids []db.ID
+		var filtered []db.GovTopic
 		for _, t := range topics {
 			if !inExam[t.ID] {
 				continue
 			}
+			filtered = append(filtered, t)
+			tids = append(tids, t.ID)
+		}
+		progMap, err := TopicLectureProgressMap(ctx, s.app.DB, tids)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			for _, t := range filtered {
+				items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Mark: "?"})
+			}
+			s.topicList.SetItems(items)
+			return
+		}
+		for _, t := range filtered {
+			// Complete = every lecture done (zero lectures counts as complete).
+			lecsDone := true
+			if pm, ok := progMap[t.ID]; ok {
+				// Need full completion check: done==total OR total==0.
+				// progMap alone gives done/total; zero-total is complete.
+				if pm.Total == 0 {
+					lecsDone = true
+				} else {
+					// Reconstruct completion via done==total.
+					lecsDone = pm.Done == pm.Total
+				}
+			}
 			mark := "○"
-			done, err := topicLectureCompleteE(ctx, s.app.DB, t.ID)
-			if err != nil {
-				s.err = "data error: " + err.Error()
-				mark = "?"
-			} else if done {
+			if lecsDone {
 				mark = "✓"
 			}
 			items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Mark: mark})
@@ -223,6 +254,7 @@ func (s *GovScreen) reloadBrowserTopics() {
 	sid := s.subjNav.SelectedID()
 	if sid == "" {
 		s.subTopicList.SetItems(nil)
+		s.browserName, s.browserDone, s.browserTotal, s.browserUnavailable = "", 0, 0, false
 		return
 	}
 	topics, err := catalog.GetGovTopics(ctx, s.app.DB, db.ID(sid))
@@ -230,20 +262,45 @@ func (s *GovScreen) reloadBrowserTopics() {
 		s.err = err.Error()
 		return
 	}
-	items := make([]RowItem, 0, len(topics))
-	for _, t := range topics {
-		done, total, _, _, err := TopicLectureProgressE(ctx, s.app.DB, t.ID)
-		if err != nil {
-			s.err = "data error: " + err.Error()
-			items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Meta: "?"})
-			continue
-		}
-		mark := "○"
-		if done == total {
-			mark = "✓"
-		}
-		items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Meta: fmt.Sprintf("%d/%d", done, total), Mark: mark})
+	// Subject display name cached for render-pure browserRight.
+	name := sid
+	if g, err := catalog.GetGovSubject(ctx, s.app.DB, db.ID(sid)); err == nil {
+		name = g.Name
 	}
+	s.browserName = name
+	s.browserTotal = len(topics)
+	// Batch progress for all browser topics (one lectures query + one
+	// completion query, progress computed in memory).
+	var tids []db.ID
+	for _, t := range topics {
+		tids = append(tids, t.ID)
+	}
+	progMap, err := TopicLectureProgressMap(ctx, s.app.DB, tids)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		s.browserUnavailable = true
+		items := make([]RowItem, 0, len(topics))
+		for _, t := range topics {
+			items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Meta: "?"})
+		}
+		s.subTopicList.SetItems(items)
+		s.browserDone = 0
+		return
+	}
+	items := make([]RowItem, 0, len(topics))
+	doneTopics := 0
+	s.browserUnavailable = false
+	for _, t := range topics {
+		pm := progMap[t.ID]
+		mark := "○"
+		complete := pm.Done == pm.Total // zero-total counts as complete
+		if complete {
+			mark = "✓"
+			doneTopics++
+		}
+		items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Meta: fmt.Sprintf("%d/%d", pm.Done, pm.Total), Mark: mark})
+	}
+	s.browserDone = doneTopics
 	s.subTopicList.SetItems(items)
 }
 
@@ -605,28 +662,18 @@ func (s *GovScreen) subjectsView(w, h int) string {
 }
 
 func (s *GovScreen) browserRight() string {
+	// Render-pure: all data comes from the reload-time cache
+	// (browserName/Done/Total/Unavailable + subTopicList). No DB access.
 	sid := s.subjNav.SelectedID()
 	if sid == "" {
 		return EmptyState("Select a subject.")
 	}
-	ctx := context.Background()
-	name := sid
-	if g, err := catalog.GetGovSubject(ctx, s.app.DB, db.ID(sid)); err == nil {
-		name = g.Name
+	name := s.browserName
+	if name == "" {
+		name = sid
 	}
-	topics, _ := catalog.GetGovTopics(ctx, s.app.DB, db.ID(sid))
-	done, total := 0, len(topics)
-	unavailable := false
-	for _, t := range topics {
-		d, err := topicLectureCompleteE(ctx, s.app.DB, t.ID)
-		if err != nil {
-			unavailable = true
-			break
-		}
-		if d {
-			done++
-		}
-	}
+	done, total := s.browserDone, s.browserTotal
+	unavailable := s.browserUnavailable
 	barW := 24
 	var sb strings.Builder
 	sb.WriteString(thScreenTitle.Render(TruncateToWidth(name, 30)) + "\n")

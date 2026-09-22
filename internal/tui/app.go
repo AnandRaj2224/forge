@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
-	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
 type TopTab int
@@ -78,6 +78,10 @@ type App struct {
 	history *HistoryScreen
 	reviews *ReviewsScreen
 
+	// active is the authoritative in-memory active session, loaded once
+	// per explicit reload (tab switch / start / stop) and never polled
+	// from SQLite on TickMsg. Tick only recomputes the elapsed label.
+	active     *db.Session
 	activeInfo string
 }
 
@@ -161,36 +165,71 @@ func (a *App) goTab(t TopTab) {
 
 func (a *App) reloadCurrent() {
 	a.err = ""
-	a.refreshActiveIndicator()
 	switch a.tab {
 	case TabToday:
+		// TodayScreen.Reload loads the authoritative active session and
+		// syncs it into a.active (no extra DB query here).
 		a.today.Reload()
 	case TabGOV:
+		a.loadActiveFromDB()
 		a.gov.Reload()
 	case TabDSA:
+		a.loadActiveFromDB()
 		a.dsa.Reload()
 	case TabSWE:
+		a.loadActiveFromDB()
 		a.swe.Reload()
 	case TabMocks:
+		a.loadActiveFromDB()
 		a.mocks.Reload()
 	case TabHistory:
+		a.loadActiveFromDB()
 		a.history.Reload()
 	case TabReviews:
+		a.loadActiveFromDB()
 		a.reviews.Reload()
 	}
+	// Pure recompute only (never a DB query here).
+	a.updateActiveIndicator()
 }
 
-func (a *App) refreshActiveIndicator() {
-	sess, err := runtime.GetActiveSession(a.ctx(), a.DB)
+// loadActiveFromDB refreshes the in-memory active session exactly once per
+// explicit reload (tab switch). It is never called from TickMsg or View.
+func (a *App) loadActiveFromDB() {
+	sess, err := engine.LoadActiveSession(a.ctx(), a.DB)
 	if err != nil {
+		a.active = nil
 		a.activeInfo = ""
 		return
 	}
-	el := time.Since(sess.StartedAt)
+	a.active = sess
+	a.updateActiveIndicator()
+}
+
+// updateActiveIndicator recomputes the elapsed label purely from the
+// in-memory active session and the tick clock. It performs no I/O.
+func (a *App) updateActiveIndicator() {
+	if a.active == nil {
+		a.activeInfo = ""
+		return
+	}
+	var el time.Duration
+	if a.now.IsZero() {
+		el = time.Since(a.active.StartedAt)
+	} else {
+		el = a.now.Sub(a.active.StartedAt)
+	}
 	if el < 0 {
 		el = 0
 	}
-	a.activeInfo = fmt.Sprintf("● %s %s %s", sess.Domain, sess.Kind, FormatHMS(el))
+	a.activeInfo = fmt.Sprintf("● %s %s %s", a.active.Domain, a.active.Kind, FormatHMS(el))
+}
+
+func (a *App) refreshActiveIndicator() {
+	// Pure in-memory recompute. Never queries SQLite. The authoritative
+	// session is refreshed only via loadActiveFromDB (tab switch) or via
+	// Today start/stop flows that update a.active from engine results.
+	a.updateActiveIndicator()
 }
 
 func (a *App) Init() tea.Cmd { return tea.Batch(tickCmd(), func() tea.Msg { return ReloadMsg{} }) }
@@ -204,7 +243,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case TickMsg:
 		a.now = time.Time(m)
-		a.refreshActiveIndicator()
+		// 1-second repaint only: recompute the elapsed label from the
+		// in-memory session. No SQLite query here by design.
+		a.updateActiveIndicator()
 		return a, tickCmd()
 	case ReloadMsg:
 		a.reloadCurrent()
@@ -302,8 +343,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case IsStop(ks):
 			// Global stop: end the session and surface its form on Today.
 			// With no active session this is a no-op (letters still type
-			// inside evidence forms via the guard above).
-			if _, err := runtime.GetActiveSession(a.ctx(), a.DB); err == nil {
+			// inside evidence forms via the guard above). In-memory check
+			// only: the authoritative stop itself queries via the engine.
+			if a.active != nil {
+				a.goTab(TabToday)
+				a.today.stopActive()
+			} else if a.today.active != nil {
 				a.goTab(TabToday)
 				a.today.stopActive()
 			}

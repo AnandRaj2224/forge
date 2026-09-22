@@ -184,6 +184,12 @@ func requireGenuinelyNew(ctx context.Context, q db.DBTX, problemID db.ID) error 
 
 // ValidateSWETarget validates a SWE bundle: non-empty, no duplicate tasks,
 // every area exists, every task exists and belongs to its area.
+//
+// Legacy area-only items (TaskID == nil) remain readable here for historical
+// snapshots (EvaluateTodayTask, History). They are NOT valid for new work:
+// new evidence paths (Start/Save) must reject them with ErrLegacyTarget via
+// ValidateSWECurrentTarget / SaveSWEEvidence instead of silently attaching
+// evidence to an arbitrary task.
 func ValidateSWETarget(ctx context.Context, q db.DBTX, st db.SWETarget) error {
 	items := st.Items()
 	if len(items) == 0 {
@@ -235,4 +241,28 @@ func ValidateSWETarget(ctx context.Context, q db.DBTX, st db.SWETarget) error {
 		}
 	}
 	return nil
+}
+
+// IsLegacySWETarget reports whether a SWE target contains any legacy
+// area-only item (TaskID == nil). Such targets remain readable for
+// historical snapshots but are read-only for new evidence.
+func IsLegacySWETarget(st db.SWETarget) bool {
+	for _, it := range st.Items() {
+		if it.TaskID == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateSWECurrentTarget validates a SWE bundle for NEW work: identical to
+// ValidateSWETarget except legacy area-only items are rejected with the
+// domain-level ErrLegacyTarget (read-only) instead of being accepted.
+// Newly generated Today SWE targets must always contain TaskID; historical
+// area-only snapshots stay readable via ValidateSWETarget/EvaluateTodayTask.
+func ValidateSWECurrentTarget(ctx context.Context, q db.DBTX, st db.SWETarget) error {
+	if IsLegacySWETarget(st) {
+		return wrapErr("swe target", ErrLegacyTarget, "legacy area-only SWE target is read-only: migrate to task bundle for new evidence")
+	}
+	return ValidateSWETarget(ctx, q, st)
 }

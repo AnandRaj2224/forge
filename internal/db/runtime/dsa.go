@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	db "forge/internal/db"
@@ -71,6 +72,32 @@ FROM dsa_attempts WHERE session_id = ? ORDER BY attempted_at`, sessionID)
 		return nil, fmt.Errorf("runtime: dsa attempts by session: %w", err)
 	}
 	defer rows.Close()
+	return scanDSAAttempts(rows)
+}
+
+// GetDSAAttemptsBySessions returns attempts for a bounded set of sessions
+// in ONE query (batch alternative to per-session lookups).
+func GetDSAAttemptsBySessions(ctx context.Context, q db.DBTX, sessionIDs []db.ID) ([]db.DSAAttempt, error) {
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	place := make([]string, 0, len(sessionIDs))
+	args := make([]any, 0, len(sessionIDs))
+	for _, id := range sessionIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `
+SELECT id, session_id, problem_id, mode, attempted_at, independent, optimal, hint_used, solve_time_seconds
+FROM dsa_attempts WHERE session_id IN (`+strings.Join(place, ",")+`) ORDER BY attempted_at`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: dsa attempts by sessions: %w", err)
+	}
+	defer rows.Close()
+	return scanDSAAttempts(rows)
+}
+
+func scanDSAAttempts(rows *sql.Rows) ([]db.DSAAttempt, error) {
 	var out []db.DSAAttempt
 	for rows.Next() {
 		var a db.DSAAttempt
@@ -93,6 +120,28 @@ FROM dsa_attempts WHERE session_id = ? ORDER BY attempted_at`, sessionID)
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// GetDSAAttemptsForProblems returns attempts for a bounded set of problems
+// in ONE query (batch alternative to per-problem GetDSAAttempts).
+func GetDSAAttemptsForProblems(ctx context.Context, q db.DBTX, problemIDs []db.ID) ([]db.DSAAttempt, error) {
+	if len(problemIDs) == 0 {
+		return nil, nil
+	}
+	place := make([]string, 0, len(problemIDs))
+	args := make([]any, 0, len(problemIDs))
+	for _, id := range problemIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `
+SELECT id, session_id, problem_id, mode, attempted_at, independent, optimal, hint_used, solve_time_seconds
+FROM dsa_attempts WHERE problem_id IN (`+strings.Join(place, ",")+`) ORDER BY attempted_at`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: dsa attempts for problems: %w", err)
+	}
+	defer rows.Close()
+	return scanDSAAttempts(rows)
 }
 
 func boolToInt(b bool) int {

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -104,7 +105,8 @@ func ParseDurationSeconds(s string) (int, string) {
 
 // ParseAvgSpeed parses an avg-question-speed input. Empty is allowed by the
 // legacy form helper (nil, no error); engine evidence validation requires a
-// positive value when the bundle demands it (see evidence.go).
+// positive value when the bundle demands it (see evidence.go). NaN/±Inf are
+// explicitly rejected (NaN bypasses ordinary ordering comparisons).
 func ParseAvgSpeed(s string) (*float64, string) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -115,7 +117,7 @@ func ParseAvgSpeed(s string) (*float64, string) {
 	low = strings.TrimSuffix(low, "s")
 	low = strings.TrimSpace(low)
 	v, err := strconv.ParseFloat(low, 64)
-	if err != nil || v <= 0 {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
 		return nil, "average speed must be > 0"
 	}
 	return &v, ""

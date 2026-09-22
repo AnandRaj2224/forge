@@ -408,6 +408,11 @@ func addDaysLocal(localDate string, days int) (string, error) {
 // SaveSWEEvidence validates the exact bundle, writes all outcomes in ONE
 // transaction, and re-evaluates. Every target task needs exactly one valid
 // outcome; BLOCKED/PARTIAL still complete the bundle as evidence.
+//
+// Legacy area-only targets remain readable via EvaluateTodayTask but are
+// read-only for new evidence: attempting a new save on them returns the
+// domain-level ErrLegacyTarget (never silently attaches evidence to an
+// arbitrary unfinished task).
 func SaveSWEEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.ID, inputs []SWEOutcomeInput, now time.Time) (TaskEvaluation, error) {
 	task, err := runtime.GetTodayTask(ctx, database, taskID)
 	if err != nil {
@@ -419,6 +424,12 @@ func SaveSWEEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 	st, err := db.UnmarshalSWETarget(*task.TargetJSON)
 	if err != nil {
 		return TaskEvaluation{}, wrapErr("swe save", ErrInvalidTarget, err.Error())
+	}
+	// Legacy check first so validation and save agree: historical
+	// area-only snapshots are readable (ValidateSWETarget allows them) but
+	// new evidence on them is a read-only domain error.
+	if IsLegacySWETarget(st) {
+		return TaskEvaluation{}, wrapErr("swe save", ErrLegacyTarget, "legacy area-only SWE target is read-only: migrate to task bundle for new evidence")
 	}
 	if err := ValidateSWETarget(ctx, database, st); err != nil {
 		return TaskEvaluation{}, err
@@ -436,9 +447,7 @@ func SaveSWEEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 	items := st.Items()
 	targetSet := map[db.ID]db.SWETaskTarget{}
 	for _, it := range items {
-		if it.TaskID == nil {
-			return TaskEvaluation{}, wrapErr("swe save", ErrInvalidTarget, "area-only targets require migration to task bundles for new saves")
-		}
+		// Legacy was rejected above; TaskID is guaranteed present here.
 		targetSet[*it.TaskID] = it
 	}
 	if len(inputs) == 0 {

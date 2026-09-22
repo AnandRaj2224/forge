@@ -31,10 +31,13 @@ type DSAScreen struct {
 	detailScroll ScrollViewport // problem pane scrolls independently when overflowing
 	showing      string         // "pattern" or "problem"
 	err          string
+	// passCache caches per-problem pass marks loaded in Reload/reloadQuestions
+	// so View rendering performs no database access.
+	passCache map[string]bool
 }
 
 func NewDSAScreen(a *App) *DSAScreen {
-	return &DSAScreen{app: a, patList: NewNavigator(), qList: NewNavigator(), showing: "pattern"}
+	return &DSAScreen{app: a, patList: NewNavigator(), qList: NewNavigator(), showing: "pattern", passCache: map[string]bool{}}
 }
 
 func (s *DSAScreen) Reload() {
@@ -51,7 +54,36 @@ func (s *DSAScreen) Reload() {
 	}
 	s.patList.SetItems(items)
 	s.showing = "pattern"
+	// Batch pass marks for all problems (one query, pass computed in memory).
+	s.refreshPassCache(ctx, probs)
 	s.reloadQuestions()
+}
+
+// refreshPassCache loads pass marks for the given problems in ONE batch query.
+// Pass is the authoritative engine.AnyPass rule computed in memory.
+func (s *DSAScreen) refreshPassCache(ctx context.Context, probs []db.DSAProblem) {
+	if s.passCache == nil {
+		s.passCache = map[string]bool{}
+	}
+	if len(probs) == 0 {
+		return
+	}
+	ids := make([]db.ID, 0, len(probs))
+	for _, p := range probs {
+		ids = append(ids, p.ID)
+	}
+	atts, err := runtime.GetDSAAttemptsForProblems(ctx, s.app.DB, ids)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
+	byProblem := make(map[db.ID][]db.DSAAttempt, len(ids))
+	for _, a := range atts {
+		byProblem[a.ProblemID] = append(byProblem[a.ProblemID], a)
+	}
+	for _, p := range probs {
+		s.passCache[string(p.ID)] = DSAPassUI(byProblem[p.ID])
+	}
 }
 
 func (s *DSAScreen) selPattern() *DSAPattern {
@@ -68,23 +100,19 @@ func (s *DSAScreen) selPattern() *DSAPattern {
 }
 
 func (s *DSAScreen) reloadQuestions() {
-	ctx := context.Background()
 	p := s.selPattern()
 	if p == nil {
 		s.qList.SetItems(nil)
 		return
 	}
+	// Render marks from the batch pass cache (populated in Reload). If a
+	// problem is missing from the cache (e.g. pattern changed without a
+	// full reload), fall back to the cached value defaulting to unpassed
+	// without performing I/O; the next Reload refreshes the cache.
 	items := make([]RowItem, 0, len(p.Problems))
 	for _, q := range p.Problems {
-		// Presentation-only pass mark via the authoritative engine rule
-		// (engine.AnyPass). A lookup failure surfaces as a data error
-		// instead of a silent unpassed mark.
-		att, err := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID)
-		if err != nil {
-			s.err = "data error: " + err.Error()
-		}
 		mark := "○"
-		if DSAPassUI(att) {
+		if s.passCache != nil && s.passCache[string(q.ID)] {
 			mark = "✓"
 		}
 		items = append(items, RowItem{ID: string(q.ID), Title: q.Title, Meta: q.Difficulty, Mark: mark})
@@ -126,15 +154,14 @@ func (s *DSAScreen) onBack() bool {
 }
 
 func (s *DSAScreen) patternProgress(p *DSAPattern) (int, int) {
-	ctx := context.Background()
+	// Render-pure: progress derives from the batch pass cache loaded in
+	// Reload. Never queries SQLite and never mutates s.err during render.
+	if p == nil {
+		return 0, 0
+	}
 	done := 0
 	for _, q := range p.Problems {
-		att, err := runtime.GetDSAAttempts(ctx, s.app.DB, q.ID)
-		if err != nil {
-			s.err = "data error: " + err.Error()
-			continue
-		}
-		if DSAPassUI(att) {
+		if s.passCache != nil && s.passCache[string(q.ID)] {
 			done++
 		}
 	}
