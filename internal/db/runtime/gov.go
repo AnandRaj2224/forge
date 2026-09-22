@@ -56,7 +56,14 @@ func IsLectureComplete(ctx context.Context, q db.DBTX, lectureID db.ID) (bool, e
 }
 
 // RecordLectureCompletion records a one-time lecture completion.
+// Lectures complete once: a duplicate completion is rejected here so a
+// completed lecture can never reach the UNIQUE save path twice through
+// normal operation (the Today CanStart rule blocks it first).
 func RecordLectureCompletion(ctx context.Context, q db.DBTX, c db.GovLectureCompletion) error {
+	var count int
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_lecture_completions WHERE lecture_id = ?`, c.LectureID).Scan(&count); err == nil && count > 0 {
+		return fmt.Errorf("runtime: lecture %q already complete — result is read-only", c.LectureID)
+	}
 	if _, err := q.ExecContext(ctx, `INSERT INTO gov_lecture_completions (lecture_id, session_id, completed_at) VALUES (?, ?, ?)`,
 		c.LectureID, c.SessionID, c.CompletedAt.Unix()); err != nil {
 		return fmt.Errorf("runtime: record lecture completion: %w", err)

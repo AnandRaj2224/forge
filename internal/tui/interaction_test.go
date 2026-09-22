@@ -145,11 +145,11 @@ func TestGovDashboardFlow(t *testing.T) {
 	if app.gov.detail == nil || app.gov.detail.Topic.ID != "topic-a" {
 		t.Fatalf("wrong topic detail: %+v", app.gov.detail)
 	}
-	testSend(app, "q")
+	testSend(app, "esc")
 	if app.gov.level != govExam {
 		t.Fatalf("Esc must return to the exam workspace, got %q", app.gov.level)
 	}
-	testSend(app, "q")
+	testSend(app, "esc")
 	if app.gov.level != govDashboard {
 		t.Fatalf("Esc must return to the dashboard, got %q", app.gov.level)
 	}

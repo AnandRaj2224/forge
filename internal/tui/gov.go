@@ -49,6 +49,7 @@ type GovScreen struct {
 	subZone      int
 
 	detail   *GovTopicView
+	detailScroll ScrollViewport // topic pane scrolls independently when overflowing
 	returnTo string
 	err      string
 }
@@ -242,6 +243,7 @@ func (s *GovScreen) openTopic(topicID string) {
 		Stats: ComputeTopicPracticeStats(ctx, s.app.DB, tp.ID), UsedBy: ExamsForTopic(ctx, s.app.DB, tp.ID)}
 	s.returnTo = s.level
 	s.level = govTopic
+	s.detailScroll.Reset()
 }
 
 // onBack pops right-panel detail first, then workspace to dashboard.
@@ -277,6 +279,27 @@ func (s *GovScreen) move(key string) tea.Cmd {
 	up := key == "k" || key == "up"
 	left := key == "h" || key == "left"
 	right := key == "l" || key == "right"
+	if s.level == govTopic {
+		// Scroll the topic pane independently.
+		if down || up {
+			_, h := s.app.contentViewport()
+			bodyH := h
+			if bodyH < 8 {
+				bodyH = 8
+			}
+			innerH := bodyH - 4
+			if innerH < 4 {
+				innerH = 4
+			}
+			total := len(strings.Split(s.topicBody(40), "\n"))
+			if down {
+				s.detailScroll.ScrollDown(total, innerH)
+			} else {
+				s.detailScroll.ScrollUp(total, innerH)
+			}
+		}
+		return nil
+	}
 	switch s.level {
 	case govDashboard:
 		n := s.dashboardItems()
@@ -608,7 +631,7 @@ func (s *GovScreen) topicInWorkspace(w, h int, fromSubjects bool) string {
 		}
 		left = PanelFixed(strings.ToUpper(TruncateToWidth(name, 20)), SectionHeader("SUBJECTS")+"\n"+s.subjMenu.View(), lw, bodyH, false)
 	}
-	return lipglossJoin(left, PanelFixed("TOPIC", s.topicBody(rw-6), rw, bodyH, true))
+	return lipglossJoin(left, PanelFixed("TOPIC", ViewportView(s.topicBody(rw-6), &s.detailScroll, innerH), rw, bodyH, true))
 }
 
 func (s *GovScreen) topicBody(inner int) string {
@@ -645,11 +668,11 @@ func (s *GovScreen) topicBody(inner int) string {
 	} else {
 		sb.WriteString(ProgressBar{Ratio: accuracyRatio(st), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 	}
-	sb.WriteString(MetaRow("Questions", fmt.Sprint(st.Attempted), 10) + "\n")
-	sb.WriteString(MetaRow("Correct", fmt.Sprint(st.Correct), 10) + "\n")
-	sb.WriteString(MetaRow("Incorrect", fmt.Sprint(st.Incorrect), 10) + "\n")
-	sb.WriteString(MetaRow("Accuracy", fmt.Sprintf("%.1f%%", st.Accuracy*100), 10) + "\n")
-	sb.WriteString(MetaRow("Avg speed", avgStr(st), 10) + "\n")
+	sb.WriteString(MetaRow("Questions attempted", fmt.Sprint(st.Attempted), 19) + "\n")
+	sb.WriteString(MetaRow("Questions correct", fmt.Sprint(st.Correct), 19) + "\n")
+	sb.WriteString(MetaRow("Questions incorrect", fmt.Sprint(st.Incorrect), 19) + "\n")
+	sb.WriteString(MetaRow("Accuracy", fmt.Sprintf("%.1f%%", st.Accuracy*100), 19) + "\n")
+	sb.WriteString(MetaRow("Avg speed", avgStr(st), 19) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("LECTURES") + "\n")
 	for i, l := range v.Lectures {

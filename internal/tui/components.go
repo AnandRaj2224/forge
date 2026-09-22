@@ -305,7 +305,10 @@ func (r RadioGroup) View() string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// Checkbox is a real toggle control with stable glyphs (☑/☐).
+// Checkbox is a real toggle control with a strong checked state.
+// Focus stays on the arrow ▶ (never replaced); the checked state uses a
+// solid block ■ in a solid color vs the hollow □, clearly visible at a
+// glance: ▶ ■ Independent /   □ Optimal.
 type Checkbox struct {
 	Label   string
 	Checked bool
@@ -313,15 +316,19 @@ type Checkbox struct {
 }
 
 func (c Checkbox) View() string {
-	glyph := "☐"
+	var glyph string
+	var line string
 	if c.Checked {
-		glyph = "☑"
+		glyph = thSuccess.Render("■")
+		line = glyph + "  " + thPrimary.Render(c.Label)
+	} else {
+		glyph = thMeta.Render("□")
+		line = glyph + "  " + thPrimary.Render(c.Label)
 	}
-	line := glyph + "  " + c.Label
 	if c.Focused {
-		return thFocusMark.Render("▶ ") + thPrimary.Render(line)
+		return thFocusMark.Render("▶ ") + line
 	}
-	return "  " + thPrimary.Render(line)
+	return "  " + line
 }
 
 // FormField wraps a real editable text input with an aligned label.
@@ -611,6 +618,8 @@ type StatPair struct {
 // EvidenceRow renders one domain evidence row: a domain-colored label plus
 // aligned full-word stat pairs (Lectures, Questions, Accuracy — never
 // lect/q/acc shorthand).
+// Kept for compat; new information-design prefers DomainDetailBlock
+// (structured sections/cards/rows) over single-line prose.
 func EvidenceRow(domain string, pairs []StatPair) string {
 	var sb strings.Builder
 	sb.WriteString(DomainLabel(domain, 5))
@@ -618,6 +627,78 @@ func EvidenceRow(domain string, pairs []StatPair) string {
 		sb.WriteString("   " + thMeta.Render(padRight(pr.Label, 9)) + " " + thPrimary.Render(pr.Value))
 	}
 	return sb.String()
+}
+
+// DomainDetailBlock renders one domain as a structured section: a
+// domain-colored title plus one labeled row per metric (compact rows, never
+// compressed prose). Labels explain the metric; values scan easily.
+// Example:
+//
+//	GOV
+//	Lectures completed      1
+//	Practice questions     60
+//	Accuracy             78.3%
+func DomainDetailBlock(domain, title string, pairs []StatPair) string {
+	var sb strings.Builder
+	sb.WriteString(DomainStyle(domain).Render(title))
+	for _, pr := range pairs {
+		sb.WriteString("\n" + MetaRow(pr.Label, pr.Value, 18))
+	}
+	return sb.String()
+}
+
+// FitBlockWidth truncates every line of a pre-rendered block to w cells so
+// side-by-side blocks never overflow their column.
+func FitBlockWidth(s string, w int) string {
+	if w <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		lines[i] = TruncateToWidth(ln, w)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// JoinDetailBlocks joins domain detail blocks side by side when wide enough
+// to use the available space, else stacks them vertically with dividers.
+// Widths are derived from inner so the row never overflows.
+func JoinDetailBlocks(blocks []string, inner int) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	if inner < 60 || len(blocks) < 2 {
+		div := ""
+		var sb strings.Builder
+		for i, b := range blocks {
+			if i > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(FitBlockWidth(b, inner))
+			if i < len(blocks)-1 {
+				sb.WriteString("\n" + RowDivider(inner))
+			}
+		}
+		_ = div
+		return sb.String()
+	}
+	n := len(blocks)
+	cw := (inner - (n-1)*1) / n
+	if cw < 10 {
+		cw = 10
+	}
+	fitted := make([]string, 0, n)
+	for _, b := range blocks {
+		fitted = append(fitted, FitBlockWidth(b, cw))
+	}
+	parts := make([]string, 0, n*2-1)
+	for i, b := range fitted {
+		if i > 0 {
+			parts = append(parts, " ")
+		}
+		parts = append(parts, b)
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 }
 
 // EmptyState renders a consistent placeholder for empty content.

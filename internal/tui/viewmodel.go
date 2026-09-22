@@ -51,20 +51,96 @@ func FormatHMS(d time.Duration) string {
 func FormatHM(secs int) string { return FormatDuration(secs) }
 
 // FormatDurationLong renders seconds as product metrics: 3600->"1h",
-// 9300->"15h 41m", 2400->"40m". Actual and planned stay visually distinct.
+// 9300->"1h 35m", 300->"5m", 90->"1m 30s", 42->"42s". Sub-hour values keep
+// second precision (1m 30s, not 1m); hour values truncate to minutes.
+// Actual and planned stay visually distinct.
 func FormatDurationLong(secs int) string {
+	if secs <= 0 {
+		if secs < 0 {
+			secs = 0
+		}
+		if secs < 60 {
+			return fmt.Sprintf("%ds", secs)
+		}
+	}
 	if secs < 60 {
 		return fmt.Sprintf("%ds", secs)
 	}
 	h := secs / 3600
 	m := (secs % 3600) / 60
+	s := secs % 60
 	if h == 0 {
-		return fmt.Sprintf("%dm", m)
+		if s == 0 {
+			return fmt.Sprintf("%dm", m)
+		}
+		return fmt.Sprintf("%dm %ds", m, s)
 	}
 	if m == 0 {
 		return fmt.Sprintf("%dh", h)
 	}
 	return fmt.Sprintf("%dh %02dm", h, m)
+}
+
+// ParseDurationSeconds parses human duration strings into seconds without
+// changing the stored meaning (seconds). Accepts:
+//   - plain integers as seconds: "300" -> 300 (back-compat)
+//   - duration strings: "30s", "5m", "1h", "1h 15m", "1h15m", "1m 30s"
+// Units are h/m/s, case-insensitive, spaces optional. Returns seconds or
+// an error message fragment.
+func ParseDurationSeconds(s string) (int, string) {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return 0, "required"
+	}
+	low := strings.ToLower(t)
+	// Plain integer (optional surrounding spaces) = seconds for back-compat.
+	if v, err := strconv.Atoi(strings.TrimSpace(low)); err == nil {
+		if v < 0 {
+			return 0, "must be >= 0"
+		}
+		return v, ""
+	}
+	// Duration tokens: sequence of <number><unit>.
+	nospace := strings.ReplaceAll(low, " ", "")
+	if nospace == "" {
+		return 0, "required"
+	}
+	total := 0
+	i := 0
+	seen := false
+	for i < len(nospace) {
+		j := i
+		for j < len(nospace) && nospace[j] >= '0' && nospace[j] <= '9' {
+			j++
+		}
+		if j == i {
+			return 0, "use like 30s, 5m, 1h 15m or seconds"
+		}
+		num, err := strconv.Atoi(nospace[i:j])
+		if err != nil {
+			return 0, "use like 30s, 5m, 1h 15m or seconds"
+		}
+		if j >= len(nospace) {
+			return 0, "use like 30s, 5m, 1h 15m or seconds"
+		}
+		unit := nospace[j]
+		switch unit {
+		case 'h':
+			total += num * 3600
+		case 'm':
+			total += num * 60
+		case 's':
+			total += num
+		default:
+			return 0, "use like 30s, 5m, 1h 15m or seconds"
+		}
+		seen = true
+		i = j + 1
+	}
+	if !seen {
+		return 0, "use like 30s, 5m, 1h 15m or seconds"
+	}
+	return total, ""
 }
 
 // FormatDate renders UI dates as 21 Sep 2026 (numeric day, 3-letter
@@ -540,10 +616,15 @@ func ComputeSWEProgress(ctx context.Context, q db.DBTX, area db.SWEArea) SWEArea
 // ---- Form validation (pure, unit-tested) ----
 
 // ValidatePracticeRow validates one practice topic row of text inputs.
+// Time accepts plain seconds ("1380") or durations ("23m", "20m 30s").
 func ValidatePracticeRow(timeS, attS, corrS, avgS string) (tSecs, att, corr int, avg *float64, errMsg string) {
-	tSecs, errMsg = parseNonNegInt("time", timeS)
-	if errMsg != "" {
-		return
+	if v, msg := ParseDurationSeconds(timeS); msg != "" {
+		if msg == "required" {
+			return 0, 0, 0, nil, "time required"
+		}
+		return 0, 0, 0, nil, "time " + msg
+	} else {
+		tSecs = v
 	}
 	att, errMsg = parseNonNegInt("attempted", attS)
 	if errMsg != "" {
@@ -579,11 +660,16 @@ func parseNonNegInt(field, s string) (int, string) {
 	return v, ""
 }
 
-// ValidateSolveTime validates optional solve-time seconds (required by DSA form).
+// ValidateSolveTime validates solve-time input (required by DSA form).
+// Accepts plain seconds ("300") or durations ("5m", "30s", "1h 15m").
+// Stored meaning stays seconds.
 func ValidateSolveTime(s string) (int, *int, string) {
-	v, msg := parseNonNegInt("solve time", s)
+	v, msg := ParseDurationSeconds(s)
 	if msg != "" {
-		return 0, nil, msg
+		if msg == "required" {
+			return 0, nil, "solve time required"
+		}
+		return 0, nil, "solve time must be like 30s, 5m, 1h 15m or seconds"
 	}
 	return v, &v, ""
 }

@@ -151,16 +151,32 @@ func TestReviewsMetricsStructure(t *testing.T) {
 	app := NewApp(seedFlowDB(t))
 	app.width, app.height = 150, 40
 	app.goTab(TabReviews)
-	view := app.View().Content
-	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV", "DSA", "SWE", "What worked well", "What should change"} {
+	// Full report (unclipped) must read as an analytical weekly report with
+	// explicit week context, performance sections, and reflections. The
+	// right pane scrolls independently, so the clipped app view is checked
+	// separately for the top bento.
+	full := stripANSIForTest(app.reviews.reportView(90))
+	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "SWE EXECUTION", "What worked well", "What should change", "DOMAIN SUMMARY", "Questions attempted", "Questions correct", "Questions incorrect", "Not passed"} {
 		found := false
 		// case-insensitive for reflections
-		if strings.Contains(strings.ToUpper(view), strings.ToUpper(want)) {
+		if strings.Contains(strings.ToUpper(full), strings.ToUpper(want)) {
 			found = true
 		}
 		if !found {
 			t.Fatalf("reviews missing %q", want)
 		}
+	}
+	view := app.View().Content
+	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN"} {
+		if !strings.Contains(strings.ToUpper(view), strings.ToUpper(want)) {
+			t.Fatalf("reviews viewport missing top %q", want)
+		}
+	}
+	// Scrolling the report must reveal the reflections tail.
+	app.reviews.bodyScroll.Offset = 1 << 30
+	scrolled := stripANSIForTest(app.View().Content)
+	if !strings.Contains(scrolled, "What worked well") || !strings.Contains(scrolled, "What should change") {
+		t.Fatalf("reviews reflections not reachable by scrolling")
 	}
 }
 

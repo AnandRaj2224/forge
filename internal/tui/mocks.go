@@ -53,6 +53,11 @@ type MocksScreen struct {
 	wStaged   []db.ID
 	wFocus    int // 0 filter, 1 list, 2 save
 	wErr      string
+
+	// Shared scroll viewports: detail and create panes scroll
+	// independently whenever they overflow.
+	detailScroll ScrollViewport
+	formScroll   ScrollViewport
 }
 
 func NewMocksScreen(a *App) *MocksScreen {
@@ -109,6 +114,7 @@ func (s *MocksScreen) syncDetail() {
 	s.sections = nil
 	s.weak = map[string][]db.MockWeakTopic{}
 	s.secCur = 0
+	s.detailScroll.Reset()
 	if m == nil {
 		return
 	}
@@ -129,8 +135,40 @@ func (s *MocksScreen) syncDetail() {
 	}
 }
 
+// detailViewportH mirrors browseView geometry for scrolling.
+func (s *MocksScreen) detailViewportH() int {
+	_, h := s.app.contentViewport()
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
+	}
+	innerH := bodyH - 4
+	if innerH < 4 {
+		innerH = 4
+	}
+	return innerH
+}
+
+// followSection keeps the selected weak-topic section visible: top on the
+// first section, bottom on the last, proportional in between.
+func (s *MocksScreen) followSection() {
+	n := len(s.sections)
+	if n <= 1 {
+		return
+	}
+	total := len(strings.Split(s.mockBody(40), "\n"))
+	height := s.detailViewportH()
+	maxOff := total - height
+	if maxOff <= 0 {
+		s.detailScroll.Reset()
+		return
+	}
+	s.detailScroll.Offset = s.secCur * maxOff / (n - 1)
+	s.detailScroll.Clamp(total, height)
+}
 // qBacksOut reports whether q should leave the form instead of typing.
 // Inside text inputs q always types; on selectors and buttons it backs out.
+// Kept for compat; form-mode routing in App guarantees q never quits Forge.
 func (s *MocksScreen) qBacksOut() bool {
 	switch s.mode {
 	case "create":
@@ -139,6 +177,18 @@ func (s *MocksScreen) qBacksOut() bool {
 		return s.wFocus != 0
 	}
 	return true
+}
+
+// textEditing reports whether a text input owns focus in a mock form.
+// While true, letters (including q/s/x) type instead of acting as shortcuts.
+func (s *MocksScreen) textEditing() bool {
+	switch s.mode {
+	case "create":
+		return s.cFocus >= 1 && s.cFocus <= len(s.cInputs)
+	case "weak":
+		return s.wFocus == 0
+	}
+	return false
 }
 
 func (s *MocksScreen) onBack() bool {
@@ -172,6 +222,10 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 			if s.focusR {
 				if s.secCur < len(s.sections)-1 {
 					s.secCur++
+					s.followSection()
+				} else {
+					// At the end: scroll the detail tail independently.
+					s.detailScroll.ScrollDown(len(strings.Split(s.mockBody(40), "\n")), s.detailViewportH())
 				}
 			} else {
 				prev := s.list.SelectedID()
@@ -185,6 +239,10 @@ func (s *MocksScreen) Update(msg tea.Msg) tea.Cmd {
 			if s.focusR {
 				if s.secCur > 0 {
 					s.secCur--
+					s.followSection()
+				} else {
+					// At the top: scroll the detail head independently.
+					s.detailScroll.ScrollUp(len(strings.Split(s.mockBody(40), "\n")), s.detailViewportH())
 				}
 			} else {
 				prev := s.list.SelectedID()
@@ -284,6 +342,42 @@ func (s *MocksScreen) updateCreateFocus() {
 	}
 }
 
+// followCreateFocus keeps the focused create field reachable: exam on top,
+// SAVE on bottom, proportional in between.
+func (s *MocksScreen) followCreateFocus() {
+	n := s.nCreateFocus()
+	if n <= 1 {
+		return
+	}
+	_, h := s.app.contentViewport()
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
+	}
+	innerH := bodyH - 4
+	if innerH < 4 {
+		innerH = 4
+	}
+	// Approximate full create-form height: header + inputs + divider + save.
+	total := 2 + len(s.cInputs) + 3
+	if s.cFocus <= 0 {
+		s.formScroll.Reset()
+		return
+	}
+	if s.cFocus >= n-1 {
+		s.formScroll.Offset = 1 << 30
+		s.formScroll.Clamp(total, innerH)
+		return
+	}
+	maxOff := total - innerH
+	if maxOff <= 0 {
+		s.formScroll.Reset()
+		return
+	}
+	s.formScroll.Offset = s.cFocus * maxOff / (n - 1)
+	s.formScroll.Clamp(total, innerH)
+}
+
 func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
 	k, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
@@ -299,10 +393,12 @@ func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
 	case "down":
 		s.cFocus = (s.cFocus + 1) % s.nCreateFocus()
 		s.updateCreateFocus()
+		s.followCreateFocus()
 		return nil
 	case "up":
 		s.cFocus = (s.cFocus - 1 + s.nCreateFocus()) % s.nCreateFocus()
 		s.updateCreateFocus()
+		s.followCreateFocus()
 		return nil
 	case "left", "h":
 		if s.cFocus == 0 && len(s.exams) > 0 {
@@ -798,7 +894,7 @@ func (s *MocksScreen) browseView() string {
 		RowDivider(lw-6) + "\n" +
 		KeyBadge("N") + thMeta.Render(" New mock   ") + KeyBadge("D") + thMeta.Render(" Delete")
 	left := PanelFixed("MOCKS", leftBody, lw, bodyH, !s.focusR)
-	right := PanelFixed("MOCK DETAIL", s.mockBody(rw-6), rw, bodyH, s.focusR)
+	right := PanelFixed("MOCK DETAIL", ViewportView(s.mockBody(rw-6), &s.detailScroll, innerH), rw, bodyH, s.focusR)
 	out := lipglossJoin(left, right)
 	if s.err != "" {
 		out += "\n" + thError.Render(s.err)
@@ -941,8 +1037,9 @@ func (s *MocksScreen) createView() string {
 	if s.cErr != "" {
 		rb.WriteString(thError.Render(s.cErr) + "\n")
 	}
-	rb.WriteString(thHelp.Render("↑/↓ move · H/L exam · Enter SAVE · Q back"))
-	right := PanelFixed("DETAILS", rb.String(), rw, bodyH, s.cFocus > 0)
+	rb.WriteString(thHelp.Render("↑/↓ move · H/L exam · Enter SAVE · ESC back"))
+	// The create form scrolls independently when it overflows.
+	right := PanelFixed("DETAILS", ViewportView(rb.String(), &s.formScroll, bodyH-4), rw, bodyH, s.cFocus > 0)
 	return lipglossJoin(left, right)
 }
 
@@ -995,7 +1092,7 @@ func (s *MocksScreen) weakView() string {
 	if s.wErr != "" {
 		rb.WriteString(thError.Render(s.wErr) + "\n")
 	}
-	rb.WriteString(thHelp.Render("↑/↓ move · Enter toggle · S save · Q back"))
+	rb.WriteString(thHelp.Render("↑/↓ move · Enter toggle · S save · ESC back"))
 	right := PanelFixed("WEAK TOPICS", rb.String(), rw, bodyH, s.wFocus == 2)
 	return lipglossJoin(left, right)
 }

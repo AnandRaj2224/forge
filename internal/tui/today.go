@@ -21,22 +21,26 @@ const (
 
 // TodayScreen is the three-part bento workspace: task list | active session /
 // selected-task-or-result. Selection drives the detail panel; no separate
-// detail screen exists.
+// detail screen exists. Detail and result panes scroll independently via
+// shared ScrollViewports whenever they overflow.
 type TodayScreen struct {
-	app      *App
-	tbl      TodayTaskTable
-	tasks    []db.TodayTask
-	status   []TaskStatus
-	bundles  []Bundle
-	snap     *db.TodaySnapshot
-	active   *db.Session
-	zone     int
-	stopBtn  Button
-	startBtn Button
-	right    string // "detail" or "result"
-	result   *ResultForm
-	err      string
-	ready    bool
+	app          *App
+	tbl          TodayTaskTable
+	tasks        []db.TodayTask
+	status       []TaskStatus
+	bundles      []Bundle
+	snap         *db.TodaySnapshot
+	active       *db.Session
+	zone         int
+	stopBtn      Button
+	startBtn     Button
+	right        string // "detail" or "result"
+	result       *ResultForm
+	detailScroll ScrollViewport
+	resultScroll ScrollViewport
+	notice       string // small neutral contextual note (never a red error banner)
+	err          string
+	ready        bool
 }
 
 func NewTodayScreen(a *App) *TodayScreen {
@@ -87,6 +91,7 @@ func (s *TodayScreen) latestSnapshot(ctx context.Context) *db.TodaySnapshot {
 func (s *TodayScreen) Reload() {
 	ctx := context.Background()
 	s.err, s.ready = "", false
+	s.notice = ""
 	snap := s.latestSnapshot(ctx)
 	if snap == nil {
 		s.err = "no today snapshots"
@@ -147,6 +152,7 @@ func (s *TodayScreen) syncButtons() {
 }
 
 // startSelected creates the persisted ACTIVE session for the selected task.
+// The domain layer is authoritative: completed tasks never start again.
 func (s *TodayScreen) startSelected() {
 	_, _, _, ok := s.selected()
 	if !ok {
@@ -154,6 +160,13 @@ func (s *TodayScreen) startSelected() {
 	}
 	task := s.tasks[s.tbl.CursorPos()]
 	ctx := context.Background()
+	if okStart, _ := runtime.CanStartTodayTask(ctx, s.app.DB, task.ID); !okStart {
+		// Normal state, not an error: a DONE task is simply non-actionable.
+		// No session is attempted, no DB path is reached, no red banner.
+		s.notice = "Completed · read-only"
+		s.syncButtons()
+		return
+	}
 	if _, err := runtime.GetActiveSession(ctx, s.app.DB); err == nil {
 		s.app.err = "another session is active — stop it first (x)"
 		return
@@ -205,24 +218,42 @@ func (s *TodayScreen) stopActive() {
 
 func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
-		// While the in-place result form owns the right panel, it owns
-		// field keys and typing. Esc quits and q backs out globally
-		// (handled by the app); s/x start/stop are also global there.
+		// While the in-place result form owns the right panel, the form owns
+		// the keys: text fields take every keystroke (j/k/q/s/x type there);
+		// j/k on non-text widgets moves between fields like ↓/↑; Enter
+		// saves on SAVE; the viewport always keeps the focused field
+		// visible. Global s/x/1-7/q never fire from inside the form — the
+		// app routes them here.
 		if s.zone == tzRight && s.right == "result" && s.result != nil {
-			if k.String() == "enter" {
+			ks := k.String()
+			if ks == "enter" {
 				if s.result.focus == s.result.nFocus()-1 {
 					if ok, _ := s.result.TrySave(); ok {
 						s.right = "detail"
 						s.zone = tzTasks
+						s.resultScroll.Reset()
 						s.Reload()
 						s.app.refreshActiveIndicator()
 					}
 				} else if cmd, handled := s.result.HandleKey(k); handled {
+					s.result.ensureFocusVisible(&s.resultScroll, s.resultViewportH())
 					return cmd
 				}
 				return nil
 			}
+			if (ks == "j" || ks == "k") && !s.result.textFocus() {
+				// Non-text widget: j/k moves between fields (never scrolls
+				// the focused field out of view).
+				if ks == "j" {
+					s.result.moveFocus(1)
+				} else {
+					s.result.moveFocus(-1)
+				}
+				s.result.ensureFocusVisible(&s.resultScroll, s.resultViewportH())
+				return nil
+			}
 			if cmd, handled := s.result.HandleKey(k); handled {
+				s.result.ensureFocusVisible(&s.resultScroll, s.resultViewportH())
 				return cmd
 			}
 			// Unhandled keys while recording evidence are ignored.
@@ -244,11 +275,25 @@ func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 				} else {
 					s.tbl.MoveUp(1)
 				}
+				s.detailScroll.Reset()
+				s.notice = ""
 				s.syncButtons()
+				return nil
+			}
+			if s.zone == tzRight && s.right == "detail" {
+				// Scroll the detail pane independently; selection stays.
+				innerH := s.detailViewportH()
+				total := len(strings.Split(s.detailViewWH(30, 999), "\n"))
+				if k.String() == "j" || k.String() == "down" {
+					s.detailScroll.ScrollDown(total, innerH)
+				} else {
+					s.detailScroll.ScrollUp(total, innerH)
+				}
 				return nil
 			}
 			if s.zone == tzRight && s.right == "result" && s.result != nil {
 				if cmd, handled := s.result.HandleKey(k); handled {
+					s.result.ensureFocusVisible(&s.resultScroll, s.resultViewportH())
 					return cmd
 				}
 			}
@@ -258,6 +303,7 @@ func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 		if s.zone == tzRight && s.right == "result" && s.result != nil {
 			if k, ok := msg.(tea.KeyPressMsg); ok {
 				if cmd, handled := s.result.HandleKey(k); handled {
+					s.result.ensureFocusVisible(&s.resultScroll, s.resultViewportH())
 					return cmd
 				}
 			}
@@ -265,6 +311,29 @@ func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 	}
 	return nil
 }
+
+// resultViewportH estimates the visible result lines from the current
+// terminal size (same geometry as View).
+func (s *TodayScreen) resultViewportH() int {
+	_, h := s.app.contentViewport()
+	bodyH := h
+	if bodyH < 10 {
+		bodyH = 10
+	}
+	activeH := bodyH/2 - 1
+	if activeH < 6 {
+		activeH = bodyH / 2
+	}
+	bottomH := bodyH - activeH
+	innerH := bottomH - 4
+	if innerH < 3 {
+		innerH = 3
+	}
+	return innerH
+}
+
+// detailViewportH mirrors rightPanelFixed geometry for scrolling.
+func (s *TodayScreen) detailViewportH() int { return s.resultViewportH() }
 
 func (s *TodayScreen) pressEnter() tea.Cmd {
 	switch s.zone {
@@ -333,9 +402,12 @@ func (s *TodayScreen) rightPanelFixed(w, h int) string {
 		innerH = 3
 	}
 	if s.right == "result" && s.result != nil && s.taskOfResult() {
-		return PanelFixed("RESULT — EVIDENCE", s.result.ViewFor(w-4), w, h, s.zone == tzRight)
+		full := s.result.ViewFor(w - 4)
+		return PanelFixed("RESULT — EVIDENCE", ViewportView(full, &s.resultScroll, innerH), w, h, s.zone == tzRight)
 	}
-	return PanelFixed("SELECTED TASK", s.detailViewWH(w-4, innerH), w, h, s.zone == tzRight)
+	// Full detail (never compact-clipped here): the viewport scrolls instead.
+	full := s.detailViewWH(w-4, 999)
+	return PanelFixed("SELECTED TASK", ViewportView(full, &s.detailScroll, innerH), w, h, s.zone == tzRight)
 }
 
 // detailView is the test-compat wrapper (default inner width).
@@ -414,6 +486,22 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		return thMeta.Render("No tasks.")
 	}
 	t := s.tasks[s.tbl.CursorPos()]
+	// Completed tasks are viewable but never startable: read-only evidence,
+	// no Start action of any kind.
+	if st == TaskCompleted {
+		var sb strings.Builder
+		sb.WriteString(DomainBadge(string(t.Domain)) + "  " + thMeta.Render(string(t.Kind)) + "  " + StatusPill(st) + "\n")
+		sb.WriteString(thSuccess.Render("✓ DONE — READ-ONLY") + "\n")
+		sb.WriteString(div + "\n")
+		sb.WriteString(s.completedEvidenceView(inner, t, b) + "\n")
+		sb.WriteString(div + "\n")
+		if s.notice != "" {
+			sb.WriteString(thMeta.Render(s.notice) + "\n")
+		} else {
+			sb.WriteString(thHelp.Render("Enter views · Completed tasks cannot be started again.") + "\n")
+		}
+		return strings.TrimRight(sb.String(), "\n")
+	}
 	var sb strings.Builder
 	// Compact mode for short viewports: preserve title + planned + action.
 	if maxLines < 8 {
@@ -527,6 +615,161 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// completedEvidenceView renders persisted evidence for a DONE task as
+// human-readable read-only rows (no inputs, no SAVE, no Start). Durations
+// always carry units; raw storage integers are never exposed.
+func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bundle) string {
+	ctx := context.Background()
+	var sb strings.Builder
+	switch {
+	case b.Lecture != nil:
+		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Lecture.Subject, inner))) + "\n")
+		sb.WriteString(SectionHeader("LECTURE") + "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(b.Lecture.Topic, inner)) + "\n")
+		if b.Lecture.Lecture != "" {
+			sb.WriteString(thMeta.Render(TruncateToWidth(b.Lecture.Lecture, inner)) + "\n")
+		}
+		if comp, err := runtime.GetLectureCompletion(ctx, s.app.DB, b.Lecture.LectureID); err == nil {
+			sb.WriteString(MetaRow("Completed", FormatDate(comp.CompletedAt), 10))
+		} else {
+			sb.WriteString(thSuccess.Render("✓ Completed"))
+		}
+	case len(b.Practice) > 0:
+		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Practice[0].Subject, inner))) + "\n")
+		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TOPICS", len(b.Practice))) + "\n")
+		recs := s.practiceRecordsForTask(ctx, task.ID)
+		byTopic := map[string]db.GovPracticeRecord{}
+		for _, r := range recs {
+			byTopic[string(r.TopicID)] = r
+		}
+		for i, p := range b.Practice {
+			if i > 0 {
+				sb.WriteString("\n" + RowDivider(inner) + "\n")
+			}
+			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(p.Topic, inner-4))) + "\n")
+			if r, ok := byTopic[string(p.TopicID)]; ok {
+				sb.WriteString(MetaRow("Time spent", FormatDurationLong(r.TimeSpentSeconds), 12) + "\n")
+				sb.WriteString(MetaRow("Attempted", fmt.Sprint(r.Attempted), 12) + "\n")
+				sb.WriteString(MetaRow("Correct", fmt.Sprint(r.Correct), 12) + "\n")
+				avg := "—"
+				if r.AvgQuestionSpeedSeconds != nil {
+					avg = fmt.Sprintf("%.1fs", *r.AvgQuestionSpeedSeconds)
+				}
+				sb.WriteString(MetaRow("Avg speed", avg, 12))
+			} else {
+				sb.WriteString(thMeta.Render("—"))
+			}
+		}
+	case len(b.DSA) > 0:
+		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d PROBLEMS", len(b.DSA))) + "\n")
+		atts := s.dsaAttemptsForTask(ctx, task.ID)
+		latest := map[string]db.DSAAttempt{}
+		for _, a := range atts {
+			k := string(a.ProblemID)
+			if cur, ok := latest[k]; !ok || !a.AttemptedAt.Before(cur.AttemptedAt) {
+				latest[k] = a
+			}
+		}
+		for i, d := range b.DSA {
+			if i > 0 {
+				sb.WriteString("\n" + RowDivider(inner) + "\n")
+			}
+			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(d.Title, inner-8))) + "  " + thMeta.Render("["+string(d.Mode)+"]") + "\n")
+			if a, ok := latest[string(d.ProblemID)]; ok {
+				sb.WriteString(s.readOnlyCheckbox("Independent", a.Independent) + "\n")
+				sb.WriteString(s.readOnlyCheckbox("Optimal", a.Optimal) + "\n")
+				sb.WriteString(s.readOnlyCheckbox("Hint used", a.HintUsed) + "\n")
+				dur := "—"
+				if a.SolveTimeSeconds != nil {
+					dur = FormatDurationLong(*a.SolveTimeSeconds)
+				}
+				sb.WriteString(MetaRow("Solve time", dur, 12))
+			} else {
+				sb.WriteString(thMeta.Render("—"))
+			}
+		}
+	case len(b.SWE) > 0:
+		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TASKS", len(b.SWE))) + "\n")
+		execs := s.sweExecutionsForTask(ctx, task.ID)
+		latest := map[string]string{}
+		for _, e := range execs {
+			latest[string(e.TaskID)] = string(e.Status)
+		}
+		for i, sw := range b.SWE {
+			if i > 0 {
+				sb.WriteString("\n" + RowDivider(inner) + "\n")
+			}
+			label := sw.Task
+			if label == "" {
+				label = sw.Area
+			}
+			sb.WriteString(thPrimary.Render(TruncateToWidth(label, inner-2)) + "\n")
+			st := "—"
+			if sw.TaskID != nil {
+				if v, ok := latest[string(*sw.TaskID)]; ok {
+					st = v
+				}
+			}
+			sb.WriteString(thSuccess.Render("✓ " + st))
+		}
+	default:
+		sb.WriteString(thPrimary.Render(TruncateToWidth(task.Title, inner)))
+	}
+	return sb.String()
+}
+
+func (s *TodayScreen) readOnlyCheckbox(label string, checked bool) string {
+	glyph := thMeta.Render("□")
+	if checked {
+		glyph = thSuccess.Render("■")
+	}
+	return "  " + glyph + "  " + thPrimary.Render(label)
+}
+
+func (s *TodayScreen) taskSessionIDs(ctx context.Context, taskID db.ID) []db.ID {
+	sessList, err := runtime.ListSessions(ctx, s.app.DB)
+	if err != nil {
+		return nil
+	}
+	var out []db.ID
+	for _, sess := range sessList {
+		if sess.TodayTaskID == taskID && sess.Status != db.SessionStatusActive {
+			out = append(out, sess.ID)
+		}
+	}
+	return out
+}
+
+func (s *TodayScreen) practiceRecordsForTask(ctx context.Context, taskID db.ID) []db.GovPracticeRecord {
+	var out []db.GovPracticeRecord
+	for _, sid := range s.taskSessionIDs(ctx, taskID) {
+		if recs, err := runtime.GetGovPracticeRecordsBySession(ctx, s.app.DB, sid); err == nil {
+			out = append(out, recs...)
+		}
+	}
+	return out
+}
+
+func (s *TodayScreen) dsaAttemptsForTask(ctx context.Context, taskID db.ID) []db.DSAAttempt {
+	var out []db.DSAAttempt
+	for _, sid := range s.taskSessionIDs(ctx, taskID) {
+		if atts, err := runtime.GetDSAAttemptsBySession(ctx, s.app.DB, sid); err == nil {
+			out = append(out, atts...)
+		}
+	}
+	return out
+}
+
+func (s *TodayScreen) sweExecutionsForTask(ctx context.Context, taskID db.ID) []db.SWEExecution {
+	var out []db.SWEExecution
+	for _, sid := range s.taskSessionIDs(ctx, taskID) {
+		if execs, err := runtime.GetSWEExecutionsBySession(ctx, s.app.DB, sid); err == nil {
+			out = append(out, execs...)
+		}
+	}
+	return out
+}
+
 // stepZone moves pane focus left/right across tasks, session, detail.
 // The session pane is skipped when no session is active.
 func (s *TodayScreen) stepZone(d int) {
@@ -567,6 +810,7 @@ func (s *TodayScreen) onBack() bool {
 	if s.right == "result" {
 		s.right = "detail"
 		s.zone = tzTasks
+		s.resultScroll.Reset()
 		s.Reload()
 		return true
 	}

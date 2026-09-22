@@ -218,6 +218,136 @@ func ClipToHeight(s string, h int) string {
 	return strings.Join(lines, "\n")
 }
 
+// ---- System-wide scrollable panes ----
+//
+// ScrollViewport is the ONE shared scrollable-pane abstraction. Whenever
+// content exceeds its pane viewport, the pane scrolls independently;
+// focused items stay visible; unrelated panes never move. Lists (RowList,
+// TodayTaskTable) own equivalent viewport state internally; long detail,
+// report, and form bodies use ScrollViewport explicitly instead of one-off
+// clipping logic.
+type ScrollViewport struct {
+	Offset int // first visible content line
+}
+
+// Clamp keeps the offset inside the valid window for total content lines
+// and a visible height.
+func (v *ScrollViewport) Clamp(total, height int) {
+	if height < 1 {
+		height = 1
+	}
+	if total <= height {
+		v.Offset = 0
+		return
+	}
+	maxOff := total - height
+	if v.Offset > maxOff {
+		v.Offset = maxOff
+	}
+	if v.Offset < 0 {
+		v.Offset = 0
+	}
+}
+
+// ScrollDown moves one line down (clamped).
+func (v *ScrollViewport) ScrollDown(total, height int) {
+	v.Offset++
+	v.Clamp(total, height)
+}
+
+// ScrollUp moves one line up (clamped).
+func (v *ScrollViewport) ScrollUp(total, height int) {
+	v.Offset--
+	v.Clamp(total, height)
+}
+
+// Reset returns to the top.
+func (v *ScrollViewport) Reset() { v.Offset = 0 }
+
+// ViewportLines slices content lines to a visible window of height lines,
+// reserving hint rows (↑ more above / ↓ more below) when overflow exists.
+// It always returns exactly height lines (padded with blanks).
+func ViewportLines(content string, offset, height int) []string {
+	if height < 1 {
+		height = 1
+	}
+	lines := strings.Split(content, "\n")
+	total := len(lines)
+	if total <= height {
+		out := make([]string, 0, height)
+		out = append(out, lines...)
+		for len(out) < height {
+			out = append(out, "")
+		}
+		return out
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	// Reserve hint rows inside the height budget.
+	above := offset > 0
+	// Peek whether content remains below the window.
+	below := offset+height < total
+	reserved := 0
+	if above {
+		reserved++
+	}
+	if below {
+		reserved++
+	}
+	win := height - reserved
+	if win < 1 {
+		win = 1
+	}
+	if offset > total-win {
+		offset = total - win
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	// Recompute flags against the adjusted window.
+	above = offset > 0
+	below = offset+win < total
+	out := make([]string, 0, height)
+	if above {
+		out = append(out, thHelp.Render("↑ more above"))
+	}
+	end := offset + win
+	if end > total {
+		end = total
+	}
+	out = append(out, lines[offset:end]...)
+	for len(out) < height-(boolToInt(below)) {
+		out = append(out, "")
+	}
+	if below {
+		out = append(out, thHelp.Render("↓ more below"))
+	}
+	for len(out) < height {
+		out = append(out, "")
+	}
+	if len(out) > height {
+		out = out[:height]
+	}
+	return out
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ViewportView renders content through a ScrollViewport into exactly height
+// lines, updating the clamp. It is the single entry point panes use instead
+// of raw ClipToHeight when scrolling applies.
+func ViewportView(content string, vp *ScrollViewport, height int) string {
+	total := len(strings.Split(content, "\n"))
+	vp.Clamp(total, height)
+	return strings.Join(ViewportLines(content, vp.Offset, height), "\n")
+}
+
 // PanelFixed renders a bento card forced to an exact total height (including
 // borders). Content is clipped or padded so side-by-side panels stay aligned
 // and never push the footer out of the viewport.

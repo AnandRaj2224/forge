@@ -112,3 +112,15 @@ FROM today_tasks WHERE id = ?`, id).Scan(
 	}
 	return t, nil
 }
+
+// CanStartTodayTask is the authoritative domain rule: a completed Today
+// task (stopped-session evidence persisted) must not be executable again.
+// It returns false with a reason when starting is forbidden. The UI must
+// reflect this (no Start action) but must never be the only enforcement:
+// callers creating sessions must consult this first.
+func CanStartTodayTask(ctx context.Context, q db.DBTX, taskID db.ID) (bool, string) {
+	if taskHasEvidence(ctx, q, taskID) {
+		return false, "task already complete — result is read-only"
+	}
+	return true, ""
+}

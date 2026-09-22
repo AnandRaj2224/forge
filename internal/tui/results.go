@@ -74,14 +74,14 @@ func (s *ResultForm) Reload(sessionID string, task db.TodayTask) {
 	case "PRACTICE":
 		for _, p := range s.bundle.Practice {
 			s.prows = append(s.prows, PracticeRow{TopicID: p.TopicID, Topic: p.Topic,
-				Time: NewField("Time", "1380", 8), Att: NewField("Attempted", "20", 8),
+				Time: NewField("Time", "20m", 8), Att: NewField("Attempted", "20", 8),
 				Corr: NewField("Correct", "16", 8), Avg: NewField("Avg speed", "17.2", 8)})
 		}
 	case "DSA":
 		for _, d := range s.bundle.DSA {
 			s.drows = append(s.drows, DSARow{ProblemID: d.ProblemID, Title: d.Title, Mode: d.Mode,
 				Indep: Checkbox{Label: "Independent"}, Optimal: Checkbox{Label: "Optimal"},
-				Hint: Checkbox{Label: "Hint used"}, Solve: NewField("Solve time", "300", 8)})
+				Hint: Checkbox{Label: "Hint used"}, Solve: NewField("Solve time", "5m", 8)})
 		}
 	case "SWE":
 		for _, sw := range s.bundle.SWE {
@@ -229,8 +229,9 @@ func (s *ResultForm) updateFocusVisual() {
 }
 
 // textFocus reports whether the focused widget is a text input. While a
-// text field owns focus, letter keys (including q) type instead of acting
-// as global keys; q backs out of the form from non-text widgets.
+// text field owns focus, letter keys (including q/s/x) type instead of
+// acting as global keys. Esc cancels the form via the app (never quits);
+// the app footer switches to Esc Cancel / Enter Save while editing.
 func (s *ResultForm) textFocus() bool {
 	switch s.kind {
 	case "PRACTICE":
@@ -252,6 +253,60 @@ func (s *ResultForm) moveFocus(d int) {
 	}
 	s.focus = (s.focus + d + n) % n
 	s.updateFocusVisual()
+}
+
+// focusLine returns the 0-based content line of the focused widget inside
+// ViewFor output (line count is width-independent: rows never wrap).
+func (s *ResultForm) focusLine() int {
+	f := s.focus
+	switch s.kind {
+	case "LECTURE":
+		if f <= 0 {
+			return 2 // first radio option
+		}
+		return 5 // SAVE box first line
+	case "PRACTICE":
+		n := len(s.prows)
+		if f < n*4 {
+			r, c := f/4, f%4
+			base := 1 + r*5
+			if c < 2 {
+				return base + 2
+			}
+			return base + 3
+		}
+		return n*5 + 2 // SAVE box first line
+	case "DSA":
+		m := len(s.drows)
+		if f < m*4 {
+			r, c := f/4, f%4
+			return 1 + r*7 + 2 + c
+		}
+		return m*7 + 2 // SAVE box first line
+	case "SWE":
+		n := len(s.srows)
+		if f < n {
+			return 1 + f*6 + 2 // first radio option of task f
+		}
+		return n*6 + 2 // SAVE box first line
+	}
+	return 0
+}
+
+// ensureFocusVisible scrolls vp just enough to keep the focused field
+// visible. The focused item/field is never hidden below the viewport.
+func (s *ResultForm) ensureFocusVisible(vp *ScrollViewport, height int) {
+	if vp == nil {
+		return
+	}
+	total := len(strings.Split(s.ViewFor(30), "\n"))
+	fl := s.focusLine()
+	if fl < vp.Offset {
+		vp.Offset = fl
+	} else if fl > vp.Offset+height-1 {
+		vp.Offset = fl - height + 1
+	}
+	vp.Clamp(total, height)
 }
 
 // HandleKey processes a key when the result panel owns focus.
@@ -455,10 +510,10 @@ func (s *ResultForm) ViewFor(inner int) string {
 			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(r.Topic, inner-4))) + "\n")
 			sb.WriteString("  " + r.Time.View(s.focus == fbase, 9) + "  " + r.Att.View(s.focus == fbase+1, 9) + "\n")
 			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 9) + "  " + r.Avg.View(s.focus == fbase+3, 9) + "\n")
-			if _, _, _, _, msg := ValidatePracticeRow(r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value()); msg != "" {
+			if tSecs, _, _, _, msg := ValidatePracticeRow(r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value()); msg != "" {
 				sb.WriteString("  " + thError.Render("✕ "+msg) + "\n")
 			} else {
-				sb.WriteString("  " + thSuccess.Render("✓ valid") + "\n")
+				sb.WriteString("  " + thSuccess.Render("✓ "+FormatDurationLong(tSecs)) + "\n")
 			}
 		}
 	case "DSA":
@@ -472,10 +527,14 @@ func (s *ResultForm) ViewFor(inner int) string {
 			sb.WriteString("  " + r.Hint.View() + "\n")
 			sb.WriteString("  " + r.Solve.View(s.focus == fbase+3, 10) + "\n")
 			_ = fbase
-			if _, _, msg := ValidateSolveTime(r.Solve.Input.Value()); msg != "" {
+			if _, solveSecs, msg := ValidateSolveTime(r.Solve.Input.Value()); msg != "" {
 				sb.WriteString("  " + thError.Render("✕ "+msg) + "\n")
 			} else {
-				sb.WriteString("  " + thSuccess.Render("✓ valid") + "\n")
+				dur := ""
+				if solveSecs != nil {
+					dur = FormatDurationLong(*solveSecs)
+				}
+				sb.WriteString("  " + thSuccess.Render("✓ "+dur) + "  " + thMeta.Render("e.g. 30s, 5m, 1h 15m") + "\n")
 			}
 		}
 	case "SWE":
@@ -500,6 +559,6 @@ func (s *ResultForm) ViewFor(inner int) string {
 	if s.err != "" {
 		sb.WriteString(thError.Render(s.err) + "\n")
 	}
-	sb.WriteString(thHelp.Render("↑/↓ move · Space toggle · Enter SAVE"))
+	sb.WriteString(thHelp.Render("↑/↓·j/k move · Space toggle · Enter SAVE"))
 	return sb.String()
 }

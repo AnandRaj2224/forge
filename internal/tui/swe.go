@@ -28,6 +28,7 @@ type SWEScreen struct {
 	taskList Navigator
 	focusR   bool
 	detail   *SWETaskDetail
+	detailScroll ScrollViewport // task pane scrolls independently when overflowing
 	showing  string // "area" or "task"
 	err      string
 }
@@ -119,6 +120,7 @@ func (s *SWEScreen) openTask(areaID, taskID string) {
 			done, _ := runtime.IsSWETaskComplete(ctx, s.app.DB, t.ID)
 			s.detail = &SWETaskDetail{Area: area, Task: t, History: hist, Done: done}
 			s.showing = "task"
+			s.detailScroll.Reset()
 			return
 		}
 	}
@@ -159,6 +161,27 @@ func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 			up := k.String() == "k" || k.String() == "up"
 			left := k.String() == "h" || k.String() == "left"
 			right := k.String() == "l" || k.String() == "right"
+			if s.showing == "task" {
+				// Scroll the task pane independently.
+				if down || up {
+					_, h := s.app.contentViewport()
+					bodyH := h
+					if bodyH < 8 {
+						bodyH = 8
+					}
+					innerH := bodyH - 4
+					if innerH < 4 {
+						innerH = 4
+					}
+					total := len(strings.Split(s.taskBody(40), "\n"))
+					if down {
+						s.detailScroll.ScrollDown(total, innerH)
+					} else {
+						s.detailScroll.ScrollUp(total, innerH)
+					}
+				}
+				return nil
+			}
 			if s.focusR {
 				if down {
 					s.taskList.CursorDown()
@@ -208,7 +231,7 @@ func (s *SWEScreen) View() string {
 	s.taskList.SetFocused(s.focusR)
 	var right string
 	if s.showing == "task" {
-		right = PanelFixed("TASK", s.taskBody(rw-6), rw, bodyH, true)
+		right = PanelFixed("TASK", ViewportView(s.taskBody(rw-6), &s.detailScroll, innerH), rw, bodyH, true)
 	} else if a := s.selArea(); a != nil {
 		pr := ComputeSWEProgress(context.Background(), s.app.DB, *a)
 		r := 0.0

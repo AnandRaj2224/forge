@@ -89,6 +89,65 @@ func NewApp(database *db.DB) *App {
 
 func (a *App) ctx() context.Context { return context.Background() }
 
+// formMode reports whether a form owns the keyboard and whether a text
+// input owns focus (explicit input/edit mode). While a form is active,
+// global navigation shortcuts must not steal typed characters; q types as
+// text when editing, Esc cancels the form (never quits Forge).
+func (a *App) formMode() (inForm, textEditing bool) {
+	switch a.tab {
+	case TabToday:
+		if a.today.right == "result" && a.today.result != nil {
+			return true, a.today.result.textFocus()
+		}
+		return false, false
+	case TabMocks:
+		if a.mocks.ownsKeys() {
+			return true, a.mocks.textEditing()
+		}
+		return false, false
+	case TabReviews:
+		if a.reviews.editing {
+			return true, a.reviews.textFocus()
+		}
+		return false, false
+	}
+	return false, false
+}
+
+// cancelForm routes Esc to the owning form/workspace (never quits).
+func (a *App) cancelForm() bool {
+	switch a.tab {
+	case TabToday:
+		return a.today.onBack()
+	case TabMocks:
+		return a.mocks.onBack()
+	case TabReviews:
+		return a.reviews.onBack()
+	}
+	return false
+}
+
+func (a *App) forwardToScreen(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	switch a.tab {
+	case TabToday:
+		cmd = a.today.Update(msg)
+	case TabGOV:
+		cmd = a.gov.Update(msg)
+	case TabDSA:
+		cmd = a.dsa.Update(msg)
+	case TabSWE:
+		cmd = a.swe.Update(msg)
+	case TabMocks:
+		cmd = a.mocks.Update(msg)
+	case TabHistory:
+		cmd = a.history.Update(msg)
+	case TabReviews:
+		cmd = a.reviews.Update(msg)
+	}
+	return cmd
+}
+
 func (a *App) goTab(t TopTab) {
 	a.tab = t
 	a.reloadCurrent()
@@ -146,35 +205,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case tea.KeyPressMsg:
 		ks := m.String()
-		// Forms own typing keys: digits and letters (including q/s/x) must
-		// reach text inputs instead of triggering global keys. Esc/Ctrl+C
-		// always quit globally. q backs out only from non-text widgets.
-		inForm := a.tab == TabToday && a.today.zone == tzRight && a.today.right == "result" && a.today.result != nil
-		inMockForm := a.tab == TabMocks && a.mocks.ownsKeys()
-		inReviewEdit := a.tab == TabReviews && a.reviews.editing
-		if !IsQuit(ks) {
-			if inForm {
-				if IsBack(ks) && !a.today.result.textFocus() {
-					// fall through to Back below
-				} else {
-					break
-				}
-			} else if inReviewEdit {
-				if IsBack(ks) && !a.reviews.textFocus() {
-					// fall through to Back below (exits editing)
-				} else {
-					break
-				}
-			} else if inMockForm {
-				if IsBack(ks) && a.mocks.qBacksOut() {
-					// fall through to Back below
-				} else {
-					break
-				}
+		// Form/editing modes own the keyboard: typed characters (including
+		// q/s/x/digits) must reach text inputs instead of triggering global
+		// keys. Esc cancels/leaves the form (never quits). Ctrl+C quits.
+		if inForm, _ := a.formMode(); inForm {
+			if ks == "ctrl+c" {
+				return a, func() tea.Msg { return tea.Quit() }
 			}
+			if IsBack(ks) { // Esc → cancel/leave input/form
+				a.cancelForm()
+				return a, nil
+			}
+			return a, a.forwardToScreen(msg)
 		}
 		switch {
-		case IsQuit(ks):
+		case IsQuit(ks): // q or Ctrl+C in normal navigation quits
 			return a, func() tea.Msg { return tea.Quit() }
 		case ks == "1":
 			a.goTab(TabToday)
@@ -416,8 +461,28 @@ func joinHeader(brand string, nav []string, active, clock string, w int, gap str
 	return left + strings.Repeat(" ", sp) + right
 }
 
-// footerView is the ONE shared global footer: a single centered row of
-// uniform key badges with action labels. Identical on every screen:
-// actions only, no metadata, never wraps vertically.
-func (a *App) footerView(w int) string { return GlobalFooter(w) }
+// footerView is the shared shell footer. In normal navigation it is the ONE
+// identical global command bar on every tab. While a form owns the keyboard
+// it switches to the explicit input/editing bar (Esc Cancel, Enter Save —
+// never "Q Quit"). When a completed Today task is selected, Start is not
+// advertised.
+func (a *App) footerView(w int) string {
+	if inForm, _ := a.formMode(); inForm {
+		return InputModeFooter(w)
+	}
+	if a.tab == TabToday && a.todayDoneSelected() {
+		return TodayDoneFooter(w)
+	}
+	return GlobalFooter(w)
+}
+
+// todayDoneSelected reports whether Today shows a completed task (Start
+// must not be offered there).
+func (a *App) todayDoneSelected() bool {
+	if a.tab != TabToday || a.today.right != "detail" {
+		return false
+	}
+	_, st, _, ok := a.today.selected()
+	return ok && st == TaskCompleted
+}
 

@@ -28,6 +28,7 @@ type DSAScreen struct {
 	qList    Navigator
 	focusR   bool
 	detail   *DSAProblemDetail
+	detailScroll ScrollViewport // problem pane scrolls independently when overflowing
 	showing  string // "pattern" or "problem"
 	err      string
 }
@@ -99,6 +100,7 @@ func (s *DSAScreen) openProblem(pid string) {
 	}
 	s.detail = &DSAProblemDetail{Problem: p, Passed: DSAPassUI(att), Last: LastAttempt(att), Review: rev}
 	s.showing = "problem"
+	s.detailScroll.Reset()
 }
 
 // onBack pops the problem panel first. True = consumed.
@@ -145,6 +147,27 @@ func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 			up := k.String() == "k" || k.String() == "up"
 			left := k.String() == "h" || k.String() == "left"
 			right := k.String() == "l" || k.String() == "right"
+			if s.showing == "problem" {
+				// Scroll the problem pane independently.
+				if down || up {
+					_, h := s.app.contentViewport()
+					bodyH := h
+					if bodyH < 8 {
+						bodyH = 8
+					}
+					innerH := bodyH - 4
+					if innerH < 4 {
+						innerH = 4
+					}
+					total := len(strings.Split(s.problemBody(40), "\n"))
+					if down {
+						s.detailScroll.ScrollDown(total, innerH)
+					} else {
+						s.detailScroll.ScrollUp(total, innerH)
+					}
+				}
+				return nil
+			}
 			if s.focusR {
 				if down {
 					s.qList.CursorDown()
@@ -195,7 +218,7 @@ func (s *DSAScreen) View() string {
 	p := s.selPattern()
 	var right string
 	if s.showing == "problem" {
-		right = PanelFixed("PROBLEM", s.problemBody(rw-6), rw, bodyH, true)
+		right = PanelFixed("PROBLEM", ViewportView(s.problemBody(rw-6), &s.detailScroll, innerH), rw, bodyH, true)
 	} else if p != nil {
 		done, total := s.patternProgress(p)
 		r := 0.0

@@ -32,6 +32,7 @@ type ReviewsScreen struct {
 	editing  bool // reflection editing mode
 	editFoc  int  // editing focus (0 worked, 1 change, 2 save)
 	editIn   [2]textinput.Model
+	bodyScroll ScrollViewport // report pane scrolls independently when overflowing
 	nowFn    func() time.Time
 	err      string
 }
@@ -133,6 +134,7 @@ func sortWeekEntries(entries []weekEntry) {
 func (s *ReviewsScreen) syncSelected() {
 	s.editing = false
 	s.editCur = 0
+	s.bodyScroll.Reset()
 	id := s.weeks.SelectedID()
 	if id == "" {
 		s.selected = nil
@@ -169,7 +171,7 @@ func (s *ReviewsScreen) syncSelected() {
 }
 
 // textFocus reports whether a reflection text input owns focus (letters
-// type there; q backs out only from the SAVE button).
+// type there, including q; Esc cancels editing via the app, never quits).
 func (s *ReviewsScreen) textFocus() bool { return s.editing && s.editFoc < 2 }
 
 func (s *ReviewsScreen) onBack() bool {
@@ -203,6 +205,7 @@ func (s *ReviewsScreen) startEditing() {
 		s.editFoc = 0
 	}
 	s.editing = true
+	s.bodyScroll.Offset = 1 << 30 // clamped on render: inputs stay visible
 	s.updateEditFocus()
 }
 
@@ -281,29 +284,40 @@ func (s *ReviewsScreen) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	switch {
-	case IsMoveDown(ks):
-		if s.focusR {
-			if s.editCur < 1 {
-				s.editCur++
+	case IsMoveDown(ks) || IsMoveUp(ks):
+		down := IsMoveDown(ks)
+		arrow := ks == "down" || ks == "up"
+		if s.focusR && !s.editing {
+			// j/k scrolls the report independently; ↑/↓ moves the
+			// reflection cursor. Both keep the focused content visible.
+			if !arrow {
+				inner, total := s.reportViewportH(), len(strings.Split(s.reportView(40), "\n"))
+				if down {
+					s.bodyScroll.ScrollDown(total, inner)
+				} else {
+					s.bodyScroll.ScrollUp(total, inner)
+				}
+				return nil
 			}
-		} else {
-			prev := s.weeks.SelectedID()
-			s.weeks.CursorDown()
-			if s.weeks.SelectedID() != prev {
-				s.syncSelected()
-			}
-		}
-		return nil
-	case IsMoveUp(ks):
-		if s.focusR {
-			if s.editCur > 0 {
+			if down {
+				if s.editCur < 1 {
+					s.editCur++
+				}
+			} else if s.editCur > 0 {
 				s.editCur--
 			}
-		} else {
+			return nil
+		}
+		if !s.focusR {
 			prev := s.weeks.SelectedID()
-			s.weeks.CursorUp()
+			if down {
+				s.weeks.CursorDown()
+			} else {
+				s.weeks.CursorUp()
+			}
 			if s.weeks.SelectedID() != prev {
 				s.syncSelected()
+				s.bodyScroll.Reset()
 			}
 		}
 		return nil
@@ -342,8 +356,22 @@ func (s *ReviewsScreen) View() string {
 	s.weeks.SetFocused(!s.focusR)
 	return lipglossJoin(
 		PanelFixed("REVIEWS", SectionHeader("WEEKLY REVIEWS")+"\n"+s.weeks.View(), lw, bodyH, !s.focusR),
-		PanelFixed("WEEKLY REPORT", s.reportView(rw-6), rw, bodyH, s.focusR),
+		PanelFixed("WEEKLY REPORT", ViewportView(s.reportView(rw-6), &s.bodyScroll, innerH), rw, bodyH, s.focusR),
 	)
+}
+
+// reportViewportH mirrors View geometry for scrolling.
+func (s *ReviewsScreen) reportViewportH() int {
+	_, h := s.app.contentViewport()
+	bodyH := h
+	if bodyH < 8 {
+		bodyH = 8
+	}
+	innerH := bodyH - 4
+	if innerH < 4 {
+		innerH = 4
+	}
+	return innerH
 }
 
 func (s *ReviewsScreen) reportView(inner int) string {
@@ -371,11 +399,17 @@ func (s *ReviewsScreen) reportView(inner int) string {
 	tasksValue := "—"
 	if ev.TasksTotal > 0 {
 		completion = fmt.Sprintf("%.0f%%", float64(ev.Tasks)/float64(ev.TasksTotal)*100)
-		tasksValue = fmt.Sprintf("%d / %d", ev.Tasks, ev.TasksTotal)
+		tasksValue = fmt.Sprintf("%d of %d", ev.Tasks, ev.TasksTotal)
+	}
+	// TIME CONTEXT on the title line: this week vs selected week + date range.
+	contextTag := "SELECTED WEEK"
+	if cur := lastWeeks(s.nowFn(), 1); len(cur) > 0 && cur[0].ID == r.ID {
+		contextTag = "THIS WEEK"
 	}
 	var sb strings.Builder
-	sb.WriteString(thScreenTitle.Render(FormatDateRange(r.WeekStart, r.WeekEnd)) + "  " + thMeta.Render(r.ID) + "\n")
-	// Compact metric cards: PLANNED ACTUAL COMPLETION SESSIONS TASKS OVER/UNDER.
+	sb.WriteString(thScreenTitle.Render("WEEKLY REVIEW") + "\n")
+	sb.WriteString(thPrimary.Render(FormatDateRange(r.WeekStart, r.WeekEnd)) + "  " + thMeta.Render(r.ID+" · "+contextTag) + "\n")
+	// Compact metric bento: PLANNED ACTUAL COMPLETION SESSIONS TASKS OVER/UNDER.
 	cards := []MetricCard{
 		{Label: "PLANNED", Value: FormatDurationLong(planned)},
 		{Label: "ACTUAL", Value: FormatDurationLong(actual)},
@@ -389,49 +423,79 @@ func (s *ReviewsScreen) reportView(inner int) string {
 	sb.WriteString(SectionHeader("TIME BY DOMAIN") + "\n")
 	total := ev.GovSeconds + ev.DSASeconds + ev.SWESeconds
 	sb.WriteString(MetricGrid([]MetricCard{
-		{Label: "GOV", Value: FormatDurationLong(ev.GovSeconds) + " · " + pctOf(ev.GovSeconds, total), Accent: cGov},
-		{Label: "DSA", Value: FormatDurationLong(ev.DSASeconds) + " · " + pctOf(ev.DSASeconds, total), Accent: cDSA},
-		{Label: "SWE", Value: FormatDurationLong(ev.SWESeconds) + " · " + pctOf(ev.SWESeconds, total), Accent: cSWE},
+		{Label: "GOV", Value: FormatDurationLong(ev.GovSeconds) + " · " + pctOf(ev.GovSeconds, total) + " of week", Accent: cGov},
+		{Label: "DSA", Value: FormatDurationLong(ev.DSASeconds) + " · " + pctOf(ev.DSASeconds, total) + " of week", Accent: cDSA},
+		{Label: "SWE", Value: FormatDurationLong(ev.SWESeconds) + " · " + pctOf(ev.SWESeconds, total) + " of week", Accent: cSWE},
 	}, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
-	sb.WriteString(SectionHeader("DOMAIN EVIDENCE") + "\n")
-	sb.WriteString(s.govEvidenceBlock(ctx, r.WeekStart, r.WeekEnd, ev, inner))
-	sb.WriteString(EvidenceRow("DSA", []StatPair{
-		{"Problems", fmt.Sprint(ev.DSAAttempts)},
+	// Explicit temporal context for domain evidence.
+	summaryHeader := strings.ToUpper(r.ID) + " · DOMAIN SUMMARY"
+	if contextTag == "THIS WEEK" {
+		summaryHeader = "THIS WEEK · DOMAIN SUMMARY"
+	}
+	sb.WriteString(SectionHeader(summaryHeader) + "\n")
+	govBlock := s.govPerformanceBlock(ctx, r.WeekStart, r.WeekEnd, ev)
+	dsaNotPassed := ev.DSAAttempts - ev.DSAPassed
+	if dsaNotPassed < 0 {
+		dsaNotPassed = 0
+	}
+	dsaBlock := DomainDetailBlock("DSA", "DSA PERFORMANCE", []StatPair{
+		{"Problems attempted", fmt.Sprint(ev.DSAAttempts)},
 		{"Passed", fmt.Sprint(ev.DSAPassed)},
-	}) + "\n")
-	sb.WriteString(EvidenceRow("SWE", []StatPair{
+		{"Not passed", fmt.Sprint(dsaNotPassed)},
+	})
+	sweBlock := DomainDetailBlock("SWE", "SWE EXECUTION", []StatPair{
 		{"Completed", fmt.Sprint(ev.SWECompleted)},
 		{"Partial", fmt.Sprint(ev.SWEPartial)},
 		{"Blocked", fmt.Sprint(ev.SWEBlocked)},
-	}) + "\n")
-	sb.WriteString(SectionHeader("USER REFLECTIONS") + "\n")
+	})
+	sb.WriteString(JoinDetailBlocks([]string{govBlock, dsaBlock, sweBlock}, inner) + "\n")
+	sb.WriteString(RowDivider(inner) + "\n")
+	sb.WriteString(SectionHeader("REFLECTIONS") + "\n")
 	sb.WriteString(s.reflectionsBlock(inner) + "\n")
 	return sb.String()
 }
 
-// govEvidenceBlock renders subject-aware GOV evidence: one Lectures /
-// Practice Questions / Accuracy row per subject with evidence, plus the
-// aggregate zero row when the week has none.
-func (s *ReviewsScreen) govEvidenceBlock(ctx context.Context, start, end string, ev runtime.WeeklyEvidence, inner int) string {
-	var sb strings.Builder
+// govPerformanceBlock renders structured GOV performance: aggregate rows when
+// no subject evidence, otherwise per-subject sections with explicit units:
+//
+//	Quant
+//	  1 lecture completed
+//	  206 questions attempted
+//	  145 correct · 61 incorrect
+//	  70.4% accuracy
+func (s *ReviewsScreen) govPerformanceBlock(ctx context.Context, start, end string, ev runtime.WeeklyEvidence) string {
 	subs := runtime.ComputeWeeklyGovSubjects(ctx, s.app.DB, start, end)
 	if len(subs) == 0 {
-		sb.WriteString(EvidenceRow("GOV", []StatPair{
-			{"Lectures", fmt.Sprint(ev.GovLectures)},
-			{"Questions", fmt.Sprint(ev.GovAttempted)},
+		return DomainDetailBlock("GOV", "GOV PERFORMANCE", []StatPair{
+			{"Lectures completed", fmt.Sprint(ev.GovLectures)},
+			{"Questions attempted", fmt.Sprint(ev.GovAttempted)},
+			{"Questions correct", fmt.Sprint(ev.GovCorrect)},
+			{"Questions incorrect", fmt.Sprint(ev.GovAttempted - ev.GovCorrect)},
 			{"Accuracy", fmtAcc(ev.GovAccuracy, ev.GovAttempted)},
-		}) + "\n")
-		return sb.String()
+		})
 	}
-	sb.WriteString(DomainStyle("GOV").Render("GOV") + "\n")
+	var sb strings.Builder
+	sb.WriteString(DomainStyle("GOV").Render("GOV PERFORMANCE"))
 	for _, g := range subs {
-		sb.WriteString("  " + thPrimary.Render(TruncateToWidth(g.Subject, 12)) +
-			"   " + thMeta.Render(padRight("Lectures", 9)) + " " + thPrimary.Render(fmt.Sprint(g.Lectures)) +
-			"   " + thMeta.Render(padRight("Questions", 9)) + " " + thPrimary.Render(fmt.Sprint(g.Attempted)) +
-			"   " + thMeta.Render(padRight("Accuracy", 9)) + " " + thPrimary.Render(fmtAcc(g.Accuracy, g.Attempted)) + "\n")
+		sb.WriteString("\n" + thPrimary.Render(TruncateToWidth(g.Subject, 18)))
+		lecLine := fmt.Sprintf("%d lectures completed", g.Lectures)
+		if g.Lectures == 1 {
+			lecLine = "1 lecture completed"
+		}
+		qLine := fmt.Sprintf("%d questions attempted", g.Attempted)
+		if g.Attempted == 1 {
+			qLine = "1 question attempted"
+		}
+		incorrect := g.Attempted - g.Correct
+		cLine := fmt.Sprintf("%d correct · %d incorrect", g.Correct, incorrect)
+		accLine := fmtAcc(g.Accuracy, g.Attempted) + " accuracy"
+		sb.WriteString("\n" + MetaRow("  ", lecLine, 2))
+		sb.WriteString("\n" + MetaRow("  ", qLine, 2))
+		sb.WriteString("\n" + MetaRow("  ", cLine, 2))
+		sb.WriteString("\n" + MetaRow("  ", accLine, 2))
 	}
-	return TruncateToWidth(sb.String(), inner)
+	return sb.String()
 }
 
 // reflectionsBlock renders the two user reflections: selectable rows in
@@ -486,10 +550,14 @@ func (s *ReviewsScreen) reflectionsBlock(inner int) string {
 	return sb.String()
 }
 
-// formatSignedLong renders signed metric durations: -600->"-10m".
+// formatSignedLong renders signed metric durations: -600->"-10m",
+// +660->"+11m", 0->"0s".
 func formatSignedLong(secs int) string {
 	if secs < 0 {
 		return "-" + FormatDurationLong(-secs)
+	}
+	if secs > 0 {
+		return "+" + FormatDurationLong(secs)
 	}
 	return FormatDurationLong(secs)
 }
