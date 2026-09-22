@@ -10,7 +10,8 @@ import (
 	"forge/internal/db/runtime"
 )
 
-// q in normal navigation quits; Esc backs out (never quits); Ctrl+C quits.
+// q in normal navigation backs out (never quits); Esc backs out (never
+// quits); Ctrl+C quits everywhere. Text inputs take q literally.
 func TestNormalQQuitsEscBacks(t *testing.T) {
 	app := newFlowApp(t)
 	app.width, app.height = 120, 36
@@ -32,13 +33,26 @@ func TestNormalQQuitsEscBacks(t *testing.T) {
 	if app.gov.level != govExam {
 		t.Fatalf("Esc must back to exam, got %q", app.gov.level)
 	}
+	// q backs (not quits) in nested navigation.
 	_, cmd = app.Update(testKey("q"))
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			if _, isQuit := msg.(tea.QuitMsg); isQuit {
+				t.Fatalf("q must not quit (it backs): got Quit")
+			}
+		}
+	}
+	if app.gov.level != govDashboard {
+		t.Fatalf("q must back to dashboard, got %q", app.gov.level)
+	}
+	// Ctrl+C quits everywhere.
+	_, cmd = app.Update(testKey("ctrl+c"))
 	if cmd == nil {
-		t.Fatal("q in normal mode must quit")
+		t.Fatal("Ctrl+C must quit")
 	}
 	if msg := cmd(); msg != nil {
 		if _, isQuit := msg.(tea.QuitMsg); !isQuit {
-			t.Fatalf("q must produce Quit, got %T", msg)
+			t.Fatalf("Ctrl+C must produce Quit, got %T", msg)
 		}
 	}
 }
@@ -54,13 +68,13 @@ func TestFormQTypesEscCancelsEnterSaves(t *testing.T) {
 	if app.today.right != "result" {
 		t.Fatalf("setup: want practice form, got %q", app.today.right)
 	}
-	// Footer must reflect input mode: Cancel/Save, never Q Quit.
+	// Static legend everywhere: BACK/SAVE present, never Q Quit.
 	foot := stripANSIForTest(app.footerView(app.width))
-	if strings.Contains(foot, "Q") && strings.Contains(foot, "Quit") {
-		t.Fatalf("editing footer must not show Q Quit: %q", foot)
+	if strings.Contains(foot, "Q Quit") {
+		t.Fatalf("static footer must not show Q Quit: %q", foot)
 	}
-	if !strings.Contains(foot, "Cancel") || !strings.Contains(foot, "Save") {
-		t.Fatalf("editing footer must show Cancel/Save: %q", foot)
+	if !strings.Contains(foot, "BACK") || !strings.Contains(foot, "SAVE") {
+		t.Fatalf("static footer must show BACK/SAVE legend: %q", foot)
 	}
 	// q types.
 	testSend(app, "q")
@@ -87,7 +101,7 @@ func TestFormQTypesEscCancelsEnterSaves(t *testing.T) {
 // Completed tasks: viewable read-only, never startable (domain + UI).
 func TestCompletedTaskCannotStart(t *testing.T) {
 	app := newFlowApp(t)
-	app.width, app.height = 120, 36
+	app.width, app.height = 150, 40
 	app.reloadCurrent()
 	// Complete the lecture task.
 	testSend(app, "s")
@@ -116,11 +130,11 @@ func TestCompletedTaskCannotStart(t *testing.T) {
 		t.Fatalf("DONE detail must not show Start:\n%s", detail)
 	}
 	foot := stripANSIForTest(app.footerView(app.width))
-	if strings.Contains(foot, "Start") {
-		t.Fatalf("footer must not advertise Start for DONE: %q", foot)
-	}
-	if !strings.Contains(foot, "View") {
-		t.Fatalf("DONE footer should offer Enter View: %q", foot)
+	// Static legend always carries the full command set, even for DONE.
+	for _, want := range []string{"N", "NEW", "S", "START", "X", "STOP", "VIEW"} {
+		if !strings.Contains(foot, want) {
+			t.Fatalf("static footer must carry legend %q: %q", want, foot)
+		}
 	}
 	// s is rejected safely: no new session, task stays DONE, no red error —
 	// just a small neutral contextual note.

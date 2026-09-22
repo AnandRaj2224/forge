@@ -22,15 +22,15 @@ type DSAProblemDetail struct {
 }
 
 type DSAScreen struct {
-	app      *App
-	patterns []DSAPattern
-	patList  Navigator
-	qList    Navigator
-	focusR   bool
-	detail   *DSAProblemDetail
+	app          *App
+	patterns     []DSAPattern
+	patList      Navigator
+	qList        Navigator
+	focusR       bool
+	detail       *DSAProblemDetail
 	detailScroll ScrollViewport // problem pane scrolls independently when overflowing
-	showing  string // "pattern" or "problem"
-	err      string
+	showing      string         // "pattern" or "problem"
+	err          string
 }
 
 func NewDSAScreen(a *App) *DSAScreen {
@@ -278,7 +278,7 @@ func (s *DSAScreen) problemBody(inner int) string {
 	}
 	var sb strings.Builder
 	sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(d.Problem.Title, inner))) + "\n")
-	sb.WriteString(thMeta.Render(d.Problem.Difficulty+"  ·  "+d.Problem.Pattern) + "\n")
+	sb.WriteString(DifficultyBadge(d.Problem.Difficulty) + "  " + thMeta.Render("·  "+d.Problem.Pattern) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("PROGRESS") + "\n")
 	if d.Last == nil {
@@ -312,4 +312,3 @@ func (s *DSAScreen) problemBody(inner int) string {
 	sb.WriteString(thHelp.Render("Work starts from Today only."))
 	return sb.String()
 }
-

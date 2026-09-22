@@ -244,14 +244,16 @@ func TestWorkspacesFitViewport(t *testing.T) {
 	}
 }
 
-// TestGlobalFooterAndColumns guards the unified shell: one identical footer
-// on every tab, structured Today columns, no bullet composites.
+// TestGlobalFooterAndColumns guards the static shell: one identical footer
+// everywhere, structured Today columns, no bullet composites. The footer
+// is the global legend only; it never carries metadata and never shows
+// Q Quit (only CTRL+C QUIT).
 func TestGlobalFooterAndColumns(t *testing.T) {
-	for _, size := range [][2]int{{170, 44}, {120, 36}} {
+	for _, size := range [][2]int{{170, 44}, {150, 40}} {
 		w, h := size[0], size[1]
 		app := newFlowApp(t)
 		app.width, app.height = w, h
-		var footerRef string
+		var ref string
 		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabMocks, TabHistory, TabReviews} {
 			app.goTab(tab)
 			view := app.View().Content
@@ -263,20 +265,24 @@ func TestGlobalFooterAndColumns(t *testing.T) {
 			plain := stripANSIForTest(view)
 			fl := strings.Split(plain, "\n")
 			foot := fl[len(fl)-2] + "\n" + fl[len(fl)-1]
-			if tab == TabToday {
-				footerRef = foot
-				for _, want := range []string{"ESC", "Q", "J/K", "ENTER", "S", "X", "Quit", "Back", "Move", "Select", "Start", "Stop"} {
-					if !strings.Contains(foot, want) {
-						t.Fatalf("%dx%d footer missing %q", w, h, want)
-					}
+			if ref == "" {
+				ref = foot
+			} else if foot != ref {
+				t.Fatalf("%dx%d tab %v footer differs:\nref: %q\ngot: %q", w, h, tab, ref, foot)
+			}
+			// Static legend: complete uppercase keys, single quit command.
+			for _, want := range []string{"CTRL+C", "QUIT", "Q", "ESC", "J/K", "↑/↓", "H/L", "ENTER", "SPACE", "N", "S", "X", "BACK", "MOVE", "PANEL", "VIEW/SAVE", "TOGGLE", "NEW", "START", "STOP"} {
+				if !strings.Contains(foot, want) {
+					t.Fatalf("%dx%d tab %v footer missing %q: %q", w, h, tab, want, foot)
 				}
-				for _, bad := range []string{"r Refresh", "Tab", "rev ", "2026-"} {
-					if strings.Contains(foot, bad) {
-						t.Fatalf("%dx%d footer has %q", w, h, bad)
-					}
+			}
+			if strings.Contains(foot, "Q Quit") {
+				t.Fatalf("%dx%d tab %v footer must never show Q Quit: %q", w, h, tab, foot)
+			}
+			for _, bad := range []string{"TODAY", "TODO", "DONE", "DRAFT", "ACTIVE", "DELETE", "r Refresh", "2026-"} {
+				if strings.Contains(foot, bad) {
+					t.Fatalf("%dx%d tab %v footer has metadata %q: %q", w, h, tab, bad, foot)
 				}
-			} else if foot != footerRef {
-				t.Fatalf("%dx%d tab %v footer differs", w, h, tab)
 			}
 			if !strings.Contains(plain, "Everyone sees") || !strings.Contains(plain, "Machiavelli") {
 				t.Fatalf("%dx%d tab %v quote broken", w, h, tab)

@@ -480,6 +480,148 @@ func TestCrossMidnightTaskActualSplit(t *testing.T) {
 	}
 }
 
+// ---- Mock schema contract: failure propagates, never unmapped partials ----
+
+func dropGovSubjectIDColumn(t *testing.T, ctx context.Context, d *db.DB) {
+	t.Helper()
+	if _, err := d.ExecContext(ctx, `DROP INDEX IF EXISTS idx_mock_sections_subject`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ExecContext(ctx, `ALTER TABLE mock_sections DROP COLUMN gov_subject_id`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMockSchemaFailureNoPartial(t *testing.T) {
+	d := openEngineDB(t)
+	ctx := context.Background()
+	seedGov(t, ctx, d)
+	now := time.Now()
+	// Current schema: normal creation with explicit mapping works.
+	mk := db.Mock{ID: "m-ok", ExamID: "exam-1", Name: "OK", MockDate: "2026-09-21", CreatedAt: now}
+	if _, err := engine.CreateMockAtomic(ctx, d, mk, []engine.MockSectionInput{
+		{Name: "QA", GovSubjectID: "subj-quant", WeakTopics: []db.ID{"topic-perc"}},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	// Break the schema contract the engine relies on.
+	dropGovSubjectIDColumn(t, ctx, d)
+	// Creation must fail outright, never persist an unmapped section.
+	mk2 := db.Mock{ID: "m-bad", ExamID: "exam-1", Name: "BAD", MockDate: "2026-09-21", CreatedAt: now}
+	if _, err := engine.CreateMockAtomic(ctx, d, mk2, []engine.MockSectionInput{
+		{Name: "QA", GovSubjectID: "subj-quant", WeakTopics: []db.ID{"topic-perc"}},
+	}, now); err == nil {
+		t.Fatal("schema failure must propagate, not create unmapped sections")
+	}
+	var mocks, secs, weak int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM mocks WHERE id = 'm-bad'`).Scan(&mocks); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM mock_sections WHERE mock_id = 'm-bad'`).Scan(&secs); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM mock_weak_topics`).Scan(&weak); err != nil {
+		t.Fatal(err)
+	}
+	if mocks != 0 || secs != 0 || weak != 1 {
+		t.Fatalf("no partial state allowed: mocks=%d secs=%d weak=%d (want 0/0/1)", mocks, secs, weak)
+	}
+	// Weak-topic replacement must fail the same way, leaving prior state.
+	var secID string
+	if err := d.QueryRowContext(ctx, `SELECT id FROM mock_sections WHERE mock_id = 'm-ok'`).Scan(&secID); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.ReplaceWeakTopicsAtomic(ctx, d, "m-ok", db.ID(secID), "subj-quant", []db.ID{"topic-ratio"}); err == nil {
+		t.Fatal("schema failure on replace must propagate")
+	}
+	var kept int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM mock_weak_topics WHERE section_id = ?`, secID).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 1 {
+		t.Fatalf("failed replace must keep prior weak topics, got %d", kept)
+	}
+}
+
+// ---- History enrichment: catalog failure is a data error, never silent ----
+
+func TestHistoryEnrichmentFailureIsDataError(t *testing.T) {
+	ctx := context.Background()
+	t.Run("practice topic", func(t *testing.T) {
+		d := openEngineDB(t)
+		seedGov(t, ctx, d)
+		// Dangling topic reference: evaluator reports ConfigError, but
+		// enrichment must fail the report instead of rendering one name
+		// as if the bundle were complete.
+		raw, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-ratio", "topic-NOPE"}})
+		mkTaskDate(t, ctx, d, "enr-p", "2026-09-22", db.DomainGOV, db.SessionKindPractice, raw)
+		if _, err := engine.BuildDailyReport(ctx, d, "2026-09-22"); err == nil {
+			t.Fatal("unresolvable practice topic must fail the report, not render partial names")
+		}
+	})
+	t.Run("dsa problem", func(t *testing.T) {
+		d := openEngineDB(t)
+		seedDSA(t, ctx, d)
+		raw, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
+			{ProblemID: "dsa-1", Mode: db.DSAModeRepeat},
+			{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
+			{ProblemID: "dsa-NOPE", Mode: db.DSAModeNew},
+		}})
+		mkTaskDate(t, ctx, d, "enr-d", "2026-09-22", db.DomainDSA, db.SessionKindDSA, raw)
+		if _, err := engine.BuildDailyReport(ctx, d, "2026-09-22"); err == nil {
+			t.Fatal("unresolvable DSA problem must fail the report, not render partial names")
+		}
+	})
+	t.Run("swe task", func(t *testing.T) {
+		d := openEngineDB(t)
+		seedSWE(t, ctx, d)
+		raw, _ := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{
+			{AreaID: "area-go", TaskID: withID("go-NOPE")},
+		}})
+		mkTaskDate(t, ctx, d, "enr-s", "2026-09-22", db.DomainSWE, db.SessionKindSWE, raw)
+		if _, err := engine.BuildDailyReport(ctx, d, "2026-09-22"); err == nil {
+			t.Fatal("unresolvable SWE task must fail the report, not render the title as detail")
+		}
+	})
+	t.Run("healthy enrichment renders names", func(t *testing.T) {
+		d := openEngineDB(t)
+		seedGov(t, ctx, d)
+		seedDSA(t, ctx, d)
+		seedSWE(t, ctx, d)
+		// Both tasks in ONE snapshot: the report renders the latest
+		// snapshot's tasks with resolved bundle names.
+		if err := runtime.CreateTodaySnapshot(ctx, d, db.TodaySnapshot{ID: "snap-ok", LocalDate: "2026-09-22", Revision: 1, GeneratedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		praw, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-ratio"}})
+		if err := runtime.InsertTodayTask(ctx, d, db.TodayTask{ID: "ok-p", SnapshotID: "snap-ok", Position: 1, Domain: db.DomainGOV, Kind: db.SessionKindPractice, Title: "P", PlannedSeconds: 3600, TargetJSON: &praw}); err != nil {
+			t.Fatal(err)
+		}
+		draw, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
+			{ProblemID: "dsa-1", Mode: db.DSAModeRepeat},
+			{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
+			{ProblemID: "dsa-3", Mode: db.DSAModeNew},
+		}})
+		if err := runtime.InsertTodayTask(ctx, d, db.TodayTask{ID: "ok-d", SnapshotID: "snap-ok", Position: 2, Domain: db.DomainDSA, Kind: db.SessionKindDSA, Title: "D", PlannedSeconds: 3600, TargetJSON: &draw}); err != nil {
+			t.Fatal(err)
+		}
+		rep, err := engine.BuildDailyReport(ctx, d, "2026-09-22")
+		if err != nil {
+			t.Fatal(err)
+		}
+		details := map[string]string{}
+		for _, a := range rep.Activities {
+			details[string(a.TaskID)] = a.Detail
+		}
+		if !strings.Contains(details["ok-p"], "Ratio") {
+			t.Fatalf("practice detail must name topics, got %q", details["ok-p"])
+		}
+		if !strings.Contains(details["ok-d"], "Two Sum") {
+			t.Fatalf("dsa detail must name problems, got %q", details["ok-d"])
+		}
+	})
+}
+
 // ---- 14. Mock negatives rejected before writes ----
 
 func TestMockNegativeMetricsRejected(t *testing.T) {

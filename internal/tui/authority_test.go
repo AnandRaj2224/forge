@@ -117,3 +117,41 @@ func TestTodayBrokenDBNoFallback(t *testing.T) {
 		t.Fatalf("broken DB must render no stale tasks, got %d", len(app.today.tasks))
 	}
 }
+
+// History enrichment failure renders as a panel-local data error: the day
+// shows "report unavailable · data error", never a plausible partial
+// report and never a global red banner.
+func TestHistoryEnrichmentFailureVisible(t *testing.T) {
+	database := seedOldSnapshotDB(t)
+	ctx := context.Background()
+	// Practice task with a dangling topic on Tue 2026-09-22.
+	if err := runtime.CreateTodaySnapshot(ctx, database, db.TodaySnapshot{ID: "snap-bad", LocalDate: "2026-09-22", Revision: 1, GeneratedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	bad, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-a", "topic-NOPE"}})
+	if err := runtime.InsertTodayTask(ctx, database, db.TodayTask{ID: "bad-p", SnapshotID: "snap-bad", Position: 1, Domain: db.DomainGOV, Kind: db.SessionKindPractice, Title: "Bad practice", PlannedSeconds: 3600, TargetJSON: &bad}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp(database)
+	app.width, app.height = 150, 40
+	app.history.nowFn = func() time.Time { return time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC) }
+	app.goTab(TabHistory)
+	// Select Tue 2026-09-22 (index 1 in Mon..Sun).
+	app.history.list.Select(1)
+	if got := app.history.selectedDate(); got != "2026-09-22" {
+		t.Fatalf("selected=%q want 2026-09-22", got)
+	}
+	if _, bad := app.history.reportErr["2026-09-22"]; !bad {
+		t.Fatal("enrichment failure must record a report error for the day")
+	}
+	body := stripANSIForTest(app.history.dayBody(90))
+	if !strings.Contains(body, "report unavailable") {
+		t.Fatalf("day must show unavailable state, got:\n%s", body)
+	}
+	if strings.Contains(body, "topic-a") || strings.Contains(body, "Number System") {
+		t.Fatalf("partial names must not render:\n%s", body)
+	}
+	if app.err != "" {
+		t.Fatalf("error must stay panel-local, app.err=%q", app.err)
+	}
+}

@@ -137,7 +137,10 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 		if err != nil {
 			return DailyReport{}, err
 		}
-		detail := taskDetail(ctx, q, t)
+		detail, err := taskDetail(ctx, q, t)
+		if err != nil {
+			return DailyReport{}, err
+		}
 		act := TaskActivity{
 			Position: i + 1, TaskID: t.ID, Domain: string(t.Domain), Kind: string(t.Kind),
 			Title: t.Title, Detail: detail, Planned: t.PlannedSeconds,
@@ -163,72 +166,100 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 	return rep, nil
 }
 
-func taskDetail(ctx context.Context, q db.DBTX, t db.TodayTask) string {
-	if t.TargetJSON == nil {
-		return t.Title
+// taskDetail resolves a task's bundle names for History display.
+//
+//   - missing/unparsable target → the task title (genuine no-data state;
+//     target validity itself is owned by the evaluator, never here)
+//   - any catalogue lookup failure → error, failing the whole report
+//
+// A historical report is either complete or a data error: it never renders
+// a plausible detail line with silently dropped topics/problems/tasks.
+func taskDetail(ctx context.Context, q db.DBTX, t db.TodayTask) (string, error) {
+	if t.TargetJSON == nil || *t.TargetJSON == "" {
+		return t.Title, nil
 	}
 	switch t.Domain {
 	case db.DomainGOV:
 		if t.Kind == db.SessionKindLecture {
 			lt, err := db.UnmarshalGovLectureTarget(*t.TargetJSON)
 			if err != nil {
-				return t.Title
+				return t.Title, nil
 			}
 			tp, err := catalog.GetGovTopic(ctx, q, lt.TopicID)
 			if err != nil {
-				return t.Title
+				return "", fmt.Errorf("engine: task detail topic: %w", err)
 			}
-			return tp.Name
+			return tp.Name, nil
 		}
 		pt, err := db.UnmarshalGovPracticeTarget(*t.TargetJSON)
 		if err != nil {
-			return t.Title
+			return t.Title, nil
 		}
 		var names []string
 		for _, tid := range pt.TopicIDs {
-			if tp, err := catalog.GetGovTopic(ctx, q, tid); err == nil {
-				names = append(names, tp.Name)
+			tp, err := catalog.GetGovTopic(ctx, q, tid)
+			if err != nil {
+				return "", fmt.Errorf("engine: task detail topic: %w", err)
 			}
+			names = append(names, tp.Name)
 		}
-		return joinPlus(names)
+		if len(names) == 0 {
+			return t.Title, nil
+		}
+		return joinPlus(names), nil
 	case db.DomainDSA:
 		dt, err := db.UnmarshalDSATarget(*t.TargetJSON)
 		if err != nil {
-			return t.Title
+			return t.Title, nil
 		}
 		var names []string
 		for _, it := range dt.Items() {
-			if p, err := catalog.GetDSAProblem(ctx, q, it.ProblemID); err == nil {
-				names = append(names, p.Title)
+			p, err := catalog.GetDSAProblem(ctx, q, it.ProblemID)
+			if err != nil {
+				return "", fmt.Errorf("engine: task detail problem: %w", err)
 			}
+			names = append(names, p.Title)
 		}
-		return joinPlus(names)
+		if len(names) == 0 {
+			return t.Title, nil
+		}
+		return joinPlus(names), nil
 	case db.DomainSWE:
 		st, err := db.UnmarshalSWETarget(*t.TargetJSON)
 		if err != nil {
-			return t.Title
+			return t.Title, nil
+		}
+		areas, err := catalog.GetSWEAreas(ctx, q)
+		if err != nil {
+			return "", fmt.Errorf("engine: task detail areas: %w", err)
+		}
+		areaName := map[db.ID]string{}
+		for _, a := range areas {
+			areaName[a.ID] = a.Name
 		}
 		var names []string
 		for _, it := range st.Items() {
-			if it.TaskID != nil {
-				tasks, err := catalog.GetSWETasks(ctx, q, it.AreaID)
-				if err != nil {
-					// Read-only enrichment only: a catalogue failure
-					// degrades this detail line to the title rather than
-					// failing the whole report. Domain state is decided
-					// by the evaluator, never here.
-					continue
+			if it.TaskID == nil {
+				// Legacy area-only target: name the area itself.
+				name, ok := areaName[it.AreaID]
+				if !ok {
+					return "", fmt.Errorf("engine: task detail area: unknown area %q", string(it.AreaID))
 				}
-				for _, tk := range tasks {
-					if tk.ID == *it.TaskID {
-						names = append(names, tk.Title)
-					}
-				}
+				names = append(names, name)
+				continue
 			}
+			tk, err := catalog.GetSWETask(ctx, q, *it.TaskID)
+			if err != nil {
+				return "", fmt.Errorf("engine: task detail task: %w", err)
+			}
+			names = append(names, tk.Title)
 		}
-		return joinPlus(names)
+		if len(names) == 0 {
+			return t.Title, nil
+		}
+		return joinPlus(names), nil
 	}
-	return t.Title
+	return t.Title, nil
 }
 
 func fillDailyGov(ctx context.Context, q db.DBTX, rep *DailyReport, lo, hi int64) error {

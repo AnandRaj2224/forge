@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	db "forge/internal/db"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Forge row system: every navigable list item is a structured row separated
@@ -346,13 +346,52 @@ func (r SelectableRow) View() string {
 	if edged {
 		lead = "▌"
 	}
+	// Difficulty labels keep semantic color (green/amber/red) on any row
+	// background; selection tint + focus edge stay independent.
+	metaStyle := th.strong
+	if isDifficulty(meta) {
+		var fg color.Color
+		switch strings.ToUpper(strings.TrimSpace(meta)) {
+		case "EASY":
+			fg = cSuccess
+		case "MEDIUM":
+			fg = cWarning
+		default:
+			fg = cError
+		}
+		metaStyle = lipgloss.NewStyle().Bold(true).Foreground(fg)
+		if th.bg != nil {
+			metaStyle = metaStyle.Background(th.bg)
+		}
+		// Normalize display to uppercase for scannability.
+		meta = strings.ToUpper(strings.TrimSpace(meta))
+		// Recompute widths after normalization (same visible length for
+		// EASY/MEDIUM/HARD, but keep logic safe).
+		rightW = lipgloss.Width(meta) + lipgloss.Width(sub)
+		titleW = w - 1 - pw - 2 - rightW
+		if rightW == 0 {
+			titleW = w - 1 - pw
+		}
+		if titleW < 1 {
+			titleW = 1
+		}
+		title = PadToWidth(TruncateToWidth(r.Title, titleW), titleW)
+		used = 1 + pw + titleW
+		if rightW > 0 {
+			used += 2 + rightW
+		}
+		trailW = w - used
+		if trailW < 0 {
+			trailW = 0
+		}
+	}
 	segs := []rowCell{
 		{lead, th.edge},
 		{pre, th.main},
 		{title, th.main},
 	}
 	if rightW > 0 {
-		segs = append(segs, rowCell{"  ", th.gap}, rowCell{meta, th.strong}, rowCell{sub, th.faint})
+		segs = append(segs, rowCell{"  ", th.gap}, rowCell{meta, metaStyle}, rowCell{sub, th.faint})
 	}
 	if trailW > 0 {
 		segs = append(segs, rowCell{strings.Repeat(" ", trailW), th.gap})
@@ -373,7 +412,6 @@ func prefixPlain(num, mark string) string {
 	}
 	return mark + "  "
 }
-
 
 // RowDivider is the thin horizontal separator spanning the list width.
 func RowDivider(width int) string {

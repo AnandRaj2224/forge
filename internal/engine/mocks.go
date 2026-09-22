@@ -159,10 +159,13 @@ func CreateMockAtomic(ctx context.Context, database *db.DB, m db.Mock, sections 
 			}
 			seenNames[lower] = true
 			sid := db.ID(fmt.Sprintf("%s-sec-%d-%d", string(m.ID), i, now.UnixNano()%100000))
-			if err := insertMockSectionWithSubject(ctx, q, db.MockSection{
-				ID: sid, MockID: m.ID, Name: strings.TrimSpace(sec.Name), SortOrder: i + 1,
-			}, sec.GovSubjectID); err != nil {
-				return err
+			// Current schema contract: mock_sections.gov_subject_id is
+			// required (migration 003). No legacy fallback here: a
+			// schema/DB failure propagates and rolls the transaction
+			// back instead of persisting an unmapped section.
+			if _, err := q.ExecContext(ctx, `INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES (?, ?, ?, ?, ?)`,
+				string(sid), string(m.ID), strings.TrimSpace(sec.Name), i+1, string(sec.GovSubjectID)); err != nil {
+				return fmt.Errorf("engine: create mock section: %w", err)
 			}
 			for rank, tid := range sec.WeakTopics {
 				if _, err := q.ExecContext(ctx, `INSERT INTO mock_weak_topics (section_id, topic_id, rank_order) VALUES (?, ?, ?)`,
@@ -177,34 +180,6 @@ func CreateMockAtomic(ctx context.Context, database *db.DB, m db.Mock, sections 
 		return db.Mock{}, err
 	}
 	return m, nil
-}
-
-func insertMockSectionWithSubject(ctx context.Context, q db.DBTX, s db.MockSection, govSubjectID db.ID) error {
-	// gov_subject_id column exists after migration 003; legacy DBs without it
-	// fall back to the plain insert so engine tests on old schemas still run.
-	var hasCol bool
-	rows, err := q.QueryContext(ctx, `SELECT name FROM pragma_table_info('mock_sections')`)
-	if err == nil {
-		for rows.Next() {
-			var name string
-			if rows.Scan(&name) == nil && name == "gov_subject_id" {
-				hasCol = true
-			}
-		}
-		rows.Close()
-	}
-	if hasCol {
-		if _, err := q.ExecContext(ctx, `INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES (?, ?, ?, ?, ?)`,
-			string(s.ID), string(s.MockID), s.Name, s.SortOrder, string(govSubjectID)); err != nil {
-			return fmt.Errorf("engine: create mock section: %w", err)
-		}
-		return nil
-	}
-	if _, err := q.ExecContext(ctx, `INSERT INTO mock_sections (id, mock_id, name, sort_order) VALUES (?, ?, ?, ?)`,
-		string(s.ID), string(s.MockID), s.Name, s.SortOrder); err != nil {
-		return fmt.Errorf("engine: create mock section: %w", err)
-	}
-	return nil
 }
 
 // DeleteMock deletes a mock (sections/weak topics cascade). It is the only
@@ -258,22 +233,12 @@ func ReplaceWeakTopicsAtomic(ctx context.Context, database *db.DB, mockID, secti
 				return fmt.Errorf("engine: insert weak topic: %w", err)
 			}
 		}
-		// Persist subject mapping when the column exists.
-		rows, err := q.QueryContext(ctx, `SELECT name FROM pragma_table_info('mock_sections')`)
-		if err == nil {
-			hasCol := false
-			for rows.Next() {
-				var name string
-				if rows.Scan(&name) == nil && name == "gov_subject_id" {
-					hasCol = true
-				}
-			}
-			rows.Close()
-			if hasCol {
-				if _, err := q.ExecContext(ctx, `UPDATE mock_sections SET gov_subject_id = ? WHERE id = ?`, string(govSubjectID), string(sectionID)); err != nil {
-					return fmt.Errorf("engine: update section subject: %w", err)
-				}
-			}
+		// Current schema contract: the explicit subject mapping is
+		// persisted unconditionally (migration 003). A schema/DB
+		// failure propagates and rolls back instead of leaving weak
+		// topics on an unmapped section.
+		if _, err := q.ExecContext(ctx, `UPDATE mock_sections SET gov_subject_id = ? WHERE id = ?`, string(govSubjectID), string(sectionID)); err != nil {
+			return fmt.Errorf("engine: update section subject: %w", err)
 		}
 		return nil
 	})

@@ -68,7 +68,7 @@ type App struct {
 	// relevant panel), so no path sets this today. Kept so a future
 	// shell-level failure has a layout-safe slot that cannot break
 	// shell geometry.
-	err    string
+	err string
 
 	today   *TodayScreen
 	gov     *GovScreen
@@ -211,22 +211,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case tea.KeyPressMsg:
 		ks := m.String()
-		// Form/editing modes own the keyboard: typed characters (including
-		// q/s/x/digits) must reach text inputs instead of triggering global
-		// keys. Esc cancels/leaves the form (never quits). Ctrl+C quits.
-		if inForm, _ := a.formMode(); inForm {
-			if ks == "ctrl+c" {
-				return a, func() tea.Msg { return tea.Quit() }
+		// Ctrl+C quits Forge everywhere — including inside text inputs.
+		if IsQuit(ks) {
+			return a, func() tea.Msg { return tea.Quit() }
+		}
+		// Form ownership is based only on whether a text-input component
+		// currently owns the keyboard (never screen-specific q rules).
+		if inForm, textEditing := a.formMode(); inForm {
+			if textEditing {
+				// TEXT INPUT: q types literally (forwarded), Esc backs/
+				// cancels, Enter saves (forwarded). Esc never quits.
+				if IsBackEsc(ks) {
+					a.cancelForm()
+					return a, nil
+				}
+				return a, a.forwardToScreen(msg)
 			}
-			if IsBack(ks) { // Esc → cancel/leave input/form
+			// Form owns keyboard but focus is on a non-text widget
+			// (checkbox, radio, selector, list, button): q/Esc back out,
+			// everything else (Space, Enter, arrows, j/k) goes to the form.
+			if IsBack(ks) {
 				a.cancelForm()
 				return a, nil
 			}
 			return a, a.forwardToScreen(msg)
 		}
 		switch {
-		case IsQuit(ks): // q or Ctrl+C in normal navigation quits
-			return a, func() tea.Msg { return tea.Quit() }
 		case ks == "1":
 			a.goTab(TabToday)
 			return a, nil
@@ -249,7 +259,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.goTab(TabReviews)
 			return a, nil
 		case IsBack(ks):
-			// Sub-state back is owned by each workspace; at root no-op.
+			// NORMAL NAVIGATION: q/Esc = Back. Sub-state back is owned
+			// by each workspace; at root no-op (never quits).
 			switch a.tab {
 			case TabToday:
 				if a.today.onBack() {
@@ -366,7 +377,7 @@ func (a *App) View() tea.View {
 	// viewport (clipped with content, layout preserved) — never as a
 	// red paragraph appended below the shell.
 	if a.err != "" {
-		body = thWarn.Render("▲ " + TruncateToWidth(a.err, w-4)) + "\n" + body
+		body = thWarn.Render("▲ "+TruncateToWidth(a.err, w-4)) + "\n" + body
 	}
 	lines := strings.Split(body, "\n")
 	if len(lines) > contentH {
@@ -470,28 +481,11 @@ func joinHeader(brand string, nav []string, active, clock string, w int, gap str
 	return left + strings.Repeat(" ", sp) + right
 }
 
-// footerView is the shared shell footer. In normal navigation it is the ONE
-// identical global command bar on every tab. While a form owns the keyboard
-// it switches to the explicit input/editing bar (Esc Cancel, Enter Save —
-// never "Q Quit"). When a completed Today task is selected, Start is not
-// advertised.
+// footerView is the ONE STATIC app-wide keyboard legend (like the header).
+// Identical content, geometry, spacing, typography, badges and alignment
+// on every screen. Never changes by screen or focus. It describes the
+// global keyboard model; screen-specific actions (New/Start/Stop/Save)
+// live in buttons, labels and inline hints, not here.
 func (a *App) footerView(w int) string {
-	if inForm, _ := a.formMode(); inForm {
-		return InputModeFooter(w)
-	}
-	if a.tab == TabToday && a.todayDoneSelected() {
-		return TodayDoneFooter(w)
-	}
-	return GlobalFooter(w)
+	return renderGlobalFooter(w)
 }
-
-// todayDoneSelected reports whether Today shows a completed task (Start
-// must not be offered there).
-func (a *App) todayDoneSelected() bool {
-	if a.tab != TabToday || a.today.right != "detail" {
-		return false
-	}
-	_, st, _, ok := a.today.selected()
-	return ok && st == TaskCompleted
-}
-

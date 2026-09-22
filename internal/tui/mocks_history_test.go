@@ -198,9 +198,8 @@ func TestRadioRoundTripStillVisible(t *testing.T) {
 }
 
 // TestMockCreateFlow guards the single mock creation flow: raw facts in,
-// derived metrics out, explicit user-entered sections (actual name +
-// GOV subject mapping, never inferred), weak topics picked per section,
-// one atomic engine save.
+// derived metrics out, direct GOV-subject selection (no arbitrary section
+// layer), weak topics picked per subject, one atomic engine save.
 func TestMockCreateFlow(t *testing.T) {
 	database := seedMockHistoryDB(t)
 	app := NewApp(database)
@@ -233,29 +232,25 @@ func TestMockCreateFlow(t *testing.T) {
 	typeKeys("87")
 	testSend(app, "down") // Correct (cFocus 8)
 	typeKeys("71")
-	for range [4]struct{}{} {
+	for range [3]struct{}{} {
 		testSend(app, "down")
-	} // Rank, Percentile, Average Speed, section name (cFocus 12)
+	} // Rank, Percentile, Average Speed (cFocus 11)
+	testSend(app, "down") // GOV subject (cFocus 12)
 	if app.mocks.cFocus != 12 {
-		t.Fatalf("cFocus=%d want section name", app.mocks.cFocus)
+		t.Fatalf("cFocus=%d want GOV subject selector", app.mocks.cFocus)
 	}
-	// Explicit section: actual name + GOV subject (Quant is first).
-	typeKeys("QA-1")
+	// Direct GOV-subject selection (Quant is first).
 	if got := app.mocks.secSubjName(); got != "Quant" {
 		t.Fatalf("default subject=%q want Quant", got)
 	}
-	testSend(app, "down") // GOV subject
-	testSend(app, "down") // ADD SECTION
+	testSend(app, "down") // ADD SUBJECT (cFocus 13)
 	testSend(app, "enter")
-	// Straight into the weak-topic editor for the staged section.
+	// Straight into the weak-topic editor for the staged subject.
 	if app.mocks.mode != "weak" {
 		t.Fatalf("mode=%q want weak editor (%s)", app.mocks.mode, app.mocks.cErr)
 	}
-	if sec := string(app.mocks.wSection.Name); sec != "QA-1" {
-		t.Fatalf("editor section=%q want explicit name QA-1", sec)
-	}
 	if app.mocks.wSection.GovSubjectID == nil || *app.mocks.wSection.GovSubjectID != "subj-quant" {
-		t.Fatalf("editor must carry the explicit Quant mapping: %+v", app.mocks.wSection)
+		t.Fatalf("editor must carry the Quant mapping: %+v", app.mocks.wSection)
 	}
 	// Toggle two weak topics, save back into the create form.
 	testSend(app, "down") // filter -> list
@@ -294,10 +289,7 @@ func TestMockCreateFlow(t *testing.T) {
 	}
 	secs, _ := runtime.ListMockSections(ctx, database, m.ID)
 	if len(secs) != 1 {
-		t.Fatalf("sections=%d want 1 explicit", len(secs))
-	}
-	if secs[0].Name != "QA-1" {
-		t.Fatalf("section name=%q want explicit QA-1", secs[0].Name)
+		t.Fatalf("sections=%d want 1", len(secs))
 	}
 	if secs[0].GovSubjectID == nil || *secs[0].GovSubjectID != "subj-quant" {
 		t.Fatalf("section mapping=%v want Quant", secs[0].GovSubjectID)
@@ -307,6 +299,7 @@ func TestMockCreateFlow(t *testing.T) {
 		t.Fatalf("weak=%d want 2", len(ws))
 	}
 }
+
 // TestMockCreateValidation rejects impossible raw combinations.
 func TestMockCreateValidation(t *testing.T) {
 	database := seedMockHistoryDB(t)

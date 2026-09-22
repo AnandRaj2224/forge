@@ -31,6 +31,17 @@ func InsertSWEArea(ctx context.Context, q db.DBTX, a db.SWEArea) error {
 	return nil
 }
 
+func GetSWETask(ctx context.Context, q db.DBTX, id db.ID) (db.SWETask, error) {
+	var t db.SWETask
+	err := q.QueryRowContext(ctx, `SELECT id, area_id, title, sort_order FROM swe_tasks WHERE id = ?`, id).Scan(
+		&t.ID, &t.AreaID, &t.Title, &t.SortOrder,
+	)
+	if err != nil {
+		return db.SWETask{}, fmt.Errorf("catalog: get swe task: %w", err)
+	}
+	return t, nil
+}
+
 func GetSWETasks(ctx context.Context, q db.DBTX, areaID db.ID) ([]db.SWETask, error) {
 	rows, err := q.QueryContext(ctx, `SELECT id, area_id, title, sort_order FROM swe_tasks WHERE area_id = ? ORDER BY sort_order`, areaID)
 	if err != nil {

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	db "forge/internal/db"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Time-by-domain must read "% of tracked time", never "% of day".
@@ -31,23 +31,28 @@ func TestTrackedTimeWording(t *testing.T) {
 	}
 }
 
-// Mock creation exposes the explicit product model: actual section name,
-// GOV subject selector, staged weak topics, real SAVE — all reachable by
-// scrolling from one structured field model.
+// Mock creation exposes the direct product model: real GOV subject
+// selector, staged weak topics, real SAVE — all reachable by scrolling
+// from one structured field model. No arbitrary section layer.
 func TestMockCreateStructuredFields(t *testing.T) {
 	app := NewApp(seedMockHistoryDB(t))
 	app.width, app.height = 150, 40
 	app.goTab(TabMocks)
 	testSend(app, "n")
 	body := stripANSIForTest(app.mocks.createRightBody(40))
-	for _, want := range []string{"Section name", "GOV subject", "ADD SECTION", "SAVE"} {
+	for _, want := range []string{"GOV subject", "ADD SUBJECT", "SAVE"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("create form missing %q:\n%s", want, body)
 		}
 	}
+	for _, bad := range []string{"Section name", "ADD SECTION"} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("create form must not contain arbitrary section layer %q:\n%s", bad, body)
+		}
+	}
 	// SAVE is the last focusable and stays visible in a short viewport.
-	if app.mocks.nCreateFocus() != 16 {
-		t.Fatalf("focusables=%d want 16", app.mocks.nCreateFocus())
+	if app.mocks.nCreateFocus() != 15 {
+		t.Fatalf("focusables=%d want 15", app.mocks.nCreateFocus())
 	}
 	app.width, app.height = 150, 20 // short viewport forces scrolling
 	app.mocks.cFocus = app.mocks.nCreateFocus() - 1
@@ -66,17 +71,16 @@ func TestMockCreateStructuredFields(t *testing.T) {
 	}
 }
 
-// Weak-topic choices filter to the staged explicit subject AND exam syllabus.
+// Weak-topic choices filter to the staged subject AND exam syllabus.
 func TestMockWeakFilteredBySubject(t *testing.T) {
 	app := NewApp(seedMockHistoryDB(t))
 	app.width, app.height = 150, 40
 	app.goTab(TabMocks)
 	testSend(app, "n")
-	app.mocks.secName.SetValue("QA-1")
 	if got := app.mocks.secSubjName(); got != "Quant" {
 		t.Fatalf("subject=%q want Quant", got)
 	}
-	app.mocks.addStagedSection()
+	app.mocks.addStagedSubject()
 	if app.mocks.mode != "weak" {
 		t.Fatalf("mode=%q want weak (%s)", app.mocks.mode, app.mocks.cErr)
 	}
@@ -174,14 +178,13 @@ func TestPracticeSaveReachableFullBundle(t *testing.T) {
 	}
 }
 
-// The mock create form (fields + section block + SAVE) must fit narrow
+// The mock create form (fields + subject block + SAVE) must fit narrow
 // viewports without overflowing rows.
 func TestMockCreateFitsNarrow(t *testing.T) {
 	app := NewApp(seedMockHistoryDB(t))
 	app.width, app.height = 70, 24
 	app.goTab(TabMocks)
 	testSend(app, "n")
-	app.mocks.secName.SetValue("QA-1")
 	v := stripANSIForTest(app.mocks.createView())
 	for i, ln := range strings.Split(v, "\n") {
 		if ansi.StringWidth(ln) > 70 {
