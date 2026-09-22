@@ -6,6 +6,7 @@ import (
 
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
+	"forge/internal/db/runtime"
 )
 
 // ValidateGovLectureTarget semantically validates a lecture target: non-empty
@@ -91,6 +92,59 @@ func ValidateDSATarget(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
 		}
 		if _, err := catalog.GetDSAProblem(ctx, q, it.ProblemID); err != nil {
 			return wrapErr("dsa target", ErrInvalidTarget, fmt.Sprintf("unknown problem %q", string(it.ProblemID)))
+		}
+	}
+	return nil
+}
+
+// ValidateDSACurrentBundle strictly validates a newly generated DSA block
+// target: exactly 3 problems, all distinct, valid modes, every problem
+// exists, truthful labeling (a NEW-labeled problem must be genuinely new:
+// no prior NEW attempt and no repeat state), and the steady-state shape of
+// exactly 2 REPEAT + 1 NEW. An all-NEW triple is accepted only as the
+// truthful bootstrap when all three problems are genuinely new (fresh DB).
+// Historical singular/legacy shapes stay readable via ValidateDSATarget;
+// this strict rule governs NEW/current targets. DB failures propagate.
+func ValidateDSACurrentBundle(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
+	if err := ValidateDSATarget(ctx, q, dt); err != nil {
+		return err
+	}
+	items := dt.Items()
+	if len(items) != 3 {
+		return wrapErr("dsa target", ErrInvalidTarget, "current DSA bundle must be exactly 3 problems")
+	}
+	var repeats, news int
+	for _, it := range items {
+		switch it.Mode {
+		case db.DSAModeRepeat:
+			repeats++
+		case db.DSAModeNew:
+			news++
+			if err := requireGenuinelyNew(ctx, q, it.ProblemID); err != nil {
+				return err
+			}
+		}
+	}
+	if repeats == 2 && news == 1 {
+		return nil
+	}
+	if news == 3 {
+		// Truthful bootstrap: all three genuinely new (checked above).
+		return nil
+	}
+	return wrapErr("dsa target", ErrInvalidTarget, "current DSA bundle must be 2 repeat + 1 new")
+}
+
+// requireGenuinelyNew rejects a NEW label for an already-introduced
+// problem instead of silently converting it to REPEAT at save time.
+func requireGenuinelyNew(ctx context.Context, q db.DBTX, problemID db.ID) error {
+	atts, err := runtime.GetDSAAttempts(ctx, q, problemID)
+	if err != nil {
+		return fmt.Errorf("engine: dsa attempts: %w", err)
+	}
+	for _, a := range atts {
+		if a.Mode == db.DSAModeNew {
+			return wrapErr("dsa target", ErrInvalidTarget, fmt.Sprintf("stale target: problem %q labeled NEW but already introduced", string(problemID)))
 		}
 	}
 	return nil

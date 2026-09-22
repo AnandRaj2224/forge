@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"time"
 
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
@@ -83,8 +81,13 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 		return DailyReport{}, err
 	}
 	// Planned + tasks from LATEST snapshot for the date (never all revisions).
+	// A genuine no-row result means "no plan that day"; a real DB failure
+	// propagates instead of masquerading as an empty day.
 	snap, err := runtime.GetLatestTodaySnapshot(ctx, q, localDate)
 	hasSnap := err == nil
+	if err != nil && !isNotFoundErr(err) {
+		return DailyReport{}, fmt.Errorf("engine: latest today snapshot: %w", err)
+	}
 	var tasks []db.TodayTask
 	if hasSnap {
 		tasks, err = runtime.GetTodayTasks(ctx, q, snap.ID)
@@ -117,24 +120,20 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 			case db.DomainSWE:
 				rep.SWESeconds += int(secs)
 			}
+			// Task-level actual respects the same split: a session
+			// spanning midnight attributes each portion to its own day.
+			actualByTask[s.TodayTaskID] += int(secs)
 		}
 		// Count sessions touching this day (started or stopped within, or spanning).
 		if s.StartedAt.Unix() < dayEnd && s.StoppedAt.Unix() > dayStart {
 			rep.Sessions++
 		}
-		// Per-task actual across all its sessions (for activity rows).
-		if s.StoppedAt != nil {
-			el := int(s.StoppedAt.Unix() - s.StartedAt.Unix())
-			if el < 0 {
-				el = 0
-			}
-			actualByTask[s.TodayTaskID] += el
-		}
 	}
 	rep.Variance = rep.Actual - rep.Planned
-	// Task activities from the day's snapshot with authoritative evaluation.
+	// Task activities from the day's snapshot evaluated as of end of day:
+	// evidence recorded later must not rewrite this day's history.
 	for i, t := range tasks {
-		ev, err := EvaluateTodayTask(ctx, q, t.ID)
+		ev, err := EvaluateTodayTaskAt(ctx, q, t.ID, dayEnd)
 		if err != nil {
 			return DailyReport{}, err
 		}
@@ -285,7 +284,7 @@ func fillDailyGov(ctx context.Context, q db.DBTX, rep *DailyReport, lo, hi int64
 	return nil
 }
 
-// sqlNullFloat mirrors sql.NullFloat64 without importing database/sql here? use any.
+// sqlNullFloat mirrors sql.NullFloat64 for report scanning.
 type sqlNullFloat = sql.NullFloat64
 
 func fillDailyDSA(ctx context.Context, q db.DBTX, rep *DailyReport, lo, hi int64) error {
@@ -300,7 +299,8 @@ func fillDailyDSA(ctx context.Context, q db.DBTX, rep *DailyReport, lo, hi int64
 			return fmt.Errorf("engine: scan dsa: %w", err)
 		}
 		rep.DSA.Attempted++
-		if indep == 1 && opt == 1 && hint == 0 {
+		// Single authoritative pass rule (never a duplicated condition).
+		if IsDSAPass(db.DSAAttempt{Independent: indep == 1, Optimal: opt == 1, HintUsed: hint == 1}) {
 			rep.DSA.Passed++
 		}
 	}
@@ -414,12 +414,16 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 	if err != nil {
 		return WeeklyReport{}, wrapErr("weekly", ErrValidation, "bad week end")
 	}
-	// Planned: latest snapshot per day in range.
+	// Planned: latest snapshot per day in range. A genuine no-row result
+	// means "no plan that day" (skip); a real DB failure propagates.
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 		ds := d.Format("2006-01-02")
 		snap, err := runtime.GetLatestTodaySnapshot(ctx, q, ds)
 		if err != nil {
-			continue
+			if isNotFoundErr(err) {
+				continue
+			}
+			return WeeklyReport{}, fmt.Errorf("engine: weekly snapshot: %w", err)
 		}
 		tasks, err := runtime.GetTodayTasks(ctx, q, snap.ID)
 		if err != nil {
@@ -557,7 +561,7 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 		}
 		sid, err := topicSubject(ctx, q, topicID)
 		if err != nil {
-			continue
+			return fmt.Errorf("engine: topic subject: %w", err)
 		}
 		subjectOf[topicID] = sid
 		k := string(sid)
@@ -640,7 +644,8 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 			return fmt.Errorf("engine: scan dsa: %w", err)
 		}
 		rep.DSAAttempted++
-		if i == 1 && o == 1 && h == 0 {
+		// Single authoritative pass rule (never a duplicated condition).
+		if IsDSAPass(db.DSAAttempt{Independent: i == 1, Optimal: o == 1, HintUsed: h == 1}) {
 			rep.DSAPassed++
 		}
 	}
@@ -701,6 +706,3 @@ func UnmarshalWeeklySnapshot(raw string) (WeeklyReport, error) {
 	}
 	return rep, nil
 }
-
-var _ = time.Now
-var _ = sort.StringSlice{}

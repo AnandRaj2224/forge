@@ -38,6 +38,19 @@ type TaskEvaluation struct {
 //
 // DB failures propagate as error (never TODO/COMPLETE fallbacks).
 func EvaluateTodayTask(ctx context.Context, q db.DBTX, taskID db.ID) (TaskEvaluation, error) {
+	return evaluateAt(ctx, q, taskID, 0)
+}
+
+// EvaluateTodayTaskAt is the historical evaluator: identical to
+// EvaluateTodayTask but only evidence strictly before cutoffUnix (a Forge
+// day-end Unix bound, exclusive) counts, and ACTIVE is determined as of the
+// cutoff. A historical day therefore never changes when later evidence is
+// recorded. cutoffUnix == 0 means current state (no cutoff).
+func EvaluateTodayTaskAt(ctx context.Context, q db.DBTX, taskID db.ID, cutoffUnix int64) (TaskEvaluation, error) {
+	return evaluateAt(ctx, q, taskID, cutoffUnix)
+}
+
+func evaluateAt(ctx context.Context, q db.DBTX, taskID db.ID, cutoff int64) (TaskEvaluation, error) {
 	ev := TaskEvaluation{TaskID: taskID, State: StateTodo}
 	task, err := runtime.GetTodayTask(ctx, q, taskID)
 	if err != nil {
@@ -48,7 +61,7 @@ func EvaluateTodayTask(ctx context.Context, q db.DBTX, taskID db.ID) (TaskEvalua
 		return TaskEvaluation{}, err
 	}
 	for i := range sessions {
-		if sessions[i].Status == db.SessionStatusActive {
+		if isActiveAsOf(sessions[i], cutoff) {
 			c := sessions[i]
 			ev.Active = &c
 			ev.State = StateActive
@@ -59,17 +72,55 @@ func EvaluateTodayTask(ctx context.Context, q db.DBTX, taskID db.ID) (TaskEvalua
 	switch task.Domain {
 	case db.DomainGOV:
 		if task.Kind == db.SessionKindLecture {
-			return evalGovLecture(ctx, q, ev, task, sessions)
+			return evalGovLecture(ctx, q, ev, task, sessions, cutoff)
 		}
-		return evalGovPractice(ctx, q, ev, task, sessions)
+		return evalGovPractice(ctx, q, ev, task, sessions, cutoff)
 	case db.DomainDSA:
-		return evalDSA(ctx, q, ev, task, sessions)
+		return evalDSA(ctx, q, ev, task, sessions, cutoff)
 	case db.DomainSWE:
-		return evalSWE(ctx, q, ev, task, sessions)
+		return evalSWE(ctx, q, ev, task, sessions, cutoff)
 	default:
 		ev.ConfigError = fmt.Sprintf("unknown domain %q", string(task.Domain))
 		return ev, nil
 	}
+}
+
+// isActiveAsOf reports whether a session counts as active at the cutoff:
+// currently ACTIVE, or (historically) still running at the cutoff bound.
+func isActiveAsOf(s db.Session, cutoff int64) bool {
+	if cutoff == 0 {
+		return s.Status == db.SessionStatusActive
+	}
+	if s.StartedAt.Unix() >= cutoff {
+		return false
+	}
+	if s.Status == db.SessionStatusActive {
+		return true
+	}
+	return s.StoppedAt != nil && s.StoppedAt.Unix() >= cutoff
+}
+
+// evidenceSessions returns stopped sessions whose evidence may count:
+// all stopped sessions currently, or (historically) those stopped strictly
+// before the cutoff bound.
+func evidenceSessions(sessions []db.Session, cutoff int64) []db.Session {
+	var out []db.Session
+	for _, s := range sessions {
+		if s.Status != db.SessionStatusStopped || s.StoppedAt == nil {
+			continue
+		}
+		if cutoff != 0 && s.StoppedAt.Unix() >= cutoff {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// beforeCutoff reports whether a recorded Unix timestamp counts under the
+// cutoff (exclusive bound; 0 disables filtering).
+func beforeCutoff(ts int64, cutoff int64) bool {
+	return cutoff == 0 || ts < cutoff
 }
 
 func sessionsForTask(ctx context.Context, q db.DBTX, taskID db.ID) ([]db.Session, error) {
@@ -86,17 +137,7 @@ func sessionsForTask(ctx context.Context, q db.DBTX, taskID db.ID) ([]db.Session
 	return out, nil
 }
 
-func stoppedSessions(sessions []db.Session) []db.Session {
-	var out []db.Session
-	for _, s := range sessions {
-		if s.Status == db.SessionStatusStopped {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-func evalGovLecture(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session) (TaskEvaluation, error) {
+func evalGovLecture(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session, cutoff int64) (TaskEvaluation, error) {
 	if task.TargetJSON == nil || *task.TargetJSON == "" {
 		ev.ConfigError = "lecture task has no target"
 		return ev, nil
@@ -111,26 +152,36 @@ func evalGovLecture(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.T
 		return ev, nil
 	}
 	ev.Total = 1
-	done, err := runtime.IsLectureComplete(ctx, q, lt.LectureID)
+	// Lecture completion is timestamped: historically only completions
+	// strictly before the cutoff count. DB failures propagate; a genuine
+	// no-row result means "not done".
+	comp, err := runtime.GetLectureCompletion(ctx, q, lt.LectureID)
 	if err != nil {
+		if isNotFoundErr(err) {
+			ev.Missing = []string{string(lt.LectureID)}
+			if ev.Active == nil {
+				ev.State = StateTodo
+			}
+			return ev, nil
+		}
 		return TaskEvaluation{}, fmt.Errorf("engine: lecture completion lookup: %w", err)
 	}
-	if done {
-		ev.Done = 1
-		ev.Completed = []string{string(lt.LectureID)}
-		if ev.Active == nil {
-			ev.State = StateCompleted
-		}
-	} else {
+	if !beforeCutoff(comp.CompletedAt.Unix(), cutoff) {
 		ev.Missing = []string{string(lt.LectureID)}
 		if ev.Active == nil {
 			ev.State = StateTodo
 		}
+		return ev, nil
+	}
+	ev.Done = 1
+	ev.Completed = []string{string(lt.LectureID)}
+	if ev.Active == nil {
+		ev.State = StateCompleted
 	}
 	return ev, nil
 }
 
-func evalGovPractice(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session) (TaskEvaluation, error) {
+func evalGovPractice(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session, cutoff int64) (TaskEvaluation, error) {
 	if task.TargetJSON == nil || *task.TargetJSON == "" {
 		ev.ConfigError = "practice task has no target"
 		return ev, nil
@@ -146,12 +197,15 @@ func evalGovPractice(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.
 	}
 	ev.Total = len(pt.TopicIDs)
 	satisfied := map[string]bool{}
-	for _, s := range stoppedSessions(sessions) {
+	for _, s := range evidenceSessions(sessions, cutoff) {
 		recs, err := runtime.GetGovPracticeRecordsBySession(ctx, q, s.ID)
 		if err != nil {
 			return TaskEvaluation{}, fmt.Errorf("engine: practice records: %w", err)
 		}
 		for _, r := range recs {
+			if !beforeCutoff(r.RecordedAt.Unix(), cutoff) {
+				continue
+			}
 			if !validPracticeEvidence(r) {
 				continue
 			}
@@ -193,7 +247,7 @@ func validPracticeEvidence(r db.GovPracticeRecord) bool {
 	return true
 }
 
-func evalDSA(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session) (TaskEvaluation, error) {
+func evalDSA(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session, cutoff int64) (TaskEvaluation, error) {
 	if task.TargetJSON == nil || *task.TargetJSON == "" {
 		ev.ConfigError = "DSA task has no target"
 		return ev, nil
@@ -210,12 +264,15 @@ func evalDSA(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 	items := dt.Items()
 	ev.Total = len(items)
 	satisfied := map[string]bool{}
-	for _, s := range stoppedSessions(sessions) {
+	for _, s := range evidenceSessions(sessions, cutoff) {
 		atts, err := runtime.GetDSAAttemptsBySession(ctx, q, s.ID)
 		if err != nil {
 			return TaskEvaluation{}, fmt.Errorf("engine: dsa attempts: %w", err)
 		}
 		for _, a := range atts {
+			if !beforeCutoff(a.AttemptedAt.Unix(), cutoff) {
+				continue
+			}
 			if a.SolveTimeSeconds == nil || *a.SolveTimeSeconds <= 0 {
 				continue
 			}
@@ -240,7 +297,7 @@ func evalDSA(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 	return ev, nil
 }
 
-func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session) (TaskEvaluation, error) {
+func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session, cutoff int64) (TaskEvaluation, error) {
 	if task.TargetJSON == nil || *task.TargetJSON == "" {
 		ev.ConfigError = "SWE task has no target"
 		return ev, nil
@@ -257,12 +314,15 @@ func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 	items := st.Items()
 	ev.Total = len(items)
 	satisfied := map[string]bool{}
-	for _, s := range stoppedSessions(sessions) {
+	for _, s := range evidenceSessions(sessions, cutoff) {
 		execs, err := runtime.GetSWEExecutionsBySession(ctx, q, s.ID)
 		if err != nil {
 			return TaskEvaluation{}, fmt.Errorf("engine: swe executions: %w", err)
 		}
 		for _, e := range execs {
+			if !beforeCutoff(e.RecordedAt.Unix(), cutoff) {
+				continue
+			}
 			if !validSWEStatus(e.Status) {
 				continue
 			}
@@ -273,7 +333,11 @@ func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 		if it.TaskID == nil {
 			// Legacy area-only target: satisfied when any execution exists
 			// for a task in that area from this task's sessions.
-			if areaSatisfied(ctx, q, it.AreaID, sessions) {
+			ok, err := areaSatisfied(ctx, q, it.AreaID, sessions, cutoff)
+			if err != nil {
+				return TaskEvaluation{}, err
+			}
+			if ok {
 				ev.Done++
 				ev.Completed = append(ev.Completed, "area:"+string(it.AreaID))
 			} else {
@@ -302,25 +366,28 @@ func validSWEStatus(s db.SWEExecutionStatus) bool {
 	return s == db.SWEStatusCompleted || s == db.SWEStatusPartial || s == db.SWEStatusBlocked
 }
 
-func areaSatisfied(ctx context.Context, q db.DBTX, areaID db.ID, sessions []db.Session) bool {
+func areaSatisfied(ctx context.Context, q db.DBTX, areaID db.ID, sessions []db.Session, cutoff int64) (bool, error) {
 	tasks, err := catalog.GetSWETasks(ctx, q, areaID)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("engine: list swe tasks: %w", err)
 	}
 	ids := map[string]bool{}
 	for _, t := range tasks {
 		ids[string(t.ID)] = true
 	}
-	for _, s := range stoppedSessions(sessions) {
+	for _, s := range evidenceSessions(sessions, cutoff) {
 		execs, err := runtime.GetSWEExecutionsBySession(ctx, q, s.ID)
 		if err != nil {
-			continue
+			return false, fmt.Errorf("engine: swe executions: %w", err)
 		}
 		for _, e := range execs {
+			if !beforeCutoff(e.RecordedAt.Unix(), cutoff) {
+				continue
+			}
 			if ids[string(e.TaskID)] && validSWEStatus(e.Status) {
-				return true
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, nil
 }

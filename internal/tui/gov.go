@@ -81,9 +81,12 @@ func (s *GovScreen) Reload() {
 	}
 	s.exams = exams
 	for _, e := range exams {
-		if cov, err := ComputeExamCoverage(ctx, s.app.DB, e.ID); err == nil {
-			s.coverages[e.ID] = cov
+		cov, err := ComputeExamCoverage(ctx, s.app.DB, e.ID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			continue
 		}
+		s.coverages[e.ID] = cov
 	}
 	if s.level == govExam && s.examID != "" {
 		s.reloadExam()
@@ -176,7 +179,11 @@ func (s *GovScreen) reloadExamTopics() {
 				continue
 			}
 			mark := "○"
-			if topicLectureComplete(ctx, s.app.DB, t.ID) {
+			done, err := topicLectureCompleteE(ctx, s.app.DB, t.ID)
+			if err != nil {
+				s.err = "data error: " + err.Error()
+				mark = "?"
+			} else if done {
 				mark = "✓"
 			}
 			items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Mark: mark})
@@ -217,7 +224,12 @@ func (s *GovScreen) reloadBrowserTopics() {
 	}
 	items := make([]RowItem, 0, len(topics))
 	for _, t := range topics {
-		done, total, _, _ := TopicLectureProgress(ctx, s.app.DB, t.ID)
+		done, total, _, _, err := TopicLectureProgressE(ctx, s.app.DB, t.ID)
+		if err != nil {
+			s.err = "data error: " + err.Error()
+			items = append(items, RowItem{ID: string(t.ID), Title: t.Name, Meta: "?"})
+			continue
+		}
 		mark := "○"
 		if done == total {
 			mark = "✓"
@@ -238,9 +250,18 @@ func (s *GovScreen) openTopic(topicID string) {
 	if g, err := catalog.GetGovSubject(ctx, s.app.DB, tp.SubjectID); err == nil {
 		subj = g.Name
 	}
-	done, total, flags, lecs := TopicLectureProgress(ctx, s.app.DB, tp.ID)
+	done, total, flags, lecs, err := TopicLectureProgressE(ctx, s.app.DB, tp.ID)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
+	stats, err := ComputeTopicPracticeStatsE(ctx, s.app.DB, tp.ID)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
 	s.detail = &GovTopicView{Topic: tp, Subject: subj, Done: done, Total: total, Flags: flags, Lectures: lecs,
-		Stats: ComputeTopicPracticeStats(ctx, s.app.DB, tp.ID), UsedBy: ExamsForTopic(ctx, s.app.DB, tp.ID)}
+		Stats: stats, UsedBy: ExamsForTopic(ctx, s.app.DB, tp.ID)}
 	s.returnTo = s.level
 	s.level = govTopic
 	s.detailScroll.Reset()
@@ -587,8 +608,14 @@ func (s *GovScreen) browserRight() string {
 	}
 	topics, _ := catalog.GetGovTopics(ctx, s.app.DB, db.ID(sid))
 	done, total := 0, len(topics)
+	unavailable := false
 	for _, t := range topics {
-		if topicLectureComplete(ctx, s.app.DB, t.ID) {
+		d, err := topicLectureCompleteE(ctx, s.app.DB, t.ID)
+		if err != nil {
+			unavailable = true
+			break
+		}
+		if d {
 			done++
 		}
 	}
@@ -597,8 +624,12 @@ func (s *GovScreen) browserRight() string {
 	sb.WriteString(thScreenTitle.Render(TruncateToWidth(name, 30)) + "\n")
 	sb.WriteString(RowDivider(30) + "\n")
 	sb.WriteString(SectionHeader("LECTURE COVERAGE") + "\n")
-	sb.WriteString(ProgressBar{Ratio: ratio(done, total), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
-	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics lecture-complete", done, total)) + "\n")
+	if unavailable {
+		sb.WriteString(thWarn.Render("coverage data unavailable") + "\n")
+	} else {
+		sb.WriteString(ProgressBar{Ratio: ratio(done, total), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
+		sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics lecture-complete", done, total)) + "\n")
+	}
 	sb.WriteString(RowDivider(30) + "\n")
 	sb.WriteString(DomainSection("GOV", "TOPICS") + "\n")
 	sb.WriteString(s.subTopicList.View())

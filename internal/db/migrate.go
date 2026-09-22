@@ -92,8 +92,11 @@ func applyMigration(ctx context.Context, sqlDB *sql.DB, version int, body string
 }
 
 // splitStatements splits a migration file on semicolons.
-// The schema contains no triggers/procedures or semicolons inside
-// string literals, so a naive split is deterministic and sufficient.
+// The schema contains no semicolons inside string literals, so a naive
+// split is deterministic and sufficient — except trigger bodies, which
+// legitimately contain semicolons between BEGIN and END. Chunks belonging
+// to a CREATE TRIGGER statement are therefore rejoined until the closing
+// END before splitting.
 func splitStatements(body string) []string {
 	// Strip line comments starting with -- to avoid stray semicolons there.
 	lines := strings.Split(body, "\n")
@@ -105,10 +108,48 @@ func splitStatements(body string) []string {
 	cleaned := strings.Join(lines, "\n")
 	parts := strings.Split(cleaned, ";")
 	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if strings.TrimSpace(p) != "" {
-			out = append(out, strings.TrimSpace(p))
+	var pending string
+	inTrigger := false
+	flush := func(s string) {
+		if strings.TrimSpace(s) != "" {
+			out = append(out, strings.TrimSpace(s))
 		}
 	}
+	for _, p := range parts {
+		if !inTrigger {
+			trimmed := strings.TrimSpace(p)
+			upper := strings.ToUpper(trimmed)
+			if strings.HasPrefix(upper, "CREATE TRIGGER") || strings.HasPrefix(upper, "CREATE TEMP TRIGGER") {
+				// A trigger body follows; rejoin until its END.
+				inTrigger = true
+				pending = p
+				if isTriggerEnd(pending) {
+					inTrigger = false
+					flush(pending)
+					pending = ""
+				}
+				continue
+			}
+			flush(p)
+			continue
+		}
+		pending += ";" + p
+		if isTriggerEnd(pending) {
+			inTrigger = false
+			flush(pending)
+			pending = ""
+		}
+	}
+	flush(pending)
 	return out
+}
+
+// isTriggerEnd reports whether a CREATE TRIGGER chunk has reached its
+// closing END (the last significant token).
+func isTriggerEnd(chunk string) bool {
+	fields := strings.Fields(strings.ToUpper(strings.TrimSpace(chunk)))
+	if len(fields) == 0 {
+		return false
+	}
+	return fields[len(fields)-1] == "END"
 }

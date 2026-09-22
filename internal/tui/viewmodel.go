@@ -414,7 +414,11 @@ func ComputeExamCoverage(ctx context.Context, q db.DBTX, examID db.ID) (ExamCove
 			order = append(order, tp.SubjectID)
 		}
 		sc.Total++
-		if topicLectureComplete(ctx, q, s.TopicID) {
+		done, err := topicLectureCompleteE(ctx, q, s.TopicID)
+		if err != nil {
+			return ExamCoverage{}, err
+		}
+		if done {
 			cov.Done++
 			sc.Done++
 		}
@@ -425,35 +429,48 @@ func ComputeExamCoverage(ctx context.Context, q db.DBTX, examID db.ID) (ExamCove
 	return cov, nil
 }
 
-func topicLectureComplete(ctx context.Context, q db.DBTX, topicID db.ID) bool {
+// topicLectureCompleteE reports whether every lecture of a topic is
+// complete (zero lectures counts as complete). DB failures propagate;
+// callers must surface them as data errors instead of defaulting.
+func topicLectureCompleteE(ctx context.Context, q db.DBTX, topicID db.ID) (bool, error) {
 	lecs, err := catalog.GetGovLectures(ctx, q, topicID)
-	if err != nil || len(lecs) == 0 {
-		return true // zero lectures: track satisfied
+	if err != nil {
+		return false, err
+	}
+	if len(lecs) == 0 {
+		return true, nil // zero lectures: track satisfied
 	}
 	for _, l := range lecs {
 		ok, err := runtime.IsLectureComplete(ctx, q, l.ID)
-		if err != nil || !ok {
-			return false
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
-// TopicLectureProgress returns done/total plus per-lecture done flags.
-func TopicLectureProgress(ctx context.Context, q db.DBTX, topicID db.ID) (done, total int, flags []bool, lectures []db.GovLecture) {
+// TopicLectureProgressE returns done/total plus per-lecture done flags.
+// DB failures propagate; callers must surface them as data errors.
+func TopicLectureProgressE(ctx context.Context, q db.DBTX, topicID db.ID) (done, total int, flags []bool, lectures []db.GovLecture, err error) {
 	lecs, err := catalog.GetGovLectures(ctx, q, topicID)
 	if err != nil {
-		return 0, 0, nil, nil
+		return 0, 0, nil, nil, err
 	}
 	total = len(lecs)
 	for _, l := range lecs {
-		ok, _ := runtime.IsLectureComplete(ctx, q, l.ID)
+		ok, err := runtime.IsLectureComplete(ctx, q, l.ID)
+		if err != nil {
+			return 0, 0, nil, nil, err
+		}
 		flags = append(flags, ok)
 		if ok {
 			done++
 		}
 	}
-	return done, total, flags, lecs
+	return done, total, flags, lecs, nil
 }
 
 // TopicPracticeStats aggregates raw practice rows; no progression formula.
@@ -467,10 +484,10 @@ type TopicPracticeStats struct {
 	HasSpeed  bool
 }
 
-func ComputeTopicPracticeStats(ctx context.Context, q db.DBTX, topicID db.ID) TopicPracticeStats {
+func ComputeTopicPracticeStatsE(ctx context.Context, q db.DBTX, topicID db.ID) (TopicPracticeStats, error) {
 	hist, err := runtime.GetGovPracticeHistory(ctx, q, topicID)
 	if err != nil {
-		return TopicPracticeStats{}
+		return TopicPracticeStats{}, err
 	}
 	var st TopicPracticeStats
 	var weightedSum float64
@@ -492,7 +509,7 @@ func ComputeTopicPracticeStats(ctx context.Context, q db.DBTX, topicID db.ID) To
 		st.AvgSpeed = weightedSum / float64(weightedN)
 		st.HasSpeed = true
 	}
-	return st
+	return st, nil
 }
 
 // ExamsForTopic returns exam names mapping a global topic (derived grouping).
@@ -636,8 +653,13 @@ func ValidateSolveTime(s string) (int, *int, string) {
 	return v, &v, ""
 }
 
-// DecideDSAAttemptMode picks NEW only when the target says NEW and no NEW
-// attempt exists yet (preserves the partial-unique invariant); else REPEAT.
+// DecideDSAAttemptMode is legacy.
+//
+// Deprecated: non-authoritative. It silently converts a NEW target into
+// REPEAT when a NEW attempt already exists. The engine never converts:
+// engine.SaveDSAEvidence surfaces a stale target (ErrInvalidTarget)
+// instead. Kept only for the existing unit test; product code must not
+// decide attempt modes outside the engine.
 func DecideDSAAttemptMode(existing []db.DSAAttempt, target db.DSAMode) db.DSAMode {
 	if target == db.DSAModeNew {
 		for _, a := range existing {

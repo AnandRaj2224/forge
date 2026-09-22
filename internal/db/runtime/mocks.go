@@ -360,6 +360,10 @@ func ListWeakTopics(ctx context.Context, q db.DBTX, sectionID db.ID) ([]db.MockW
 // topicIDs are ordered: index 0 = strongest weakness (rank 1).
 // Enforces: max 3, no duplicates, every topic exists and belongs to the
 // mock's exam syllabus (no impossible exam/topic combos).
+//
+// NOTE: the product path is engine.ReplaceWeakTopicsAtomic, which also
+// validates the explicit GOV subject mapping. New product code must use
+// the engine; this stays as the low-level validated primitive.
 func SetWeakTopics(ctx context.Context, q db.DBTX, mockID, sectionID db.ID, topicIDs []db.ID) error {
 	if len(topicIDs) > 3 {
 		return fmt.Errorf("runtime: at most 3 weak topics per section")

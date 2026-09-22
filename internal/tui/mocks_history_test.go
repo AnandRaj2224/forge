@@ -196,8 +196,9 @@ func TestRadioRoundTripStillVisible(t *testing.T) {
 }
 
 // TestMockCreateFlow guards the single mock creation flow: raw facts in,
-// derived metrics out, sections auto-derived from the exam, weak topics
-// picked per section in one continuous chain. No manual sections.
+// derived metrics out, explicit user-entered sections (actual name +
+// GOV subject mapping, never inferred), weak topics picked per section,
+// one atomic engine save.
 func TestMockCreateFlow(t *testing.T) {
 	database := seedMockHistoryDB(t)
 	app := NewApp(database)
@@ -232,26 +233,47 @@ func TestMockCreateFlow(t *testing.T) {
 	typeKeys("71")
 	for range [4]struct{}{} {
 		testSend(app, "down")
-	} // Rank, Percentile, Average Speed, SAVE (cFocus 12)
-	if app.mocks.cFocus != app.mocks.nCreateFocus()-1 {
-		t.Fatalf("cFocus=%d want save", app.mocks.cFocus)
+	} // Rank, Percentile, Average Speed, section name (cFocus 12)
+	if app.mocks.cFocus != 12 {
+		t.Fatalf("cFocus=%d want section name", app.mocks.cFocus)
 	}
+	// Explicit section: actual name + GOV subject (Quant is first).
+	typeKeys("QA-1")
+	if got := app.mocks.secSubjName(); got != "Quant" {
+		t.Fatalf("default subject=%q want Quant", got)
+	}
+	testSend(app, "down") // GOV subject
+	testSend(app, "down") // ADD SECTION
 	testSend(app, "enter")
-	// AFCAT maps only Quant: one auto-section, straight into its editor.
+	// Straight into the weak-topic editor for the staged section.
 	if app.mocks.mode != "weak" {
-		t.Fatalf("mode=%q want weak-chain (%s)", app.mocks.mode, app.mocks.cErr)
+		t.Fatalf("mode=%q want weak editor (%s)", app.mocks.mode, app.mocks.cErr)
 	}
-	if sec := string(app.mocks.wSection.Name); sec != "Quant" && sec != "QUANT" {
-		t.Fatalf("chain section=%q want exam subject", sec)
+	if sec := string(app.mocks.wSection.Name); sec != "QA-1" {
+		t.Fatalf("editor section=%q want explicit name QA-1", sec)
 	}
-	// Toggle two weak topics, save, chain ends (single section).
+	if app.mocks.wSection.GovSubjectID == nil || *app.mocks.wSection.GovSubjectID != "subj-quant" {
+		t.Fatalf("editor must carry the explicit Quant mapping: %+v", app.mocks.wSection)
+	}
+	// Toggle two weak topics, save back into the create form.
 	testSend(app, "down") // filter -> list
 	testSend(app, "enter")
 	testSend(app, "down")
 	testSend(app, "enter")
 	testSend(app, "s")
+	if app.mocks.mode != "create" {
+		t.Fatalf("mode=%q want create (%s)", app.mocks.mode, app.mocks.wErr)
+	}
+	if len(app.mocks.stagedSecs) != 1 || len(app.mocks.stagedSecs[0].Weak) != 2 {
+		t.Fatalf("staged=%+v", app.mocks.stagedSecs)
+	}
+	// Reach SAVE and persist atomically via the engine.
+	for app.mocks.cFocus != app.mocks.nCreateFocus()-1 {
+		testSend(app, "down")
+	}
+	testSend(app, "enter")
 	if app.mocks.mode != "browse" {
-		t.Fatalf("mode=%q want browse (%s)", app.mocks.mode, app.mocks.wErr)
+		t.Fatalf("mode=%q want browse (%s)", app.mocks.mode, app.mocks.cErr)
 	}
 	ctx := context.Background()
 	mocks, err := runtime.ListMocks(ctx, database)
@@ -270,7 +292,13 @@ func TestMockCreateFlow(t *testing.T) {
 	}
 	secs, _ := runtime.ListMockSections(ctx, database, m.ID)
 	if len(secs) != 1 {
-		t.Fatalf("sections=%d want 1 exam-derived", len(secs))
+		t.Fatalf("sections=%d want 1 explicit", len(secs))
+	}
+	if secs[0].Name != "QA-1" {
+		t.Fatalf("section name=%q want explicit QA-1", secs[0].Name)
+	}
+	if secs[0].GovSubjectID == nil || *secs[0].GovSubjectID != "subj-quant" {
+		t.Fatalf("section mapping=%v want Quant", secs[0].GovSubjectID)
 	}
 	ws, _ := runtime.ListWeakTopics(ctx, database, secs[0].ID)
 	if len(ws) != 2 {
@@ -299,9 +327,10 @@ func TestMockCreateValidation(t *testing.T) {
 	testSend(app, "5")
 	testSend(app, "down") // correct
 	testSend(app, "9")
-	for range [5]struct{}{} {
+	// Reach SAVE through the section block, then attempt the save.
+	for app.mocks.cFocus != app.mocks.nCreateFocus()-1 {
 		testSend(app, "down")
-	} // rank, percentile, avg, save (4 downs?) -> save
+	}
 	testSend(app, "enter")
 	if app.mocks.mode != "create" {
 		t.Fatalf("invalid combo left create mode")

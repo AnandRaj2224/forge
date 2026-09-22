@@ -368,25 +368,14 @@ func (s *ResultForm) focusLine() int {
 	}
 	switch s.kind {
 	case "PRACTICE":
-		// p{r}-{field}: base = header + sum of prior rows.
-		var r, c int
+		// p{r}-{field}: base = header + sum of prior row heights.
+		// Time/Attempted share the first field line, Correct/Avg the second.
+		var r int
 		fmt.Sscanf(id, "p%d-", &r)
-		for i, h := range s.rowHeights() {
-			if i >= r {
-				break
-			}
-			_ = h
-		}
 		base := header
 		for i := 0; i < r; i++ {
 			base += s.rowHeights()[i]
 		}
-		if strings.HasSuffix(id, "-time") || strings.HasSuffix(id, "-att") {
-			c = 0
-		} else {
-			c = 1
-		}
-		_ = c
 		if strings.HasSuffix(id, "-time") || strings.HasSuffix(id, "-att") {
 			return base + 2
 		}

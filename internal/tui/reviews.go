@@ -41,21 +41,27 @@ func NewReviewsScreen(a *App) *ReviewsScreen {
 	return &ReviewsScreen{app: a, weeks: NewNavigator(), nowFn: time.Now}
 }
 
-// lastWeeks returns the last n Mon..Sun weeks (newest first) as id/start/end.
+// lastWeeks returns the last n Mon..Sun weeks (newest first) as id/start/end
+// on the Forge calendar (Asia/Kolkata, Monday start). Never UTC date math:
+// week membership must match History and the stored YYYY-Www review IDs.
 func lastWeeks(now time.Time, n int) []weekEntry {
-	days := runtime.CurrentWeekDays(now)
-	if len(days) == 0 {
+	cal := engine.DefaultCalendar()
+	week := cal.CurrentWeek(now)
+	if len(week) == 0 {
 		return nil
 	}
-	monday := days[0]
+	monday, err := time.ParseInLocation("2006-01-02", week[0], cal.Location())
+	if err != nil {
+		return nil
+	}
 	out := make([]weekEntry, 0, n)
 	for i := 0; i < n; i++ {
 		mon := monday.AddDate(0, 0, -7*i)
 		sun := mon.AddDate(0, 0, 6)
-		isoYear, isoWeek := mon.ISOWeek()
+		start := mon.Format("2006-01-02")
 		out = append(out, weekEntry{
-			ID:    fmt.Sprintf("%d-W%02d", isoYear, isoWeek),
-			Start: mon.Format("2006-01-02"),
+			ID:    cal.ISOWeekID(start),
+			Start: start,
 			End:   sun.Format("2006-01-02"),
 		})
 	}

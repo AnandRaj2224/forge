@@ -32,16 +32,19 @@ type MocksScreen struct {
 
 // create form
 	cExamCur int
-	cSubjects []string // cached subjects of the selected exam
 	cInputs  []textinput.Model
 	cLabels  []string
 	cFocus   int
 	cErr     string
 
-// create-chain weak selection across fresh sections
-	wChain     bool
-	wChainSecs []db.MockSection
-	wChainIdx  int
+	// Explicit user-entered sections for the new mock: each carries the
+	// actual section name plus the user-selected GOV subject mapping
+	// (never inferred). Weak topics are staged per section via the weak
+	// editor before the atomic engine save.
+	govSubjects []db.GovSubject
+	secName     textinput.Model
+	secSubjCur  int
+	stagedSecs  []stagedSection
 
 	// weak editor
 	wMockID   db.ID
@@ -54,11 +57,24 @@ type MocksScreen struct {
 	wStaged   []db.ID
 	wFocus    int // 0 filter, 1 list, 2 save
 	wErr      string
+	// Staged mode: the editor picks weak topics for a not-yet-persisted
+	// staged section (create flow) instead of a stored section.
+	wStagedMode bool
+	wStagedIdx  int
+	wScroll     ScrollViewport // staged summary scrolls when overflowing
 
 	// Shared scroll viewports: detail and create panes scroll
 	// independently whenever they overflow.
 	detailScroll ScrollViewport
 	formScroll   ScrollViewport
+}
+
+// stagedSection is one user-entered mock section pending the atomic save:
+// actual section name + explicit GOV subject mapping + ordered weak topics.
+type stagedSection struct {
+	Name         string
+	GovSubjectID db.ID
+	Weak         []db.ID
 }
 
 func NewMocksScreen(a *App) *MocksScreen {
@@ -185,7 +201,7 @@ func (s *MocksScreen) qBacksOut() bool {
 func (s *MocksScreen) textEditing() bool {
 	switch s.mode {
 	case "create":
-		return s.cFocus >= 1 && s.cFocus <= len(s.cInputs)
+		return (s.cFocus >= 1 && s.cFocus <= len(s.cInputs)) || s.cFocus == len(s.cInputs)+1
 	case "weak":
 		return s.wFocus == 0
 	}
@@ -194,10 +210,21 @@ func (s *MocksScreen) textEditing() bool {
 
 func (s *MocksScreen) onBack() bool {
 	switch s.mode {
-	case "create", "weak":
+	case "weak":
+		if s.wStagedMode {
+			// Back to the create form; the staged section (and its
+			// staged weak topics) is kept for the atomic save.
+			s.mode = "create"
+			s.wStagedMode = false
+			s.wErr = ""
+			return true
+		}
 		s.mode = "browse"
-		s.wChain = false
-		s.wChainSecs = nil
+		s.cErr, s.wErr = "", ""
+		s.Reload()
+		return true
+	case "create":
+		s.mode = "browse"
 		s.cErr, s.wErr = "", ""
 		s.Reload()
 		return true
@@ -292,6 +319,10 @@ func (s *MocksScreen) deleteSelected() {
 
 // ---- create ----
 
+// createFocus layout: 0 exam selector, 1..N mock inputs, then the section
+// block (name input, GOV subject selector, ADD button), then SAVE.
+const createInputCount = 11
+
 func (s *MocksScreen) startCreate() {
 	s.mode = "create"
 	s.cExamCur = 0
@@ -309,47 +340,74 @@ func (s *MocksScreen) startCreate() {
 		ti.SetWidth(20)
 		s.cInputs[i] = ti
 	}
-	s.cFocus = 0 // 0 = exam selector, 1..N inputs, N+1 = SAVE
+	// Explicit section block: actual section name + GOV subject mapping.
+	sn := textinput.New()
+	sn.Prompt = "│ "
+	sn.CharLimit = 32
+	sn.Placeholder = "actual section name"
+	sn.SetWidth(20)
+	s.secName = sn
+	s.secSubjCur = 0
+	s.stagedSecs = nil
+	subjs, err := catalog.GetGovSubjects(context.Background(), s.app.DB)
+	if err != nil {
+		s.cErr = "data error: " + err.Error()
+	} else {
+		s.govSubjects = subjs
+	}
+	s.cFocus = 0 // 0 = exam selector, 1..11 inputs, 12 name, 13 subject, 14 add, 15 save
 	s.cErr = ""
-	s.refreshCreateSubjects()
+	s.formScroll.Reset()
 	s.updateCreateFocus()
 }
 
-// refreshCreateSubjects caches the selected exam's subject names: the
-// sections the new mock will derive automatically.
-func (s *MocksScreen) refreshCreateSubjects() {
-	s.cSubjects = nil
-	if len(s.exams) == 0 {
-		return
-	}
-	exam := s.exams[s.cExamCur%len(s.exams)]
-	cov, err := ComputeExamCoverage(context.Background(), s.app.DB, exam.ID)
-	if err != nil {
-		return
-	}
-	for _, sc := range cov.Subjects {
-		s.cSubjects = append(s.cSubjects, sc.Subject)
-	}
-}
+func (s *MocksScreen) nCreateFocus() int { return 1 + createInputCount + 4 } // exam + inputs + name + subject + add + save
 
-func (s *MocksScreen) nCreateFocus() int { return 1 + len(s.cInputs) + 1 } // exam + inputs + save
+func (s *MocksScreen) secSubjName() string {
+	if len(s.govSubjects) == 0 {
+		return "—"
+	}
+	return s.govSubjects[s.secSubjCur%len(s.govSubjects)].Name
+}
 
 func (s *MocksScreen) updateCreateFocus() {
 	for i := range s.cInputs {
 		s.cInputs[i].Blur()
 	}
+	s.secName.Blur()
 	if s.cFocus >= 1 && s.cFocus <= len(s.cInputs) {
 		s.cInputs[s.cFocus-1].Focus()
+	} else if s.cFocus == len(s.cInputs)+1 {
+		s.secName.Focus()
 	}
 }
 
-// followCreateFocus keeps the focused create field reachable: exam on top,
-// SAVE on bottom, proportional in between.
-func (s *MocksScreen) followCreateFocus() {
-	n := s.nCreateFocus()
-	if n <= 1 {
-		return
+// createFocusLine returns the 0-based content line of the focused widget
+// inside createRightBody output, derived from the same structured layout
+// the renderer uses (never hard-coded guesses). Multi-line controls
+// (bordered buttons) resolve to their first line.
+func (s *MocksScreen) createFocusLine() int {
+	n := len(s.cInputs)
+	switch {
+	case s.cFocus <= 0:
+		return 0
+	case s.cFocus >= 1 && s.cFocus <= n:
+		return s.cFocus // header(0) + inputs start at line 1
+	case s.cFocus == n+1: // section name
+		return n + 3
+	case s.cFocus == n+2: // GOV subject selector
+		return n + 4
+	case s.cFocus == n+3: // ADD SECTION button box
+		return n + 5
+	default: // SAVE button box
+		return n + 9
 	}
+}
+
+// followCreateFocus keeps the focused create field visible: exam on top,
+// SAVE on bottom, exact structured line otherwise.
+func (s *MocksScreen) followCreateFocus() {
+	total := len(strings.Split(s.createRightBody(40), "\n"))
 	_, h := s.app.contentViewport()
 	bodyH := h
 	if bodyH < 8 {
@@ -359,33 +417,39 @@ func (s *MocksScreen) followCreateFocus() {
 	if innerH < 4 {
 		innerH = 4
 	}
-	// Approximate full create-form height: header + inputs + divider + save.
-	total := 2 + len(s.cInputs) + 3
 	if s.cFocus <= 0 {
 		s.formScroll.Reset()
 		return
 	}
-	if s.cFocus >= n-1 {
+	if s.cFocus >= s.nCreateFocus()-1 {
 		s.formScroll.Offset = 1 << 30
 		s.formScroll.Clamp(total, innerH)
 		return
 	}
-	maxOff := total - innerH
-	if maxOff <= 0 {
-		s.formScroll.Reset()
-		return
+	fl := s.createFocusLine()
+	if fl < s.formScroll.Offset {
+		s.formScroll.Offset = fl
+	} else if fl > s.formScroll.Offset+innerH-1 {
+		s.formScroll.Offset = fl - innerH + 1
 	}
-	s.formScroll.Offset = s.cFocus * maxOff / (n - 1)
 	s.formScroll.Clamp(total, innerH)
 }
 
 func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
 	k, isKey := msg.(tea.KeyPressMsg)
+	nameFocus := len(s.cInputs) + 1
+	subjFocus := len(s.cInputs) + 2
+	addFocus := len(s.cInputs) + 3
 	if !isKey {
 		// Forward to focused input.
 		if s.cFocus >= 1 && s.cFocus <= len(s.cInputs) {
 			var cmd tea.Cmd
 			s.cInputs[s.cFocus-1], cmd = s.cInputs[s.cFocus-1].Update(msg)
+			return cmd
+		}
+		if s.cFocus == nameFocus {
+			var cmd tea.Cmd
+			s.secName, cmd = s.secName.Update(msg)
 			return cmd
 		}
 		return nil
@@ -404,38 +468,53 @@ func (s *MocksScreen) updateCreate(msg tea.Msg) tea.Cmd {
 	case "left", "h":
 		if s.cFocus == 0 && len(s.exams) > 0 {
 			s.cExamCur = (s.cExamCur - 1 + len(s.exams)) % len(s.exams)
-			s.refreshCreateSubjects()
+			return nil
+		}
+		if s.cFocus == subjFocus && len(s.govSubjects) > 0 {
+			s.secSubjCur = (s.secSubjCur - 1 + len(s.govSubjects)) % len(s.govSubjects)
 			return nil
 		}
 	case "right", "l":
 		if s.cFocus == 0 && len(s.exams) > 0 {
 			s.cExamCur = (s.cExamCur + 1) % len(s.exams)
-			s.refreshCreateSubjects()
+			return nil
+		}
+		if s.cFocus == subjFocus && len(s.govSubjects) > 0 {
+			s.secSubjCur = (s.secSubjCur + 1) % len(s.govSubjects)
 			return nil
 		}
 	case "enter":
 		if s.cFocus == s.nCreateFocus()-1 {
-			// saveCreate owns the next mode: weak-chain for fresh
-			// sections, browse when there is nothing to pick.
-			if s.saveCreate() && !s.wChain {
+			if s.saveCreate() {
 				s.mode = "browse"
 				s.Reload()
 			}
 			return nil
 		}
+		if s.cFocus == addFocus {
+			s.addStagedSection()
+			return nil
+		}
 		if s.cFocus == 0 {
 			s.cFocus = 1
 			s.updateCreateFocus()
+			s.followCreateFocus()
 			return nil
 		}
 		// Enter in input moves next.
 		s.cFocus = (s.cFocus + 1) % s.nCreateFocus()
 		s.updateCreateFocus()
+		s.followCreateFocus()
 		return nil
 	}
 	if s.cFocus >= 1 && s.cFocus <= len(s.cInputs) {
 		var cmd tea.Cmd
 		s.cInputs[s.cFocus-1], cmd = s.cInputs[s.cFocus-1].Update(msg)
+		return cmd
+	}
+	if s.cFocus == nameFocus {
+		var cmd tea.Cmd
+		s.secName, cmd = s.secName.Update(msg)
 		return cmd
 	}
 	return nil
@@ -562,84 +641,48 @@ func (s *MocksScreen) saveCreate() bool {
 		Score: score, TotalScore: total, Attempted: attempted, TotalQuestions: totalQ,
 		Correct: correct, Incorrect: &incorrect, Unattempted: &unatt, RankValue: rankV,
 		Percentile: perc, Accuracy: acc, AvgSpeedSeconds: avg, CreatedAt: time.Now().UTC()}
-	// Engine metric validation (score<=total, correct<=attempted, etc.).
-	if err := engine.ValidateMockMetrics(m); err != nil {
+	// One atomic engine path: mock + sections + weak topics in ONE
+	// transaction (TUI input -> Engine CreateMockAtomic -> SQLite).
+	// The UI never orchestrates the transaction itself.
+	secs := make([]engine.MockSectionInput, 0, len(s.stagedSecs))
+	for _, st := range s.stagedSecs {
+		secs = append(secs, engine.MockSectionInput{
+			Name: st.Name, GovSubjectID: st.GovSubjectID, WeakTopics: st.Weak,
+		})
+	}
+	if _, err := engine.CreateMockAtomic(ctx, s.app.DB, m, secs, time.Now().UTC()); err != nil {
 		s.cErr = err.Error()
 		return false
 	}
-	// Atomic: mock + derived sections in ONE transaction. Sections carry the
-	// explicit GOV subject mapping (from coverage SubjectID, not inferred
-	// from the name string). The name remains the user-visible actual section
-	// name; the mapping is stored separately for the practice signal.
-	var secs []db.MockSection
-	if err := s.app.DB.WithTx(ctx, func(q db.DBTX) error {
-		if err := runtime.CreateMock(ctx, q, m); err != nil {
-			return err
-		}
-		derived, err := s.derivedSections(ctx, q, exam.ID, id)
-		if err != nil {
-			return err
-		}
-		for _, sec := range derived {
-			if err := runtime.CreateMockSection(ctx, q, sec); err != nil {
-				return err
-			}
-		}
-		secs = derived
-		return nil
-	}); err != nil {
-		s.cErr = err.Error()
-		return false
-	}
-	if len(secs) == 0 {
-		s.mode = "browse"
-		s.Reload()
-		return true
-	}
-	// One continuous flow: pick weak topics per fresh section in order.
-	s.wChain = true
-	s.wChainSecs = secs
-	s.wChainIdx = 0
-	s.openWeakFor(m, secs[0])
+	s.stagedSecs = nil
 	return true
 }
 
-// derivedSections builds one section per subject of the exam with the explicit
-// GOV subject mapping set (no name inference at save time).
-func (s *MocksScreen) derivedSections(ctx context.Context, q db.DBTX, examID, mockID db.ID) ([]db.MockSection, error) {
-	cov, err := ComputeExamCoverage(ctx, q, examID)
-	if err != nil {
-		return nil, err
+// addStagedSection stages one user-entered section (actual name + explicit
+// GOV subject mapping) and opens the weak-topic editor for it so its
+// 0-3 ordered weak topics are picked before the atomic save.
+func (s *MocksScreen) addStagedSection() {
+	name := strings.TrimSpace(s.secName.Value())
+	if name == "" {
+		s.cErr = "section name required"
+		return
 	}
-	secs := make([]db.MockSection, 0, len(cov.Subjects))
-	for i, sc := range cov.Subjects {
-		sid := sc.SubjectID
-		sec := db.MockSection{
-			ID: db.ID(fmt.Sprintf("msec-%d-%d", time.Now().UTC().UnixNano(), i)),
-			MockID: mockID, Name: sc.Subject, SortOrder: i + 1,
-			GovSubjectID: &sid,
-		}
-		secs = append(secs, sec)
+	if len(s.govSubjects) == 0 {
+		s.cErr = "no GOV subjects"
+		return
 	}
-	return secs, nil
-}
-
-// examSubjectSections creates one mock section per subject of the exam,
-// ordered as the exam maps them. Names come from catalog subjects.
-// Kept for compat; new code uses derivedSections inside a transaction.
-func (s *MocksScreen) examSubjectSections(ctx context.Context, examID, mockID db.ID) []db.MockSection {
-	secs, err := s.derivedSections(ctx, s.app.DB, examID, mockID)
-	if err != nil {
-		s.cErr = err.Error()
-		return nil
-	}
-	for _, sec := range secs {
-		if err := runtime.CreateMockSection(ctx, s.app.DB, sec); err != nil {
-			s.cErr = err.Error()
-			return nil
+	subj := s.govSubjects[s.secSubjCur%len(s.govSubjects)]
+	for _, st := range s.stagedSecs {
+		if strings.EqualFold(st.Name, name) {
+			s.cErr = "duplicate section name"
+			return
 		}
 	}
-	return secs
+	s.stagedSecs = append(s.stagedSecs, stagedSection{Name: name, GovSubjectID: subj.ID})
+	s.cErr = ""
+	s.secName.SetValue("")
+	s.updateCreateFocus()
+	s.openWeakForStaged(len(s.stagedSecs) - 1)
 }
 
 // ---- weak editor ----
@@ -652,7 +695,7 @@ func (s *MocksScreen) openWeakEditor() {
 	if s.secCur < 0 || s.secCur >= len(s.sections) {
 		s.secCur = 0
 	}
-	s.wChain = false
+	s.wStagedMode = false
 	s.openWeakFor(*m, s.sections[s.secCur])
 }
 
@@ -692,13 +735,67 @@ func (s *MocksScreen) openWeakFor(m db.Mock, sec db.MockSection) {
 	s.wList = NewNavigator()
 	s.wFocus = 0
 	s.wErr = ""
+	s.wStagedMode = false
 	s.mode = "weak"
 	s.refreshWeakList()
 }
 
-// saveWeakTopics persists the staged ordered weak topics atomically with full
-// subject+syllabus validation. Inside the creation chain it advances to the
-// next fresh section; otherwise it returns to browsing.
+// openWeakForStaged opens the weak-topic editor for a not-yet-persisted
+// staged section of the create flow. Choices are filtered to the staged
+// explicit GOV subject mapping AND the selected exam syllabus; saving
+// stages the ordered weak topics back into the create form (no DB write).
+func (s *MocksScreen) openWeakForStaged(idx int) {
+	if idx < 0 || idx >= len(s.stagedSecs) {
+		return
+	}
+	if len(s.exams) == 0 {
+		s.cErr = "no exams"
+		return
+	}
+	st := s.stagedSecs[idx]
+	exam := s.exams[s.cExamCur%len(s.exams)]
+	sec := db.MockSection{
+		ID: db.ID(fmt.Sprintf("staged-%d", idx)),
+		Name: st.Name, GovSubjectID: &st.GovSubjectID,
+	}
+	ctx := context.Background()
+	choices, err := s.sectionTopicChoicesFor(ctx, exam.ID, sec)
+	if err != nil {
+		s.cErr = err.Error()
+		return
+	}
+	s.wMockID = ""
+	s.wSection = sec
+	s.wExamID = exam.ID
+	s.wChoices = choices
+	s.wSubjName = map[string]string{}
+	subjs, _ := catalog.GetGovSubjects(ctx, s.app.DB)
+	for _, g := range subjs {
+		s.wSubjName[string(g.ID)] = g.Name
+	}
+	s.wStaged = append([]db.ID(nil), st.Weak...)
+	ti := textinput.New()
+	ti.Prompt = "│ "
+	ti.Placeholder = "filter topics…"
+	ti.CharLimit = 32
+	ti.SetWidth(24)
+	ti.Focus()
+	s.wFilter = ti
+	s.wList = NewNavigator()
+	s.wFocus = 0
+	s.wErr = ""
+	s.wStagedMode = true
+	s.wStagedIdx = idx
+	s.wScroll.Reset()
+	s.mode = "weak"
+	s.refreshWeakList()
+}
+
+// saveWeakTopics persists the staged ordered weak topics. For stored
+// sections it uses the atomic engine path with full subject+syllabus
+// validation and returns to browsing. For staged create-flow sections it
+// validates the same way and stages the topics back into the create form
+// (no DB write; the atomic engine save happens on mock SAVE).
 func (s *MocksScreen) saveWeakTopics() {
 	ctx := context.Background()
 	subj := db.ID("")
@@ -714,25 +811,32 @@ func (s *MocksScreen) saveWeakTopics() {
 		s.wErr = "section has no GOV subject mapping"
 		return
 	}
+	if s.wStagedMode {
+		if s.wStagedIdx < 0 || s.wStagedIdx >= len(s.stagedSecs) {
+			s.wErr = "staged section gone"
+			s.mode = "create"
+			s.wStagedMode = false
+			return
+		}
+		if err := engine.ValidateMockSection(ctx, s.app.DB, s.wExamID, engine.MockSectionInput{
+			Name: s.stagedSecs[s.wStagedIdx].Name, GovSubjectID: subj, WeakTopics: s.wStaged,
+		}); err != nil {
+			s.wErr = err.Error()
+			return
+		}
+		s.stagedSecs[s.wStagedIdx].Weak = append([]db.ID(nil), s.wStaged...)
+		s.mode = "create"
+		s.wStagedMode = false
+		s.wErr = ""
+		s.cFocus = len(s.cInputs) + 1 // back at the section name field
+		s.updateCreateFocus()
+		s.followCreateFocus()
+		return
+	}
 	if err := engine.ReplaceWeakTopicsAtomic(ctx, s.app.DB, s.wMockID, s.wSection.ID, subj, s.wStaged); err != nil {
 		s.wErr = err.Error()
 		return
 	}
-	if s.wChain && s.wChainIdx+1 < len(s.wChainSecs) {
-		mock, err := runtime.GetMock(ctx, s.app.DB, s.wMockID)
-		if err != nil {
-			s.wErr = err.Error()
-			s.wChain = false
-			s.mode = "browse"
-			s.Reload()
-			return
-		}
-		s.wChainIdx++
-		s.openWeakFor(mock, s.wChainSecs[s.wChainIdx])
-		return
-	}
-	s.wChain = false
-	s.wChainSecs = nil
 	s.mode = "browse"
 	s.Reload()
 }
@@ -1082,10 +1186,33 @@ func (s *MocksScreen) mockBody(inner int) string {
 	return sb.String()
 }
 
-// createSubjects returns the cached subject names of the selected exam.
-func (s *MocksScreen) createSubjects() []string { return s.cSubjects }
+// govSubjectName resolves a GOV subject ID to its display name.
+func (s *MocksScreen) govSubjectName(id db.ID) string {
+	ctx := context.Background()
+	if g, err := catalog.GetGovSubject(ctx, s.app.DB, id); err == nil {
+		return g.Name
+	}
+	return string(id)
+}
 
-// sectionSubjectLabel renders the explicit GOV subject mapping for a section.
+// stagedSummary renders the user-entered staged sections for the create
+// form: actual name + explicit GOV subject mapping + weak-topic count.
+func (s *MocksScreen) stagedSummary(inner int) string {
+	if len(s.stagedSecs) == 0 {
+		return thHelp.Render("no sections yet — add one below")
+	}
+	var sb strings.Builder
+	for i, st := range s.stagedSecs {
+		head := fmt.Sprintf("%02d  %s", i+1, TruncateToWidth(st.Name, inner-14))
+		sb.WriteString(thPrimary.Render(head) + "\n")
+		sb.WriteString("    " + thMeta.Render("maps to "+s.govSubjectName(st.GovSubjectID)+fmt.Sprintf("  ·  %d/3 weak", len(st.Weak))) + "\n")
+		if i < len(s.stagedSecs)-1 {
+			sb.WriteString(RowDivider(inner) + "\n")
+		}
+	}
+	return sb.String()
+}
+
 func (s *MocksScreen) sectionSubjectLabel(sec db.MockSection) string {
 	if sec.GovSubjectID != nil && *sec.GovSubjectID != "" {
 		if nm, ok := s.examName[string(*sec.GovSubjectID)]; ok && nm != "" {
@@ -1121,13 +1248,28 @@ func (s *MocksScreen) createView() string {
 		}
 		sb.WriteString(arrow + padRight(mark, 13) + " " + thPrimary.Render(TruncateToWidth(e.Name, lw-24)) + "\n")
 	}
-	// Sections derive automatically from the selected exam's subjects.
+	// User-entered sections: actual names + explicit GOV subject mappings.
 	sb.WriteString(RowDivider(lw-6) + "\n")
 	sb.WriteString(SectionHeader("SECTIONS") + "\n")
-	for _, sc := range s.createSubjects() {
-		sb.WriteString(thPrimary.Render(TruncateToWidth(sc, lw-8)) + "\n")
-	}
+	sb.WriteString(s.stagedSummary(lw-6) + "\n")
 	left := PanelFixed("EXAM", sb.String(), lw, bodyH, s.cFocus == 0)
+	// The create form scrolls independently when it overflows.
+	right := PanelFixed("DETAILS", ViewportView(s.createRightBody(rw-6), &s.formScroll, bodyH-4), rw, bodyH, s.cFocus > 0)
+	return lipglossJoin(left, right)
+}
+
+// createRightBody renders the right create-form body. Its line structure is
+// the structured field model createFocusLine/followCreateFocus derive from:
+// header(1) + inputs + divider + ADD SECTION header + name + subject +
+// ADD + divider + SAVE (+ optional error + help).
+func (s *MocksScreen) createRightBody(inner int) string {
+	if inner < 18 {
+		inner = 18
+	}
+	n := len(s.cInputs)
+	nameFocus := n + 1
+	subjFocus := n + 2
+	addFocus := n + 3
 	var rb strings.Builder
 	rb.WriteString(SectionHeader("NEW MOCK") + "\n")
 	for i, lb := range s.cLabels {
@@ -1137,16 +1279,24 @@ func (s *MocksScreen) createView() string {
 		ff := FormField{Label: lb, Input: s.cInputs[i]}
 		rb.WriteString(ff.View(focused, 15) + "\n")
 	}
-	rb.WriteString(RowDivider(rw-6) + "\n")
+	rb.WriteString(RowDivider(inner) + "\n")
+	rb.WriteString(SectionHeader("ADD SECTION") + "\n")
+	sn := FormField{Label: "Section name", Input: s.secName}
+	rb.WriteString(sn.View(s.cFocus == nameFocus, 15) + "\n")
+	subjLine := "  " + thMeta.Render(padRight("GOV subject", 15)+" ") + thPrimary.Render(TruncateToWidth(s.secSubjName(), 20))
+	if s.cFocus == subjFocus {
+		subjLine = thFocusMark.Render("▶ ") + thMeta.Render(padRight("GOV subject", 15)+" ") + thPrimary.Render(TruncateToWidth(s.secSubjName(), 20))
+	}
+	rb.WriteString(subjLine + "\n")
+	rb.WriteString(Button{Label: "ADD SECTION", Focused: s.cFocus == addFocus}.View() + "\n")
+	rb.WriteString(RowDivider(inner) + "\n")
 	save := Button{Label: "SAVE", Focused: s.cFocus == s.nCreateFocus()-1}
 	rb.WriteString(save.View() + "\n")
 	if s.cErr != "" {
 		rb.WriteString(thError.Render(s.cErr) + "\n")
 	}
-	rb.WriteString(thHelp.Render("↑/↓ move · H/L exam · Enter SAVE · ESC back"))
-	// The create form scrolls independently when it overflows.
-	right := PanelFixed("DETAILS", ViewportView(rb.String(), &s.formScroll, bodyH-4), rw, bodyH, s.cFocus > 0)
-	return lipglossJoin(left, right)
+	rb.WriteString(thHelp.Render("↑/↓ move · H/L exam+subject · Enter ADD/SAVE · ESC back"))
+	return rb.String()
 }
 
 func (s *MocksScreen) weakView() string {
@@ -1199,6 +1349,19 @@ func (s *MocksScreen) weakView() string {
 		rb.WriteString(thError.Render(s.wErr) + "\n")
 	}
 	rb.WriteString(thHelp.Render("↑/↓ move · Enter toggle · S save · ESC back"))
-	right := PanelFixed("WEAK TOPICS", rb.String(), rw, bodyH, s.wFocus == 2)
+	// The staged summary scrolls independently when it overflows: the
+	// SAVE row follows focus (bottom when focused, top otherwise).
+	rightH := bodyH - 4
+	if rightH < 4 {
+		rightH = 4
+	}
+	total := len(strings.Split(rb.String(), "\n"))
+	if s.wFocus == 2 {
+		s.wScroll.Offset = 1 << 30
+	} else {
+		s.wScroll.Reset()
+	}
+	s.wScroll.Clamp(total, rightH)
+	right := PanelFixed("WEAK TOPICS", ViewportView(rb.String(), &s.wScroll, rightH), rw, bodyH, s.wFocus == 2)
 	return lipglossJoin(left, right)
 }

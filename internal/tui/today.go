@@ -98,10 +98,14 @@ func (s *TodayScreen) Reload() {
 	if snap == nil {
 		// First run on a fresh DB: generate today's snapshot exactly once
 		// via EnsureToday (no-op when a snapshot already exists, so
-		// routine reloads never create revisions).
+		// routine reloads never create revisions). A real DB failure
+		// propagates as a data error, never a silent empty state.
 		cal := engine.DefaultCalendar()
 		if nsnap, _, err := engine.EnsureToday(ctx, s.app.DB, cal.LocalDate(time.Now()), time.Now()); err == nil {
 			snap = &nsnap
+		} else {
+			s.err = "data error: " + err.Error()
+			return
 		}
 	}
 	if snap == nil {
@@ -190,7 +194,7 @@ func (s *TodayScreen) startSelected() {
 	ctx := context.Background()
 	ev, err := engine.EvaluateTodayTask(ctx, s.app.DB, task.ID)
 	if err != nil {
-		s.app.err = "data error: " + err.Error()
+		s.err = "data error: " + err.Error()
 		return
 	}
 	if ev.State == engine.StateCompleted {
@@ -205,17 +209,18 @@ func (s *TodayScreen) startSelected() {
 		return
 	}
 	if _, err := engine.StartTodayTask(ctx, s.app.DB, task.ID, time.Now()); err != nil {
-		// Expected busy/completed states stay neutral; real failures surface.
+		// Expected busy/completed states stay neutral notes; real
+		// failures surface panel-locally (never a red shell banner).
 		msg := err.Error()
 		if isExpectedStartErr(err) {
 			s.notice = "Completed · read-only"
 			if containsBusy(msg) {
-				s.app.err = "another session is active — stop it first (x)"
+				s.notice = "Another session is active — stop it first (x)"
 			}
 			s.syncButtons()
 			return
 		}
-		s.app.err = msg
+		s.err = "data error: " + msg
 		return
 	}
 	s.right = "detail"

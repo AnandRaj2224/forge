@@ -487,7 +487,8 @@ func TestTodayGeneration(t *testing.T) {
 	if snap.Revision != 1 {
 		t.Fatalf("rev=%d", snap.Revision)
 	}
-	// Count lecture slots (3), practice (3), dsa (1), swe (1).
+	// Count lecture slots (3), practice (Quant only: Reasoning has no
+	// eligible topic, slot-3 English has no eligible topic), dsa (1), swe (1).
 	var lec, prac, dsa, swe int
 	for _, tk := range tasks {
 		switch {
@@ -504,13 +505,27 @@ func TestTodayGeneration(t *testing.T) {
 	if lec != 3 {
 		t.Fatalf("lectures=%d", lec)
 	}
-	if prac != 3 {
-		t.Fatalf("practice=%d", prac)
+	if prac != 1 {
+		t.Fatalf("practice=%d want 1 (only Quant has eligible topics)", prac)
 	}
 	if dsa != 1 || swe != 1 {
 		t.Fatalf("dsa=%d swe=%d", dsa, swe)
 	}
-	// DSA bundle: 3 distinct problems.
+	// Practice bundle holds only eligible topics: incomplete-lecture
+	// Percentage excluded, zero-lecture Ratio + Number System included.
+	for _, tk := range tasks {
+		if tk.Domain == db.DomainGOV && tk.Kind == db.SessionKindPractice {
+			pt, _ := db.UnmarshalGovPracticeTarget(*tk.TargetJSON)
+			if len(pt.TopicIDs) != 2 {
+				t.Fatalf("practice topics=%v", pt.TopicIDs)
+			}
+			for _, tid := range pt.TopicIDs {
+				if tid == "topic-perc" {
+					t.Fatal("incomplete-lecture topic must be excluded")
+				}
+			}
+		}
+	} // DSA bundle: 3 distinct problems.
 	for _, tk := range tasks {
 		if tk.Domain == db.DomainDSA {
 			dt, _ := db.UnmarshalDSATarget(*tk.TargetJSON)

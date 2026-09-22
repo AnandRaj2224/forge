@@ -72,6 +72,12 @@ func CurrentWeekDates(now time.Time) []string {
 }
 
 // ComputeDailySummary aggregates evidence for one local date.
+//
+// Deprecated: non-authoritative legacy report. It uses UTC date boundaries
+// and any-evidence task completion. New code must use
+// engine.BuildDailyReport (Forge calendar, cross-midnight splitting,
+// latest-snapshot planning, historical cutoffs). Kept only for backward
+// compatibility; the TUI History screen uses the engine.
 func ComputeDailySummary(ctx context.Context, q db.DBTX, dateStr string) (DailySummary, error) {
 	s := DailySummary{Date: dateStr}
 	// Planned + task counts from the latest snapshot for the date.
@@ -325,6 +331,9 @@ type GovSubjectEvidence struct {
 // NOTE: the DB pool allows a single open connection, so every rows result
 // is fully collected (and closed) before any follow-up lookup runs.
 // Nesting a query inside an open rows loop deadlocks permanently.
+//
+// Deprecated: non-authoritative legacy report (UTC boundaries). New code
+// must use engine.BuildWeeklyDraft. Kept only for backward compatibility.
 func ComputeWeeklyGovSubjects(ctx context.Context, q db.DBTX, weekStart, weekEnd string) []GovSubjectEvidence {
 	lo := dayStart(weekStart)
 	hi := dayStart(weekEnd) + 86400
@@ -419,6 +428,10 @@ func ComputeWeeklyGovSubjects(ctx context.Context, q db.DBTX, weekStart, weekEnd
 }
 
 // ComputeWeeklyEvidence aggregates evidence for an inclusive date range.
+//
+// Deprecated: non-authoritative legacy report (sums all snapshot revisions,
+// UTC boundaries). New code must use engine.BuildWeeklyDraft (latest
+// snapshot per day, Forge calendar). Kept only for backward compatibility.
 func ComputeWeeklyEvidence(ctx context.Context, q db.DBTX, weekStart, weekEnd string) WeeklyEvidence {
 	var e WeeklyEvidence
 	start, err1 := time.Parse("2006-01-02", weekStart)

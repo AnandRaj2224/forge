@@ -45,7 +45,8 @@ func MaxRepeatStage() int { return len(repeatIntervals) - 1 }
 // NextRepeatOnNew computes the repeat state after saving a NEW attempt:
 // initialize/refresh according to progression and enter repeat scheduling.
 // A passed NEW attempt enters stage 1; a failed NEW attempt enters stage 0.
-// nextReviewDate is the Forge local date (YYYY-MM-DD).
+// nextReview is the Forge local date (YYYY-MM-DD) interval days after
+// localDate. Falls back to localDate when it does not parse.
 func NextRepeatOnNew(pass bool, localDate string) (stage int, interval int, nextReview string) {
 	if pass {
 		stage = 1
@@ -54,10 +55,10 @@ func NextRepeatOnNew(pass bool, localDate string) (stage int, interval int, next
 	}
 	interval = IntervalForStage(stage)
 	nextReview = localDate
-	// next_review_date is set by the caller via AddDays; kept here as the
-	// base date for explicitness.
-	_ = nextReview
-	return stage, interval, localDate
+	if s, err := DefaultCalendar().StartOfDay(localDate); err == nil {
+		nextReview = s.AddDate(0, 0, interval).Format("2006-01-02")
+	}
+	return stage, interval, nextReview
 }
 
 // NextRepeatOnRepeat computes progression after a REPEAT attempt:

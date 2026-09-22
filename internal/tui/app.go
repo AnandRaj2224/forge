@@ -356,6 +356,12 @@ func (a *App) View() tea.View {
 	}
 	footer := a.footerView(sh.Footer.W)
 	contentH := sh.Main.H
+	// App-level errors render as one concise line INSIDE the main
+	// viewport (clipped with content, layout preserved) — never as a
+	// red paragraph appended below the shell.
+	if a.err != "" {
+		body = thWarn.Render("▲ " + TruncateToWidth(a.err, w-4)) + "\n" + body
+	}
 	lines := strings.Split(body, "\n")
 	if len(lines) > contentH {
 		lines = lines[:contentH]
@@ -365,9 +371,6 @@ func (a *App) View() tea.View {
 	}
 	body = strings.Join(lines, "\n")
 	out := header + "\n" + body + "\n" + footer
-	if a.err != "" {
-		out += "\n" + thError.Render("Error: "+a.err)
-	}
 	return tea.NewView(out)
 }
 

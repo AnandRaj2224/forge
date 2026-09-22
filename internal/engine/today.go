@@ -15,6 +15,17 @@ import (
 // exact target_json per the locked scheduling rules. It preserves old
 // snapshots (new revision) and never mutates sessions.
 //
+// Generation is two-phase:
+//
+//	Phase 1 (PURE PLAN): read current state, determine selected lectures,
+//	practice topics, DSA/SWE bundles, required activation changes and
+//	rotation-state changes. No writes happen here.
+//
+//	Phase 2 (ONE TRANSACTION): create snapshot + Today tasks, persist
+//	activation changes and rotation state, commit. Any failure rolls back
+//	everything: no orphan activation, no consumed rotation, no partial
+//	snapshot or tasks.
+//
 // Rules:
 //   - GOV lecture: 3 x 1h slots, scan global subject order, first
 //     incomplete subject not already picked today; activate if inactive.
@@ -36,22 +47,34 @@ func GenerateToday(ctx context.Context, database *db.DB, localDate string, now t
 		ID: db.ID(fmt.Sprintf("today-%s-r%d", localDate, rev)),
 		LocalDate: localDate, Revision: rev, GeneratedAt: now,
 	}
-	tasks, err := planDay(ctx, database, localDate, now)
+	plan, err := planDay(ctx, database, localDate, now)
 	if err != nil {
 		return db.TodaySnapshot{}, nil, err
+	}
+	tasks := plan.tasks
+	for i := range tasks {
+		tasks[i].SnapshotID = snap.ID
+		tasks[i].Position = i + 1
+		tasks[i].ID = db.ID(fmt.Sprintf("%s-task-%02d", string(snap.ID), i+1))
 	}
 	err = database.WithTx(ctx, func(q db.DBTX) error {
 		if err := runtime.CreateTodaySnapshot(ctx, q, snap); err != nil {
 			return err
 		}
-		for i, t := range tasks {
-			t.SnapshotID = snap.ID
-			t.Position = i + 1
-			t.ID = db.ID(fmt.Sprintf("%s-task-%02d", string(snap.ID), i+1))
+		for _, t := range tasks {
 			if err := runtime.InsertTodayTask(ctx, q, t); err != nil {
 				return err
 			}
-			tasks[i] = t
+		}
+		for _, sid := range plan.activate {
+			if err := runtime.ActivateGovSubject(ctx, q, sid, now); err != nil {
+				return fmt.Errorf("engine: activate subject: %w", err)
+			}
+		}
+		if plan.rotation != nil {
+			if err := runtime.SetGovPracticeRotationState(ctx, q, *plan.rotation); err != nil {
+				return fmt.Errorf("engine: rotation state: %w", err)
+			}
 		}
 		return nil
 	})
@@ -62,7 +85,8 @@ func GenerateToday(ctx context.Context, database *db.DB, localDate string, now t
 }
 
 // EnsureToday returns the latest snapshot for localDate, generating only
-// when missing. It never creates a new revision on every reload.
+// when no snapshot row exists. A genuine no-row result means "generate";
+// a real DB/query failure propagates and never triggers generation.
 func EnsureToday(ctx context.Context, database *db.DB, localDate string, now time.Time) (db.TodaySnapshot, []db.TodayTask, error) {
 	snap, err := runtime.GetLatestTodaySnapshot(ctx, database, localDate)
 	if err == nil {
@@ -72,49 +96,72 @@ func EnsureToday(ctx context.Context, database *db.DB, localDate string, now tim
 		}
 		return snap, tasks, nil
 	}
+	if !isNotFoundErr(err) {
+		return db.TodaySnapshot{}, nil, fmt.Errorf("engine: latest today snapshot: %w", err)
+	}
 	return GenerateToday(ctx, database, localDate, now)
 }
 
 func nextRevision(ctx context.Context, database *db.DB, localDate string) (int, error) {
-	// Latest revision + 1, or 1 when none.
+	// Latest revision + 1, or 1 when no snapshot exists. DB failures
+	// propagate; only a genuine no-row result means "first revision".
 	snap, err := runtime.GetLatestTodaySnapshot(ctx, database, localDate)
 	if err != nil {
-		return 1, nil
+		if isNotFoundErr(err) {
+			return 1, nil
+		}
+		return 0, fmt.Errorf("engine: latest today snapshot: %w", err)
 	}
 	return snap.Revision + 1, nil
 }
 
-func planDay(ctx context.Context, database *db.DB, localDate string, now time.Time) ([]db.TodayTask, error) {
-	var out []db.TodayTask
-	lec, err := planLectureSlots(ctx, database, now)
+// dayPlan is the pure Phase-1 output: tasks plus the state changes that
+// Phase 2 must persist atomically alongside the snapshot.
+type dayPlan struct {
+	tasks    []db.TodayTask
+	activate []db.ID // subjects to ensure active (idempotent)
+	rotation *db.GovPracticeRotationState
+}
+
+func planDay(ctx context.Context, database *db.DB, localDate string, now time.Time) (*dayPlan, error) {
+	plan := &dayPlan{}
+	lec, activate, err := planLectureSlots(ctx, database)
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, lec...)
-	prac, err := planPracticeSlots(ctx, database, localDate, now)
+	plan.tasks = append(plan.tasks, lec...)
+	plan.activate = append(plan.activate, activate...)
+	// Subjects activated by lecture selection count as active for the
+	// practice phase of the same plan (they commit in the same tx).
+	extraActive := map[db.ID]bool{}
+	for _, sid := range plan.activate {
+		extraActive[sid] = true
+	}
+	prac, rotation, err := planPracticeSlots(ctx, database, extraActive, now)
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, prac...)
+	plan.tasks = append(plan.tasks, prac...)
+	plan.rotation = rotation
 	dsa, err := planDSABlock(ctx, database, localDate)
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, dsa...)
+	plan.tasks = append(plan.tasks, dsa...)
 	swe, err := planSWEBlock(ctx, database, localDate)
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, swe...)
-	return out, nil
+	plan.tasks = append(plan.tasks, swe...)
+	return plan, nil
 }
 
 // ---- lecture ----
 
-func planLectureSlots(ctx context.Context, database *db.DB, now time.Time) ([]db.TodayTask, error) {
+func planLectureSlots(ctx context.Context, database *db.DB) ([]db.TodayTask, []db.ID, error) {
 	subjects, err := catalog.GetGovSubjects(ctx, database)
 	if err != nil {
-		return nil, fmt.Errorf("engine: gov subjects: %w", err)
+		return nil, nil, fmt.Errorf("engine: gov subjects: %w", err)
 	}
 	routine, err := catalog.GetGovLectureRoutine(ctx, database)
 	if err != nil || len(routine) == 0 {
@@ -122,24 +169,25 @@ func planLectureSlots(ctx context.Context, database *db.DB, now time.Time) ([]db
 		routine = []db.GovLectureRoutineSlot{{SlotOrder: 1, DurationSeconds: 3600}, {SlotOrder: 2, DurationSeconds: 3600}, {SlotOrder: 3, DurationSeconds: 3600}}
 	}
 	var out []db.TodayTask
+	var activate []db.ID
 	picked := map[db.ID]bool{}
 	for _, slot := range routine {
 		subj, topic, lec, err := firstIncompleteLecture(ctx, database, subjects, picked)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if subj == nil {
 			break // everything complete
 		}
-		// Activate immediately when selected while inactive.
+		// Collect the activation for the atomic commit instead of
+		// writing it here: a later planning failure must not leave an
+		// orphan activation behind.
 		active, err := runtime.IsGovSubjectActive(ctx, database, subj.ID)
 		if err != nil {
-			return nil, fmt.Errorf("engine: subject active check: %w", err)
+			return nil, nil, fmt.Errorf("engine: subject active check: %w", err)
 		}
 		if !active {
-			if err := runtime.ActivateGovSubject(ctx, database, subj.ID, now); err != nil {
-				return nil, fmt.Errorf("engine: activate subject: %w", err)
-			}
+			activate = append(activate, subj.ID)
 		}
 		picked[subj.ID] = true
 		target, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: subj.ID, TopicID: topic.ID, LectureID: lec.ID})
@@ -150,7 +198,7 @@ func planLectureSlots(ctx context.Context, database *db.DB, now time.Time) ([]db
 			PlannedSeconds: slot.DurationSeconds, TargetJSON: &tj,
 		})
 	}
-	return out, nil
+	return out, activate, nil
 }
 
 func firstIncompleteLecture(ctx context.Context, q db.DBTX, subjects []db.GovSubject, exclude map[db.ID]bool) (*db.GovSubject, *db.GovTopic, *db.GovLecture, error) {
@@ -162,7 +210,6 @@ func firstIncompleteLecture(ctx context.Context, q db.DBTX, subjects []db.GovSub
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("engine: gov topics: %w", err)
 		}
-		allDone := true
 		for _, tp := range topics {
 			lecs, err := catalog.GetGovLectures(ctx, q, tp.ID)
 			if err != nil {
@@ -184,7 +231,6 @@ func firstIncompleteLecture(ctx context.Context, q db.DBTX, subjects []db.GovSub
 				}
 			}
 		}
-		_ = allDone
 		// Subject with zero topics or all lectures done: complete, skip.
 		continue
 	}
@@ -193,12 +239,72 @@ func firstIncompleteLecture(ctx context.Context, q db.DBTX, subjects []db.GovSub
 
 // ---- practice ----
 
-func planPracticeSlots(ctx context.Context, database *db.DB, localDate string, now time.Time) ([]db.TodayTask, error) {
+// PracticeEligibleTopics returns the practice-eligible topics of a subject
+// in catalogue order. Locked rule: a topic is practice-eligible only when
+// its lecture track is complete OR the topic has zero lectures. Every
+// candidate topic is evaluated; anything else is excluded. DB failures
+// propagate (never an empty list).
+func PracticeEligibleTopics(ctx context.Context, q db.DBTX, subjectID db.ID) ([]db.GovTopic, error) {
+	topics, err := catalog.GetGovTopics(ctx, q, subjectID)
+	if err != nil {
+		return nil, fmt.Errorf("engine: gov topics: %w", err)
+	}
+	var out []db.GovTopic
+	for _, tp := range topics {
+		lecs, err := catalog.GetGovLectures(ctx, q, tp.ID)
+		if err != nil {
+			return nil, fmt.Errorf("engine: gov lectures: %w", err)
+		}
+		if len(lecs) == 0 {
+			// Zero lectures: track satisfied, practice unlocked.
+			out = append(out, tp)
+			continue
+		}
+		complete := true
+		for _, l := range lecs {
+			done, err := runtime.IsLectureComplete(ctx, q, l.ID)
+			if err != nil {
+				return nil, fmt.Errorf("engine: lecture complete: %w", err)
+			}
+			if !done {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			out = append(out, tp)
+		}
+	}
+	return out, nil
+}
+
+// subjectIsActive reports activation including pending plan activations
+// (subjects the same plan will activate in its atomic commit).
+func subjectIsActive(ctx context.Context, q db.DBTX, subjectID db.ID, extra map[db.ID]bool) (bool, error) {
+	if extra[subjectID] {
+		return true, nil
+	}
+	return runtime.IsGovSubjectActive(ctx, q, subjectID)
+}
+
+func planPracticeSlots(ctx context.Context, database *db.DB, extraActive map[db.ID]bool, now time.Time) ([]db.TodayTask, *db.GovPracticeRotationState, error) {
 	routine, err := catalog.GetGovPracticeRoutine(ctx, database)
 	if err != nil || len(routine) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	sort.Slice(routine, func(i, j int) bool { return routine[i].SlotOrder < routine[j].SlotOrder })
+	// Round-robin chaining within one plan: each pick advances the cursor
+	// for the next round-robin slot; the final pick is the rotation write.
+	rot, err := runtime.GetGovPracticeRotationState(ctx, database)
+	last := db.ID("")
+	haveRot := err == nil
+	if err != nil && !isNotFoundErr(err) {
+		return nil, nil, fmt.Errorf("engine: rotation state: %w", err)
+	}
+	if haveRot && rot.LastSubjectID != nil {
+		last = *rot.LastSubjectID
+	}
+	var rotation *db.GovPracticeRotationState
 	var out []db.TodayTask
 	for _, slot := range routine {
 		var subjectID db.ID
@@ -207,11 +313,18 @@ func planPracticeSlots(ctx context.Context, database *db.DB, localDate string, n
 			if slot.FixedSubjectID == nil {
 				continue
 			}
+			active, err := subjectIsActive(ctx, database, *slot.FixedSubjectID, extraActive)
+			if err != nil {
+				return nil, nil, fmt.Errorf("engine: subject active: %w", err)
+			}
+			if !active {
+				continue
+			}
 			subjectID = *slot.FixedSubjectID
 		case db.GovSelectionRoundRobin:
-			sid, err := pickRoundRobinSubject(ctx, database, now)
+			sid, err := pickRoundRobinSubject(ctx, database, extraActive, last)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if sid == "" {
 				continue
@@ -220,13 +333,21 @@ func planPracticeSlots(ctx context.Context, database *db.DB, localDate string, n
 		default:
 			continue
 		}
-		topics := practiceBundleTopics(ctx, database, subjectID)
-		if len(topics) == 0 {
+		eligible, err := PracticeEligibleTopics(ctx, database, subjectID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(eligible) == 0 {
+			// No eligible topic: the subject is skipped for practice.
 			continue
+		}
+		topics := eligible
+		if len(topics) > 3 {
+			topics = topics[:3]
 		}
 		subj, err := catalog.GetGovSubject(ctx, database, subjectID)
 		if err != nil {
-			continue
+			return nil, nil, fmt.Errorf("engine: gov subject: %w", err)
 		}
 		names := make([]string, 0, len(topics))
 		for _, t := range topics {
@@ -239,27 +360,17 @@ func planPracticeSlots(ctx context.Context, database *db.DB, localDate string, n
 			Domain: db.DomainGOV, Kind: db.SessionKindPractice,
 			Title: title, PlannedSeconds: slot.DurationSeconds, TargetJSON: &tj,
 		})
-		// Persist rotation after slot-3 picks.
+		// Collect the rotation write for the atomic commit instead of
+		// persisting it here.
 		if slot.SelectionMode == db.GovSelectionRoundRobin {
-			_ = runtime.SetGovPracticeRotationState(ctx, database, db.GovPracticeRotationState{
-				ID: 1, LastSubjectID: &subjectID, UpdatedAt: now,
-			})
+			last = subjectID
+			cp := subjectID
+			rotation = &db.GovPracticeRotationState{
+				ID: 1, LastSubjectID: &cp, UpdatedAt: now,
+			}
 		}
 	}
-	return out, nil
-}
-
-func practiceBundleTopics(ctx context.Context, q db.DBTX, subjectID db.ID) []db.GovTopic {
-	topics, err := catalog.GetGovTopics(ctx, q, subjectID)
-	if err != nil {
-		return nil
-	}
-	// Practice-eligible: topics with at least one lecture (or zero-lecture
-	// topics count as unlocked). Take first up to 3 in catalogue order.
-	if len(topics) > 3 {
-		topics = topics[:3]
-	}
-	return topics
+	return out, rotation, nil
 }
 
 func topicIDs(ts []db.GovTopic) []db.ID {
@@ -271,10 +382,10 @@ func topicIDs(ts []db.GovTopic) []db.ID {
 }
 
 // pickRoundRobinSubject selects the next active subject (excluding Quant and
-// Reasoning, excluding inactive Computer Awareness unless activated) with at
-// least one practice-eligible topic, cycling after last_subject_id.
-func pickRoundRobinSubject(ctx context.Context, q db.DBTX, now time.Time) (db.ID, error) {
-	_ = now
+// Reasoning, excluding inactive subjects such as Computer Awareness before
+// activation) with at least one practice-eligible topic, cycling after
+// lastSubjectID. Pure read: the caller persists the pick atomically.
+func pickRoundRobinSubject(ctx context.Context, q db.DBTX, extraActive map[db.ID]bool, last db.ID) (db.ID, error) {
 	subjects, err := catalog.GetGovSubjects(ctx, q)
 	if err != nil {
 		return "", fmt.Errorf("engine: gov subjects: %w", err)
@@ -293,26 +404,24 @@ func pickRoundRobinSubject(ctx context.Context, q db.DBTX, now time.Time) (db.ID
 		if s.ID == quantID || s.ID == reasID {
 			continue
 		}
-		active, err := runtime.IsGovSubjectActive(ctx, q, s.ID)
+		active, err := subjectIsActive(ctx, q, s.ID, extraActive)
 		if err != nil {
 			return "", fmt.Errorf("engine: subject active: %w", err)
 		}
 		if !active {
-			continue // Computer Awareness (or any inactive) cannot appear before activation
+			continue // inactive subjects cannot appear before activation
 		}
-		topics, err := catalog.GetGovTopics(ctx, q, s.ID)
-		if err != nil || len(topics) == 0 {
-			continue
+		ets, err := PracticeEligibleTopics(ctx, q, s.ID)
+		if err != nil {
+			return "", err
+		}
+		if len(ets) == 0 {
+			continue // no eligible topic: subject skipped
 		}
 		eligible = append(eligible, s)
 	}
 	if len(eligible) == 0 {
 		return "", nil
-	}
-	rot, err := runtime.GetGovPracticeRotationState(ctx, q)
-	last := db.ID("")
-	if err == nil && rot.LastSubjectID != nil {
-		last = *rot.LastSubjectID
 	}
 	// Next after last in eligible order (eligible preserves global order).
 	for i, s := range eligible {
@@ -321,13 +430,6 @@ func pickRoundRobinSubject(ctx context.Context, q db.DBTX, now time.Time) (db.ID
 		}
 	}
 	// Wrap or first when last not found.
-	for _, s := range eligible {
-		if s.ID != last {
-			// If last was in the list, we already returned next; here last
-			// is absent so start from the front.
-			return eligible[0].ID, nil
-		}
-	}
 	return eligible[0].ID, nil
 }
 
@@ -386,7 +488,8 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 			used[rs.ProblemID] = true
 		}
 	}
-	// One new: first catalogue problem with no NEW attempt, not in bundle.
+	// One new: first catalogue problem with no NEW attempt and no repeat
+	// state (genuinely new), not in bundle.
 	for _, p := range probs {
 		if len(bundle) >= 3 {
 			break
@@ -394,29 +497,20 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 		if used[p.ID] {
 			continue
 		}
-		atts, err := runtime.GetDSAAttempts(ctx, q, p.ID)
+		genuine, err := isGenuinelyNew(ctx, q, p.ID)
 		if err != nil {
-			return nil, fmt.Errorf("engine: dsa attempts: %w", err)
+			return nil, err
 		}
-		hasNew := false
-		for _, a := range atts {
-			if a.Mode == db.DSAModeNew {
-				hasNew = true
-				break
-			}
-		}
-		if hasNew {
-			continue
-		}
-		// Also skip problems with any repeat state (already introduced).
-		if _, err := runtime.GetDSARepeatState(ctx, q, p.ID); err == nil {
+		if !genuine {
 			continue
 		}
 		bundle = append(bundle, db.DSAProblemTarget{ProblemID: p.ID, Mode: db.DSAModeNew})
 		used[p.ID] = true
 		break
 	}
-	// Fresh DB fallback: fill remaining with new problems in catalogue order.
+	// Bootstrap/fill: remaining slots take genuinely-new problems labeled
+	// NEW (truthful: never label an introduced problem NEW). If no valid
+	// bundle can be formed, emit no DSA block rather than a fake one.
 	for _, p := range probs {
 		if len(bundle) >= 3 {
 			break
@@ -424,13 +518,26 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 		if used[p.ID] {
 			continue
 		}
+		genuine, err := isGenuinelyNew(ctx, q, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !genuine {
+			continue
+		}
 		bundle = append(bundle, db.DSAProblemTarget{ProblemID: p.ID, Mode: db.DSAModeNew})
 		used[p.ID] = true
 	}
-	if len(bundle) == 0 {
+	if len(bundle) != 3 {
 		return nil, nil
 	}
-	target, _ := db.MarshalTarget(db.DSATarget{Problems: bundle})
+	dt := db.DSATarget{Problems: bundle}
+	if err := ValidateDSACurrentBundle(ctx, q, dt); err != nil {
+		// Our own plan failed strict validation: emit nothing rather
+		// than a mislabeled bundle.
+		return nil, nil
+	}
+	target, _ := db.MarshalTarget(dt)
 	tj := target
 	titles := make([]string, 0, len(bundle))
 	for _, b := range bundle {
@@ -445,6 +552,26 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 	}}, nil
 }
 
+// isGenuinelyNew reports whether a problem was never introduced: no NEW
+// attempt and no repeat state. DB failures propagate (never default).
+func isGenuinelyNew(ctx context.Context, q db.DBTX, problemID db.ID) (bool, error) {
+	atts, err := runtime.GetDSAAttempts(ctx, q, problemID)
+	if err != nil {
+		return false, fmt.Errorf("engine: dsa attempts: %w", err)
+	}
+	for _, a := range atts {
+		if a.Mode == db.DSAModeNew {
+			return false, nil
+		}
+	}
+	if _, err := runtime.GetDSARepeatState(ctx, q, problemID); err == nil {
+		return false, nil
+	} else if !isNotFoundErr(err) {
+		return false, fmt.Errorf("engine: repeat state: %w", err)
+	}
+	return true, nil
+}
+
 func dueRepeats(ctx context.Context, q db.DBTX, localDate string) ([]db.DSARepeatState, error) {
 	all, err := runtime.ListDSARepeatDue(ctx, q, localDate)
 	if err != nil {
@@ -453,7 +580,7 @@ func dueRepeats(ctx context.Context, q db.DBTX, localDate string) ([]db.DSARepea
 	return all, nil
 }
 
-func allRepeatStates(ctx context.Context, q db.DBTX, ) ([]db.DSARepeatState, error) {
+func allRepeatStates(ctx context.Context, q db.DBTX) ([]db.DSARepeatState, error) {
 	// Far-future date returns all rows ordered by next_review_date.
 	return runtime.ListDSARepeatDue(ctx, q, "9999-12-31")
 }
@@ -480,7 +607,10 @@ func planSWEBlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 	planned := 0
 	var names []string
 	for _, sl := range slots {
-		task := currentUnfinishedSWETask(ctx, q, sl.AreaID)
+		task, err := currentUnfinishedSWETask(ctx, q, sl.AreaID)
+		if err != nil {
+			return nil, err
+		}
 		planned += sl.DurationSeconds
 		if task == nil {
 			continue
@@ -506,21 +636,27 @@ func planSWEBlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 
 // currentUnfinishedSWETask selects the first task in area order without a
 // COMPLETED execution (same task may repeat on different days when nothing
-// is unfinished? then return the first task).
-func currentUnfinishedSWETask(ctx context.Context, q db.DBTX, areaID db.ID) *db.SWETask {
+// is unfinished? then return the first task). DB failures propagate.
+func currentUnfinishedSWETask(ctx context.Context, q db.DBTX, areaID db.ID) (*db.SWETask, error) {
 	tasks, err := catalog.GetSWETasks(ctx, q, areaID)
-	if err != nil || len(tasks) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("engine: list swe tasks: %w", err)
+	}
+	if len(tasks) == 0 {
+		return nil, nil
 	}
 	for _, t := range tasks {
 		done, err := runtime.IsSWETaskComplete(ctx, q, t.ID)
-		if err != nil || !done {
+		if err != nil {
+			return nil, fmt.Errorf("engine: swe completion: %w", err)
+		}
+		if !done {
 			c := t
-			return &c
+			return &c, nil
 		}
 	}
 	c := tasks[0]
-	return &c
+	return &c, nil
 }
 
 func joinPlus(xs []string) string {

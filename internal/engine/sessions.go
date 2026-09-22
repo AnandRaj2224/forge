@@ -101,6 +101,16 @@ func LoadActiveSession(ctx context.Context, q db.DBTX) (*db.Session, error) {
 	return &sess, nil
 }
 
+// EnsureGovSubjectActive marks a subject as active. It is idempotent:
+// repeated activation of an already-active subject is a no-op (never a
+// primary-key failure through normal operation).
+func EnsureGovSubjectActive(ctx context.Context, database *db.DB, subjectID db.ID, now time.Time) error {
+	if err := runtime.ActivateGovSubject(ctx, database, subjectID, now); err != nil {
+		return fmt.Errorf("engine: activate subject: %w", err)
+	}
+	return nil
+}
+
 func isNotFoundErr(err error) bool {
 	if err == nil {
 		return false

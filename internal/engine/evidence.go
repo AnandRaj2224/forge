@@ -306,37 +306,39 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 			return TaskEvaluation{}, wrapErr("dsa save", ErrAlreadySatisfied, fmt.Sprintf("problem %q already satisfied", string(in.ProblemID)))
 		}
 	}
+	// Strict mode truthfulness: a persisted target that says NEW for an
+	// already-introduced problem is stale. Never mutate it silently into
+	// REPEAT; surface the stale target instead.
+	for _, in := range inputs {
+		if targetMode[in.ProblemID] != db.DSAModeNew {
+			continue
+		}
+		existing, err := runtime.GetDSAAttempts(ctx, database, in.ProblemID)
+		if err != nil {
+			return TaskEvaluation{}, fmt.Errorf("engine: dsa history: %w", err)
+		}
+		for _, a := range existing {
+			if a.Mode == db.DSAModeNew {
+				return TaskEvaluation{}, wrapErr("dsa save", ErrInvalidTarget, fmt.Sprintf("stale target: problem %q labeled NEW but already introduced", string(in.ProblemID)))
+			}
+		}
+	}
 	cal := DefaultCalendar()
 	localDate := cal.LocalDate(now)
 	err = database.WithTx(ctx, func(q db.DBTX) error {
 		for _, in := range inputs {
 			mode := targetMode[in.ProblemID]
-			existing, err := runtime.GetDSAAttempts(ctx, q, in.ProblemID)
-			if err != nil {
-				return fmt.Errorf("engine: dsa history: %w", err)
-			}
-			hasNew := false
-			for _, a := range existing {
-				if a.Mode == db.DSAModeNew {
-					hasNew = true
-					break
-				}
-			}
-			saveMode := mode
-			if mode == db.DSAModeNew && hasNew {
-				saveMode = db.DSAModeRepeat
-			}
 			id := db.ID(fmt.Sprintf("datt-%d-%s", now.UnixNano(), string(in.ProblemID)))
 			solve := in.SolveSecs
 			if err := runtime.InsertDSAAttempt(ctx, q, db.DSAAttempt{
-				ID: id, SessionID: sessionID, ProblemID: in.ProblemID, Mode: saveMode,
+				ID: id, SessionID: sessionID, ProblemID: in.ProblemID, Mode: mode,
 				AttemptedAt: now, Independent: in.Independent, Optimal: in.Optimal,
 				HintUsed: in.HintUsed, SolveTimeSeconds: &solve,
 			}); err != nil {
 				return err
 			}
 			pass := in.Independent && in.Optimal && !in.HintUsed
-			if err := applyRepeatProgress(ctx, q, in.ProblemID, saveMode, pass, localDate, now); err != nil {
+			if err := applyRepeatProgress(ctx, q, in.ProblemID, mode, pass, localDate, now); err != nil {
 				return err
 			}
 		}
