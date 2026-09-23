@@ -172,6 +172,40 @@ INSERT INTO gov_exam_syllabus (exam_id, topic_id, sort_order) VALUES ('exam-ibps
 INSERT INTO gov_exam_syllabus (exam_id, topic_id, sort_order) VALUES ('exam-ibps-po', 'topic-networking', 14);
 INSERT INTO gov_exam_syllabus (exam_id, topic_id, sort_order) VALUES ('exam-ibps-po', 'topic-biology', 15);
 
+-- GOV exam-subject membership (explicit per-exam subject order; global
+-- subjects stay shared). Derived from each exam's syllabus subjects in
+-- global subject order.
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-afcat', 'subj-quant', 1);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-afcat', 'subj-reasoning', 2);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-afcat', 'subj-english', 3);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-afcat', 'subj-history', 4);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-afcat', 'subj-geography', 5);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-afcat', 'subj-ga', 6);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-afcat', 'subj-science', 7);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-quant', 1);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-reasoning', 2);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-english', 3);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-history', 4);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-geography', 5);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-ga', 6);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-computer', 7);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ssc-cgl', 'subj-science', 8);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-sbi-clerk', 'subj-quant', 1);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-sbi-clerk', 'subj-reasoning', 2);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-sbi-clerk', 'subj-english', 3);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-sbi-clerk', 'subj-history', 4);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-sbi-clerk', 'subj-geography', 5);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-sbi-clerk', 'subj-ga', 6);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-sbi-clerk', 'subj-computer', 7);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-quant', 1);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-reasoning', 2);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-english', 3);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-history', 4);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-geography', 5);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-ga', 6);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-computer', 7);
+INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES ('exam-ibps-po', 'subj-science', 8);
+
 -- GOV routines
 INSERT INTO gov_lecture_routine (slot_order, duration_seconds) VALUES (1, 3600);
 INSERT INTO gov_lecture_routine (slot_order, duration_seconds) VALUES (2, 3600);

@@ -62,8 +62,17 @@ func seedGov(t *testing.T, ctx context.Context, d *db.DB) {
 	if err := catalog.InsertGovExam(ctx, d, db.GovExam{ID: "exam-1", Name: "E1", SortOrder: 1}); err != nil {
 		t.Fatal(err)
 	}
-	for i, tid := range []db.ID{"topic-perc", "topic-ratio", "topic-ns", "topic-series"} {
+	for i, tid := range []db.ID{"topic-perc", "topic-ratio", "topic-ns", "topic-series", "topic-eng1"} {
 		if err := catalog.InsertGovExamSyllabus(ctx, d, db.GovExamSyllabus{ExamID: "exam-1", TopicID: tid, SortOrder: i + 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ms := range []db.GovExamSubject{
+		{ExamID: "exam-1", SubjectID: "subj-quant", SortOrder: 1},
+		{ExamID: "exam-1", SubjectID: "subj-reasoning", SortOrder: 2},
+		{ExamID: "exam-1", SubjectID: "subj-english", SortOrder: 3},
+	} {
+		if err := catalog.InsertGovExamSubject(ctx, d, ms); err != nil {
 			t.Fatal(err)
 		}
 	}

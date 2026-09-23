@@ -466,6 +466,29 @@ func ComputeExamCoverage(ctx context.Context, q db.DBTX, examID db.ID) (ExamCove
 		}
 	}
 	_ = topicInfo{}
+	// Order subjects by the exam's own subject order when membership rows
+	// exist; otherwise keep syllabus first-appearance order (legacy display
+	// for exams without membership).
+	if members, err := catalog.GetGovExamSubjects(ctx, q, examID); err == nil && len(members) > 0 {
+		rank := make(map[db.ID]int, len(members))
+		for i, m := range members {
+			rank[m.SubjectID] = i
+		}
+		sort.SliceStable(order, func(i, j int) bool {
+			ri, iok := rank[order[i]]
+			rj, jok := rank[order[j]]
+			if iok && jok {
+				return ri < rj
+			}
+			if iok {
+				return true
+			}
+			if jok {
+				return false
+			}
+			return false
+		})
+	}
 	for _, id := range order {
 		cov.Subjects = append(cov.Subjects, *bySubject[id])
 	}

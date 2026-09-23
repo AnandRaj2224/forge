@@ -45,6 +45,14 @@ func seedLifecycle(t *testing.T, ctx context.Context, d *db.DB) {
 			t.Fatal(err)
 		}
 	}
+	for _, ms := range []db.GovExamSubject{
+		{ExamID: "exam-1", SubjectID: "subj-quant", SortOrder: 1},
+		{ExamID: "exam-1", SubjectID: "subj-reasoning", SortOrder: 2},
+	} {
+		if err := catalog.InsertGovExamSubject(ctx, d, ms); err != nil {
+			t.Fatal(err)
+		}
+	}
 	for i, slot := range []int{3600, 3600, 3600} {
 		if err := catalog.InsertGovLectureRoutineSlot(ctx, d, db.GovLectureRoutineSlot{SlotOrder: i + 1, DurationSeconds: slot}); err != nil {
 			t.Fatal(err)

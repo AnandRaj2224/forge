@@ -122,11 +122,16 @@ func TestComputerAwarenessBlockedUntilActivation(t *testing.T) {
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
 	seedSWE(t, ctx, d)
-	// Inactive Computer Awareness with a zero-lecture topic.
+	// Inactive Computer Awareness with a zero-lecture topic. It is a member
+	// of the current exam's subject set but must stay unselected until
+	// activation.
 	if err := catalog.InsertGovSubject(ctx, d, db.GovSubject{ID: "subj-ca", Name: "Computer Awareness", SortOrder: 9}); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.InsertGovTopic(ctx, d, db.GovTopic{ID: "topic-ca1", SubjectID: "subj-ca", Name: "Hardware", SortOrder: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.InsertGovExamSubject(ctx, d, db.GovExamSubject{ExamID: "exam-1", SubjectID: "subj-ca", SortOrder: 4}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()

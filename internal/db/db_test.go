@@ -680,3 +680,72 @@ func mustMarshal(t *testing.T, v any) string {
 	}
 	return s
 }
+
+func seedExamSubjectPrereqs(t *testing.T, ctx context.Context, database *db.DB) {
+	t.Helper()
+	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "s1", Name: "Quant", SortOrder: 1})
+	_ = catalog.InsertGovSubject(ctx, database, db.GovSubject{ID: "s2", Name: "Reasoning", SortOrder: 2})
+	_ = catalog.InsertGovExam(ctx, database, db.GovExam{ID: "e1", Name: "E1", SortOrder: 1})
+	_ = catalog.InsertGovExam(ctx, database, db.GovExam{ID: "e2", Name: "E2", SortOrder: 2})
+}
+
+func TestExamSubjectMembershipUniquePerExam(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	seedExamSubjectPrereqs(t, ctx, database)
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "s1", SortOrder: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// Same subject twice in one exam must fail.
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "s1", SortOrder: 2}); err == nil {
+		t.Fatal("expected duplicate (exam_id, subject_id) rejection")
+	}
+	// Same subject in another exam must succeed (shared global subject).
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e2", SubjectID: "s1", SortOrder: 1}); err != nil {
+		t.Fatalf("shared subject across exams should succeed: %v", err)
+	}
+}
+
+func TestExamSubjectOrderUniquePerExam(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	seedExamSubjectPrereqs(t, ctx, database)
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "s1", SortOrder: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// Two subjects sharing one exam sort position must fail.
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "s2", SortOrder: 1}); err == nil {
+		t.Fatal("expected duplicate (exam_id, sort_order) rejection")
+	}
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "s2", SortOrder: 2}); err != nil {
+		t.Fatalf("distinct order should succeed: %v", err)
+	}
+}
+
+func TestExamSubjectFKEnforced(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	seedExamSubjectPrereqs(t, ctx, database)
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "missing-exam", SubjectID: "s1", SortOrder: 1}); err == nil {
+		t.Fatal("expected FK violation for missing exam")
+	}
+	if err := catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "missing-subject", SortOrder: 1}); err == nil {
+		t.Fatal("expected FK violation for missing subject")
+	}
+}
+
+func TestExamSubjectOrderReturned(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	seedExamSubjectPrereqs(t, ctx, database)
+	// Insert out of order; reads must follow sort_order.
+	_ = catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "s2", SortOrder: 2})
+	_ = catalog.InsertGovExamSubject(ctx, database, db.GovExamSubject{ExamID: "e1", SubjectID: "s1", SortOrder: 1})
+	got, err := catalog.GetGovExamSubjects(ctx, database, "e1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].SubjectID != "s1" || got[1].SubjectID != "s2" {
+		t.Fatalf("exam order not preserved: %+v", got)
+	}
+}

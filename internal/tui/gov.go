@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
+	"forge/internal/engine"
 )
 
 // Gov levels: dashboard -> exam workspace | subjects browser -> topic.
@@ -32,8 +33,12 @@ type GovScreen struct {
 	level     string
 	exams     []db.GovExam
 	coverages map[db.ID]ExamCoverage
-	cursor    int // dashboard grid cursor over exams + subjects card
-	gridCols  int
+	// currentExamID is the derived current GOV exam (first incomplete exam
+	// in sort_order). It only marks the dashboard card; exam progression
+	// itself is derived by the engine on every plan.
+	currentExamID db.ID
+	cursor        int // dashboard grid cursor over exams + subjects card
+	gridCols      int
 
 	// Selected exam workspace.
 	examID      db.ID
@@ -93,6 +98,14 @@ func (s *GovScreen) Reload() {
 			continue
 		}
 		s.coverages[e.ID] = cov
+	}
+	// Derived current exam for the dashboard marker (presentation only;
+	// the engine derives it again on every Today plan).
+	s.currentExamID = ""
+	if cur, err := engine.CurrentGovExam(ctx, s.app.DB); err != nil {
+		s.err = "data error: " + err.Error()
+	} else if cur != nil {
+		s.currentExamID = cur.ID
 	}
 	if s.level == govExam && s.examID != "" {
 		s.reloadExam()
@@ -511,7 +524,7 @@ func (s *GovScreen) dashboardView(w, h int) string {
 	cells := make([]string, 0, len(s.exams)+1)
 	for i, e := range s.exams {
 		cov := s.coverages[e.ID]
-		cells = append(cells, ExamCard{Name: e.Name, Done: cov.Done, Total: cov.Total, Focused: s.cursor == i, Width: cardW - 2}.View())
+		cells = append(cells, ExamCard{Name: e.Name, Done: cov.Done, Total: cov.Total, Focused: s.cursor == i, Selected: s.currentExamID != "" && e.ID == s.currentExamID, Width: cardW - 2}.View())
 	}
 	cells = append(cells, s.subjectsCell(cardW-2, s.cursor == len(s.exams)))
 	// Scroll the grid so the cursor row stays visible at any height.

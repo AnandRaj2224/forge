@@ -456,6 +456,8 @@ func wrapItems(in []listItem) []RowItem {
 }
 
 // ExamCard is a real selectable bento card for the GOV exam dashboard.
+// Selected marks the derived current exam (first incomplete in exam
+// order); it only changes the title suffix, never the card geometry.
 type ExamCard struct {
 	Name     string
 	Done     int
@@ -491,7 +493,11 @@ func (c ExamCard) View() string {
 		barW = 26
 	}
 	var sb strings.Builder
-	sb.WriteString(thScreenTitle.Render(TruncateToWidth(c.Name, inner)) + "\n")
+	title := c.Name
+	if c.Selected {
+		title += " · CURRENT"
+	}
+	sb.WriteString(thScreenTitle.Render(TruncateToWidth(title, inner)) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
 	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
@@ -506,7 +512,9 @@ func (c ExamCard) View() string {
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w)
 	if c.Focused {
 		style = style.BorderForeground(cPrimary)
-		lines[0] = thPanelTitle.Render(TruncateToWidth(c.Name, inner)) + thFocusDot.Render("  ●")
+		lines[0] = thPanelTitle.Render(TruncateToWidth(title, inner)) + thFocusDot.Render("  ●")
+	} else if c.Selected {
+		lines[0] = thPanelTitle.Render(TruncateToWidth(title, inner))
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }

@@ -113,6 +113,16 @@ type GovExamSyllabus struct {
 	SortOrder int
 }
 
+// GovExamSubject records that a global subject belongs to an exam's
+// preparation track, with the exam-specific order the exam works through
+// its subjects. Subjects are never duplicated per exam: the same global
+// subject row is shared across exams.
+type GovExamSubject struct {
+	ExamID    ID
+	SubjectID ID
+	SortOrder int
+}
+
 // GovLectureRoutineSlot is one lecture routine slot.
 type GovLectureRoutineSlot struct {
 	SlotOrder       int

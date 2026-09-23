@@ -173,6 +173,43 @@ func InsertGovExam(ctx context.Context, q db.DBTX, e db.GovExam) error {
 	return nil
 }
 
+func GetGovExam(ctx context.Context, q db.DBTX, id db.ID) (db.GovExam, error) {
+	var e db.GovExam
+	err := q.QueryRowContext(ctx, `SELECT id, name, sort_order FROM gov_exams WHERE id = ?`, id).Scan(&e.ID, &e.Name, &e.SortOrder)
+	if err != nil {
+		return db.GovExam{}, fmt.Errorf("catalog: get gov exam: %w", err)
+	}
+	return e, nil
+}
+
+// ---- Gov exam subjects (explicit per-exam membership + order) ----
+
+// GetGovExamSubjects returns the global subjects belonging to an exam in
+// exam-specific order. The global catalogue rows are shared, never copied.
+func GetGovExamSubjects(ctx context.Context, q db.DBTX, examID db.ID) ([]db.GovExamSubject, error) {
+	rows, err := q.QueryContext(ctx, `SELECT exam_id, subject_id, sort_order FROM gov_exam_subjects WHERE exam_id = ? ORDER BY sort_order`, examID)
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list exam subjects: %w", err)
+	}
+	defer rows.Close()
+	var out []db.GovExamSubject
+	for rows.Next() {
+		var s db.GovExamSubject
+		if err := rows.Scan(&s.ExamID, &s.SubjectID, &s.SortOrder); err != nil {
+			return nil, fmt.Errorf("catalog: scan exam subject: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func InsertGovExamSubject(ctx context.Context, q db.DBTX, s db.GovExamSubject) error {
+	if _, err := q.ExecContext(ctx, `INSERT INTO gov_exam_subjects (exam_id, subject_id, sort_order) VALUES (?, ?, ?)`, s.ExamID, s.SubjectID, s.SortOrder); err != nil {
+		return fmt.Errorf("catalog: insert exam subject: %w", err)
+	}
+	return nil
+}
+
 // ---- Gov exam syllabus ----
 
 func GetGovExamSyllabus(ctx context.Context, q db.DBTX, examID db.ID) ([]db.GovExamSyllabus, error) {
