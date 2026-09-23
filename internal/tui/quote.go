@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/engine"
 )
@@ -45,7 +44,8 @@ func (a *App) quoteDisplay() (text, attr string) {
 
 // loadDailyQuote loads the current quote on application startup.
 // It reuses the persisted state when it is for today, otherwise selects a
-// new random quote. Empty tables and DB failures fall back silently.
+// new quote from the non-repeat cycle. Empty tables and DB failures fall
+// back silently.
 func (a *App) loadDailyQuote() {
 	today := a.currentLocalDate()
 	if a.DB == nil {
@@ -73,9 +73,11 @@ func (a *App) loadDailyQuote() {
 	a.refreshDailyQuoteForDate(today)
 }
 
-// refreshDailyQuoteForDate selects a new random quote for the given local
-// date and persists it best-effort. When the table is empty (or the DB
-// fails), it keeps a fallback in memory without inserting anything.
+// refreshDailyQuoteForDate selects a new quote for the given local date
+// using the non-repeat cycle (never repeats until every quote has been
+// used once) and persists it atomically with the daily state. When the
+// table is empty (or the DB fails), it keeps a fallback in memory without
+// inserting anything.
 func (a *App) refreshDailyQuoteForDate(today string) {
 	if a.DB == nil {
 		a.quoteDate = today
@@ -85,7 +87,7 @@ func (a *App) refreshDailyQuoteForDate(today string) {
 		return
 	}
 	ctx := context.Background()
-	quote, err := catalog.GetRandomQuote(ctx, a.DB)
+	quote, err := catalog.SelectDailyQuoteForDate(ctx, a.DB, today)
 	if err != nil {
 		a.quoteDate = today
 		a.quoteText = ""
@@ -98,13 +100,10 @@ func (a *App) refreshDailyQuoteForDate(today string) {
 	a.quoteAuthor = quote.Author
 	v := quote.ID
 	a.quoteID = &v
-	_ = catalog.UpsertDailyQuoteState(ctx, a.DB, db.DailyQuoteState{
-		ID: 1, LocalDate: today, QuoteID: &v, QuoteText: quote.Quote, Author: quote.Author,
-	})
 }
 
 // ensureDailyQuote keeps one quote for one day: same-day calls are a no-op
-// (no DB query), a new local day selects a new random quote.
+// (no DB query), a new local day selects the next quote from the cycle.
 func (a *App) ensureDailyQuote() {
 	today := a.currentLocalDate()
 	if a.quoteDate == today {

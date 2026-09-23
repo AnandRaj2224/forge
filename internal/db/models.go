@@ -314,10 +314,14 @@ type MockWeakTopic struct {
 
 // Quote is one daily-quote catalogue entry.
 // Author is never NULL; empty/missing upstream authors are stored as "Unknown".
+// Used tracks the non-repeat cycle: 0 = not used in the current cycle,
+// 1 = already shown in the current cycle. A quote repeats only after the
+// complete quote set has been exhausted and the cycle resets.
 type Quote struct {
 	ID     int
 	Quote  string
 	Author string
+	Used   int
 }
 
 // DailyQuoteState is the singleton daily selection state (id = 1).
