@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
@@ -14,25 +15,16 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "", "path to forge sqlite db (default dev/forge-dev.db)")
+	dbPath := flag.String("db", "", "path to forge sqlite db (default ~/.local/share/forge/forge.db)")
 	flag.Parse()
-	path := *dbPath
-	if path == "" {
-		path = os.Getenv("FORGE_DB")
+	path, err := resolveDBPath(*dbPath, os.Getenv("FORGE_DB"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "db path:", err)
+		os.Exit(1)
 	}
-	if path == "" {
-		path = filepath.Join("dev", "forge-dev.db")
-		if _, err := os.Stat(path); err != nil {
-			// Fallback when launched from another cwd: walk up.
-			abs, _ := filepath.Abs(".")
-			for d := abs; d != "/" && d != "."; d = filepath.Dir(d) {
-				cand := filepath.Join(d, "dev", "forge-dev.db")
-				if _, err := os.Stat(cand); err == nil {
-					path = cand
-					break
-				}
-			}
-		}
+	if err := ensureDBParentDir(path); err != nil {
+		fmt.Fprintln(os.Stderr, "create db dir:", err)
+		os.Exit(1)
 	}
 	database, err := db.Open(path)
 	if err != nil {
@@ -58,6 +50,44 @@ func main() {
 		fmt.Fprintln(os.Stderr, "tui:", err)
 		os.Exit(1)
 	}
+}
+
+// defaultDBPath returns ~/.local/share/forge/forge.db.
+// $HOME is expanded safely via os.UserHomeDir so Forge works when
+// launched from any working directory (Rofi, desktop entry, etc.).
+func defaultDBPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home dir: %w", err)
+	}
+	if home == "" {
+		return "", fmt.Errorf("home dir: empty")
+	}
+	return filepath.Join(home, ".local", "share", "forge", "forge.db"), nil
+}
+
+// resolveDBPath applies the precedence: -db flag > FORGE_DB env > default.
+func resolveDBPath(flagVal, envVal string) (string, error) {
+	if flagVal != "" {
+		return flagVal, nil
+	}
+	if envVal != "" {
+		return envVal, nil
+	}
+	return defaultDBPath()
+}
+
+// ensureDBParentDir creates the parent directory for path with 0755.
+// Memory and file: URIs have no filesystem parent and are skipped.
+func ensureDBParentDir(path string) error {
+	if path == "" || path == ":memory:" || strings.HasPrefix(path, "file:") {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	if dir == "" || dir == "." {
+		return nil
+	}
+	return os.MkdirAll(dir, 0755)
 }
 
 // legacyKeyboardFilter wraps a terminal output stream and removes the xterm

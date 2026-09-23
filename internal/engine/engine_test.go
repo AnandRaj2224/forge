@@ -601,7 +601,8 @@ func TestReports(t *testing.T) {
 	seedDSA(t, ctx, d)
 	prac, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-perc"}})
 	mkTask(t, ctx, d, "rep1", "2026-09-22", db.DomainGOV, db.SessionKindPractice, prac)
-	now := time.Now()
+	cal := engine.DefaultCalendar()
+	now := time.Date(2026, 9, 22, 12, 0, 0, 0, cal.Location())
 	sess, _ := engine.StartTodayTask(ctx, d, "rep1", now)
 	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
 	avg := 20.0
