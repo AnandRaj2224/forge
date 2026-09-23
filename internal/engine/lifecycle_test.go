@@ -78,9 +78,6 @@ func seedLifecycle(t *testing.T, ctx context.Context, d *db.DB) {
 	if err := catalog.InsertSWEArea(ctx, d, db.SWEArea{ID: "area-go", Name: "Go", SortOrder: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.InsertSWETask(ctx, d, db.SWETask{ID: "go-1", AreaID: "area-go", Title: "Slices", SortOrder: 1}); err != nil {
-		t.Fatal(err)
-	}
 	// Monday routine (2026-09-21 is a Monday).
 	if err := catalog.InsertSWERoutineSlot(ctx, d, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 0, AreaID: "area-go", DurationSeconds: 3600}); err != nil {
 		t.Fatal(err)
@@ -231,7 +228,8 @@ func TestFullLifecycleRowAudit(t *testing.T) {
 		t.Fatal("repeat state must persist")
 	}
 
-	// 5. SWE bundle save writes executions.
+	// 5. SWE blocks start/stop as normal sessions; stopping records time.
+	// No evidence form exists.
 	for _, tk := range tasks {
 		if tk.Domain != db.DomainSWE {
 			continue
@@ -240,19 +238,25 @@ func TestFullLifecycleRowAudit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := engine.StopActiveSession(ctx, d, now.Add(120*time.Minute)); err != nil {
+		closed, err := engine.StopActiveSession(ctx, d, now.Add(120*time.Minute))
+		if err != nil {
 			t.Fatal(err)
 		}
-		st, _ := db.UnmarshalSWETarget(taskTarget(t, ctx, d, tk.ID))
-		var inputs []engine.SWEOutcomeInput
-		for _, it := range st.Items() {
-			if it.TaskID != nil {
-				inputs = append(inputs, engine.SWEOutcomeInput{TaskID: *it.TaskID, Status: db.SWEStatusCompleted})
-			}
+		if closed.ID != sw.ID {
+			t.Fatal("stop must close the SWE session")
 		}
-		if _, err := engine.SaveSWEEvidence(ctx, d, tk.ID, sw.ID, inputs, now.Add(120*time.Minute)); err != nil {
+		if closed.ElapsedSeconds() != 600 {
+			t.Fatalf("SWE elapsed=%d want 600", closed.ElapsedSeconds())
+		}
+		// SWE stays TODO by design (time allocation, not progression).
+		ev, err := engine.EvaluateTodayTask(ctx, d, tk.ID)
+		if err != nil {
 			t.Fatal(err)
 		}
+		if ev.State != engine.StateTodo {
+			t.Fatalf("SWE must stay TODO, got %s", ev.State)
+		}
+		break // one block suffices for the lifecycle audit
 	}
 
 	// 6. Mock creation is atomic with explicit subject mapping.
@@ -293,7 +297,6 @@ func TestFullLifecycleRowAudit(t *testing.T) {
 		`SELECT COUNT(*) FROM gov_lecture_completions`,
 		`SELECT COUNT(*) FROM gov_practice_records`,
 		`SELECT COUNT(*) FROM dsa_attempts`,
-		`SELECT COUNT(*) FROM swe_executions`,
 		`SELECT COUNT(*) FROM mocks`,
 		`SELECT COUNT(*) FROM weekly_reviews`,
 	} {

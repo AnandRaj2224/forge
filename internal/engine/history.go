@@ -13,15 +13,15 @@ import (
 
 // TaskActivity is one actual Today task from the selected day.
 type TaskActivity struct {
-	Position   int
-	TaskID     db.ID
-	Domain     string
-	Kind       string
-	Title      string
-	Detail     string // bundle detail: topics/problems/tasks
-	Planned    int
-	Actual     int
-	State      TaskState
+	Position int
+	TaskID   db.ID
+	Domain   string
+	Kind     string
+	Title    string
+	Detail   string // bundle detail: topics/problems/tasks
+	Planned  int
+	Actual   int
+	State    TaskState
 }
 
 // GovDailyEvidence answers what GOV produced that day.
@@ -42,12 +42,15 @@ type DSADailyEvidence struct {
 	NotPassed int
 }
 
-// SWEDailyEvidence answers SWE outcomes.
+// SWEDailyEvidence answers SWE time allocation for the day.
 type SWEDailyEvidence struct {
-	Completed int
-	Partial   int
-	Blocked   int
+	Planned  int
+	Actual   int
+	Sessions int
 }
+
+// Variance derives actual - planned.
+func (e SWEDailyEvidence) Variance() int { return e.Actual - e.Planned }
 
 // DailyReport is the structured "what actually happened on this day" DTO.
 // The engine generates it; the UI only renders it.
@@ -62,6 +65,8 @@ type DailyReport struct {
 	GovSeconds     int
 	DSASeconds     int
 	SWESeconds     int
+	SWEPlanned     int
+	SWESessions    int
 	Activities     []TaskActivity
 	Gov            GovDailyEvidence
 	DSA            DSADailyEvidence
@@ -96,6 +101,9 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 		}
 		for _, t := range tasks {
 			rep.Planned += t.PlannedSeconds
+			if t.Domain == db.DomainSWE {
+				rep.SWEPlanned += t.PlannedSeconds
+			}
 		}
 		rep.TasksTotal = len(tasks)
 	}
@@ -127,9 +135,15 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 		// Count sessions touching this day (started or stopped within, or spanning).
 		if s.StartedAt.Unix() < dayEnd && s.StoppedAt.Unix() > dayStart {
 			rep.Sessions++
+			if s.Domain == db.DomainSWE {
+				rep.SWESessions++
+			}
 		}
 	}
 	rep.Variance = rep.Actual - rep.Planned
+	// SWE time evidence derives from sessions + planned slots (no task
+	// outcomes exist).
+	rep.SWE = SWEDailyEvidence{Planned: rep.SWEPlanned, Actual: rep.SWESeconds, Sessions: rep.SWESessions}
 	// Task activities from the day's snapshot evaluated as of end of day:
 	// evidence recorded later must not rewrite this day's history.
 	for i, t := range tasks {
@@ -158,9 +172,6 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 		return DailyReport{}, err
 	}
 	if err := fillDailyDSA(ctx, q, &rep, dayStart, dayEnd); err != nil {
-		return DailyReport{}, err
-	}
-	if err := fillDailySWE(ctx, q, &rep, dayStart, dayEnd); err != nil {
 		return DailyReport{}, err
 	}
 	return rep, nil
@@ -229,35 +240,11 @@ func taskDetail(ctx context.Context, q db.DBTX, t db.TodayTask) (string, error) 
 		if err != nil {
 			return t.Title, nil
 		}
-		areas, err := catalog.GetSWEAreas(ctx, q)
+		area, err := catalog.GetSWEArea(ctx, q, st.AreaID)
 		if err != nil {
-			return "", fmt.Errorf("engine: task detail areas: %w", err)
+			return "", fmt.Errorf("engine: task detail area: %w", err)
 		}
-		areaName := map[db.ID]string{}
-		for _, a := range areas {
-			areaName[a.ID] = a.Name
-		}
-		var names []string
-		for _, it := range st.Items() {
-			if it.TaskID == nil {
-				// Legacy area-only target: name the area itself.
-				name, ok := areaName[it.AreaID]
-				if !ok {
-					return "", fmt.Errorf("engine: task detail area: unknown area %q", string(it.AreaID))
-				}
-				names = append(names, name)
-				continue
-			}
-			tk, err := catalog.GetSWETask(ctx, q, *it.TaskID)
-			if err != nil {
-				return "", fmt.Errorf("engine: task detail task: %w", err)
-			}
-			names = append(names, tk.Title)
-		}
-		if len(names) == 0 {
-			return t.Title, nil
-		}
-		return joinPlus(names), nil
+		return area.Name, nil
 	}
 	return t.Title, nil
 }
@@ -352,29 +339,6 @@ func fillDailyDSA(ctx context.Context, q db.DBTX, rep *DailyReport, lo, hi int64
 	return nil
 }
 
-func fillDailySWE(ctx context.Context, q db.DBTX, rep *DailyReport, lo, hi int64) error {
-	rows, err := q.QueryContext(ctx, `SELECT status FROM swe_executions WHERE recorded_at >= ? AND recorded_at < ?`, lo, hi)
-	if err != nil {
-		return fmt.Errorf("engine: swe executions: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var st string
-		if err := rows.Scan(&st); err != nil {
-			return fmt.Errorf("engine: scan swe: %w", err)
-		}
-		switch st {
-		case "COMPLETED":
-			rep.SWE.Completed++
-		case "PARTIAL":
-			rep.SWE.Partial++
-		case "BLOCKED":
-			rep.SWE.Blocked++
-		}
-	}
-	return rows.Err()
-}
-
 // WeightedAvgSpeed computes sum(avg*attempted)/sum(attempted) for overall
 // question-speed metrics. Never simple-average averages.
 func WeightedAvgSpeed(rows []struct {
@@ -426,6 +390,8 @@ type WeeklyReport struct {
 	GovSeconds     int
 	DSASeconds     int
 	SWESeconds     int
+	SWEPlanned     int
+	SWESessions    int
 	GovSubjects    []GovSubjectWeekly
 	GovLectures    int
 	GovAttempted   int
@@ -434,10 +400,10 @@ type WeeklyReport struct {
 	DSAAttempted   int
 	DSAPassed      int
 	DSANotPassed   int
-	SWECompleted   int
-	SWEPartial     int
-	SWEBlocked     int
 }
+
+// SWEVariance derives SWE actual - planned for the week.
+func (r WeeklyReport) SWEVariance() int { return r.SWESeconds - r.SWEPlanned }
 
 // BuildWeeklyDraft generates a live draft for [weekStart, weekEnd] using the
 // latest snapshot per day for planned totals and actual session intervals.
@@ -480,6 +446,9 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 		}
 		for _, t := range tasks {
 			rep.Planned += t.PlannedSeconds
+			if t.Domain == db.DomainSWE {
+				rep.SWEPlanned += t.PlannedSeconds
+			}
 			rep.TasksTotal++
 		}
 		// Completion via authoritative evaluation as of the week-end
@@ -532,6 +501,9 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 		// spanning the week boundary counts for the week it touches.
 		if s.StartedAt.Unix() < hi && s.StoppedAt.Unix() > lo {
 			rep.Sessions++
+			if s.Domain == db.DomainSWE {
+				rep.SWESessions++
+			}
 		}
 	}
 	rep.Variance = rep.Actual - rep.Planned
@@ -691,28 +663,9 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 	if rep.DSANotPassed < 0 {
 		rep.DSANotPassed = 0
 	}
-	// SWE.
-	srows, err := q.QueryContext(ctx, `SELECT status FROM swe_executions WHERE recorded_at >= ? AND recorded_at < ?`, lo, hi)
-	if err != nil {
-		return fmt.Errorf("engine: weekly swe: %w", err)
-	}
-	for srows.Next() {
-		var st string
-		if err := srows.Scan(&st); err != nil {
-			srows.Close()
-			return fmt.Errorf("engine: scan swe: %w", err)
-		}
-		switch st {
-		case "COMPLETED":
-			rep.SWECompleted++
-		case "PARTIAL":
-			rep.SWEPartial++
-		case "BLOCKED":
-			rep.SWEBlocked++
-		}
-	}
-	srows.Close()
-	return srows.Err()
+	// SWE time derives from sessions + planned slots (BuildWeeklyDraft):
+	// no execution table exists. Nothing to fill here.
+	return nil
 }
 
 func topicSubject(ctx context.Context, q db.DBTX, topicID string) (db.ID, error) {

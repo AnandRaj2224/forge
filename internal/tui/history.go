@@ -226,10 +226,11 @@ func (s *HistoryScreen) dayBody(inner int) string {
 		{"Problems passed", fmt.Sprint(rep.DSA.Passed)},
 		{"Problems not passed", fmt.Sprint(rep.DSA.NotPassed)},
 	})
-	sweBlock := DomainDetailBlock("SWE", "SWE ACTIVITY", []StatPair{
-		{"Tasks completed", fmt.Sprint(rep.SWE.Completed)},
-		{"Tasks partial", fmt.Sprint(rep.SWE.Partial)},
-		{"Tasks blocked", fmt.Sprint(rep.SWE.Blocked)},
+	sweBlock := DomainDetailBlock("SWE", "SWE TIME", []StatPair{
+		{"Planned SWE time", engine.FormatDurationLong(rep.SWE.Planned)},
+		{"Actual SWE time", engine.FormatDurationLong(rep.SWE.Actual)},
+		{"SWE variance", engine.FormatSigned(rep.SWE.Actual - rep.SWE.Planned)},
+		{"SWE sessions", fmt.Sprint(rep.SWE.Sessions)},
 	})
 	sb.WriteString(JoinDetailBlocks([]string{govBlock, dsaBlock, sweBlock}, inner))
 	sb.WriteString("\n" + RowDivider(inner) + "\n")

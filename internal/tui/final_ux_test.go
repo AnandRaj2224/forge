@@ -455,7 +455,7 @@ func TestFinalReviewsSimplified(t *testing.T) {
 		t.Fatalf("review UI must not contain draft language:\n%s", full)
 	}
 	// Metrics automated.
-	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "SWE EXECUTION"} {
+	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "SWE TIME"} {
 		if !strings.Contains(strings.ToUpper(full), strings.ToUpper(want)) {
 			t.Fatalf("review missing automated %q", want)
 		}

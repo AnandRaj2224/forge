@@ -124,15 +124,6 @@ func seedSWE(t *testing.T, ctx context.Context, d *db.DB) {
 	if err := catalog.InsertSWEArea(ctx, d, db.SWEArea{ID: "area-sql", Name: "SQL", SortOrder: 2}); err != nil {
 		t.Fatal(err)
 	}
-	for _, tk := range []db.SWETask{
-		{ID: "go-1", AreaID: "area-go", Title: "Slices", SortOrder: 1},
-		{ID: "go-2", AreaID: "area-go", Title: "Maps", SortOrder: 2},
-		{ID: "sql-1", AreaID: "area-sql", Title: "Joins", SortOrder: 1},
-	} {
-		if err := catalog.InsertSWETask(ctx, d, tk); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := catalog.InsertSWERoutineSlot(ctx, d, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 0, AreaID: "area-go", DurationSeconds: 3600}); err != nil {
 		t.Fatal(err)
 	}
@@ -440,46 +431,42 @@ func TestDSABundleAndRepeat(t *testing.T) {
 	}
 }
 
-func TestSWEBundle(t *testing.T) {
+func TestSWEAreaTargetValidation(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedSWE(t, ctx, d)
-	raw, _ := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{
-		{AreaID: "area-go", TaskID: idp("go-1")},
-		{AreaID: "area-go", TaskID: idp("go-2")},
-		{AreaID: "area-sql", TaskID: idp("sql-1")},
-	}})
+	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
 	mkTask(t, ctx, d, "tswe", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
 	now := time.Now()
-	sess, _ := engine.StartTodayTask(ctx, d, "tswe", now)
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	ev, err := engine.SaveSWEEvidence(ctx, d, "tswe", sess.ID, []engine.SWEOutcomeInput{
-		{TaskID: "go-1", Status: db.SWEStatusCompleted},
-		{TaskID: "go-2", Status: db.SWEStatusPartial},
-		{TaskID: "sql-1", Status: db.SWEStatusBlocked},
-	}, now)
+	sess, err := engine.StartTodayTask(ctx, d, "tswe", now)
+	if err != nil {
+		t.Fatalf("SWE area block must start: %v", err)
+	}
+	closed, err := engine.StopActiveSession(ctx, d, now.Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.State != engine.StateCompleted {
-		t.Fatalf("swe bundle with partial/blocked must complete, got %s", ev.State)
+	if closed.ElapsedSeconds() != 3600 {
+		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
 	}
-	// Duplicate rejected.
-	mkTask(t, ctx, d, "tswe2", "2026-09-21", db.DomainSWE, db.SessionKindSWE, raw)
-	s2, _ := engine.StartTodayTask(ctx, d, "tswe2", now)
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	_, err = engine.SaveSWEEvidence(ctx, d, "tswe2", s2.ID, []engine.SWEOutcomeInput{
-		{TaskID: "go-1", Status: db.SWEStatusCompleted},
-		{TaskID: "go-1", Status: db.SWEStatusPartial},
-	}, now)
-	if err == nil {
-		t.Fatal("duplicate target must fail")
+	// SWE blocks never complete via evidence: stopping is sufficient and
+	// the task stays TODO (time allocation, not task progression).
+	ev, err := engine.EvaluateTodayTask(ctx, d, "tswe")
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func idp(s string) *db.ID {
-	v := db.ID(s)
-	return &v
+	if ev.State != engine.StateTodo {
+		t.Fatalf("SWE block must stay TODO after stop, got %s", ev.State)
+	}
+	// Restarting the same block creates a normal new session.
+	sess2, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatalf("SWE restart must succeed: %v", err)
+	}
+	if sess2.ID == sess.ID {
+		t.Fatal("restart must create a new session")
+	}
+	_, _ = engine.StopActiveSession(ctx, d, now.Add(3*time.Hour))
 }
 
 func TestTodayGeneration(t *testing.T) {
@@ -497,7 +484,8 @@ func TestTodayGeneration(t *testing.T) {
 		t.Fatalf("rev=%d", snap.Revision)
 	}
 	// Count lecture slots (3), practice (Quant only: Reasoning has no
-	// eligible topic, slot-3 English has no eligible topic), dsa (1), swe (1).
+	// eligible topic, slot-3 English has no eligible topic), dsa (1),
+	// swe (2: one block per routine slot).
 	var lec, prac, dsa, swe int
 	for _, tk := range tasks {
 		switch {
@@ -517,8 +505,8 @@ func TestTodayGeneration(t *testing.T) {
 	if prac != 1 {
 		t.Fatalf("practice=%d want 1 (only Quant has eligible topics)", prac)
 	}
-	if dsa != 1 || swe != 1 {
-		t.Fatalf("dsa=%d swe=%d", dsa, swe)
+	if dsa != 1 || swe != 2 {
+		t.Fatalf("dsa=%d swe=%d want 1/2", dsa, swe)
 	}
 	// Practice bundle holds only eligible topics: incomplete-lecture
 	// Percentage excluded, zero-lecture Ratio + Number System included.
@@ -680,8 +668,13 @@ func TestTargetValidation(t *testing.T) {
 	if err := engine.ValidateDSATarget(ctx, d, db.DSATarget{Problems: []db.DSAProblemTarget{{ProblemID: "nope", Mode: db.DSAModeNew}}}); err == nil {
 		t.Fatal("unknown problem must fail")
 	}
-	bad := db.SWETaskTarget{AreaID: "area-go", TaskID: idp("sql-1")}
-	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{Tasks: []db.SWETaskTarget{bad}}); err == nil {
-		t.Fatal("area/task mismatch must fail")
+	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{AreaID: "nope"}); err == nil {
+		t.Fatal("unknown SWE area must fail")
+	}
+	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{}); err == nil {
+		t.Fatal("empty SWE area must fail")
+	}
+	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{AreaID: "area-go"}); err != nil {
+		t.Fatalf("valid SWE area must pass: %v", err)
 	}
 }

@@ -53,7 +53,6 @@ type todayEvidence struct {
 	lectureComp     *db.GovLectureCompletion
 	practiceByTopic map[string]db.GovPracticeRecord
 	dsaLatest       map[string]db.DSAAttempt
-	sweLatest       map[string]string
 }
 
 func NewTodayScreen(a *App) *TodayScreen {
@@ -189,12 +188,10 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 	// One batch query per domain (bounded, task-count independent).
 	practiceRecs, _ := runtime.GetGovPracticeRecordsBySessions(ctx, s.app.DB, allSIDs)
 	dsaAtts, _ := runtime.GetDSAAttemptsBySessions(ctx, s.app.DB, allSIDs)
-	sweExecs, _ := runtime.GetSWEExecutionsBySessions(ctx, s.app.DB, allSIDs)
 	for _, t := range s.tasks {
 		ev := &todayEvidence{
 			practiceByTopic: map[string]db.GovPracticeRecord{},
 			dsaLatest:       map[string]db.DSAAttempt{},
-			sweLatest:       map[string]string{},
 		}
 		idx := -1
 		for i, tt := range s.tasks {
@@ -232,13 +229,6 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 				if cur, exists := ev.dsaLatest[k]; !exists || !a.AttemptedAt.Before(cur.AttemptedAt) {
 					ev.dsaLatest[k] = a
 				}
-			}
-		}
-	}
-	for _, e := range sweExecs {
-		if taskID, ok := sessToTask[e.SessionID]; ok {
-			if ev, ok := s.evidence[taskID]; ok {
-				ev.sweLatest[string(e.TaskID)] = string(e.Status)
 			}
 		}
 	}
@@ -325,12 +315,21 @@ func containsDone(msg string) bool {
 	return strings.Contains(l, "already complete") || strings.Contains(l, "already has an active")
 }
 
-// stopActive stops the global session via the engine and swaps right-bottom
-// to the form.
+// stopActive stops the global session via the engine. GOV/DSA swap the
+// right-bottom panel to the evidence form; SWE has no result form —
+// stopping records actual time and stays on detail.
 func (s *TodayScreen) stopActive() {
 	ctx := context.Background()
 	sess, err := engine.StopActiveSession(ctx, s.app.DB, s.now())
 	if err != nil {
+		return
+	}
+	// SWE: no follow-up form. Recorded time is sufficient.
+	if sess.Domain == db.DomainSWE {
+		s.right = "detail"
+		s.zone = tzTasks
+		s.Reload()
+		s.app.refreshActiveIndicator()
 		return
 	}
 	task, terr := runtime.GetTodayTask(ctx, s.app.DB, sess.TodayTaskID)
@@ -708,19 +707,9 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		return strings.TrimRight(sb.String(), "\n")
 	case len(b.SWE) > 0:
 		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
-		lastArea := ""
-		n := 0
-		for _, sw := range b.SWE {
-			if sw.Area != lastArea {
-				sb.WriteString(SectionHeader(strings.ToUpper(TruncateToWidth(sw.Area, inner-2))) + "\n")
-				lastArea = sw.Area
-			}
-			if sw.Task != "" {
-				n++
-				sb.WriteString(bundleRow(n, sw.Task, inner) + "\n")
-				sb.WriteString(RowDivider(inner) + "\n")
-			}
-		}
+		sb.WriteString(SectionHeader(strings.ToUpper(TruncateToWidth(b.SWE[0].Area, inner-2))) + "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(b.SWE[0].Area+" · "+FormatDurationLong(t.PlannedSeconds), inner)) + "\n")
+		sb.WriteString(div + "\n")
 		if maxLines < 13 {
 			sb.WriteString(s.startBtn.CompactView())
 		} else {
@@ -817,28 +806,9 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 			}
 		}
 	case len(b.SWE) > 0:
-		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TASKS", len(b.SWE))) + "\n")
-		latest := map[string]string{}
-		if ev != nil {
-			latest = ev.sweLatest
-		}
-		for i, sw := range b.SWE {
-			if i > 0 {
-				sb.WriteString("\n" + RowDivider(inner) + "\n")
-			}
-			label := sw.Task
-			if label == "" {
-				label = sw.Area
-			}
-			sb.WriteString(thPrimary.Render(TruncateToWidth(label, inner-2)) + "\n")
-			st := "—"
-			if sw.TaskID != nil {
-				if v, ok := latest[string(*sw.TaskID)]; ok {
-					st = v
-				}
-			}
-			sb.WriteString(thSuccess.Render("✓ " + st))
-		}
+		sb.WriteString(SectionHeader("SWE BLOCK") + "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(b.SWE[0].Area, inner-2)) + "\n")
+		sb.WriteString(MetaRow("Planned", FormatDurationLong(task.PlannedSeconds), 12))
 	default:
 		sb.WriteString(thPrimary.Render(TruncateToWidth(task.Title, inner)))
 	}

@@ -45,8 +45,8 @@ var todayGenMu sync.Mutex
 //     among other active subjects with practice-eligible topics — all
 //     restricted to the current exam's subject set.
 //   - DSA: one 2h30 block, 2 repeat + 1 new, due/review state, catalogue order.
-//   - SWE: one 2h block, daily combination from routine areas, current
-//     unfinished task per area.
+//   - SWE: one block per routine slot for the weekday (area + duration from
+//     the slot). Each block identifies its SWE area, never a task.
 func GenerateToday(ctx context.Context, database *db.DB, localDate string, now time.Time) (db.TodaySnapshot, []db.TodayTask, error) {
 	cal, err := VerifyCalendarSettings(ctx, database)
 	if err != nil {
@@ -661,6 +661,11 @@ func allRepeatStates(ctx context.Context, q db.DBTX) ([]db.DSARepeatState, error
 
 // ---- SWE ----
 
+// planSWEBlock generates one Today SWE block per routine slot for the day's
+// weekday. Each slot resolves directly to its area: routine slot -> area ->
+// Today block. Duration comes from the slot; the target identifies the area.
+// No task lookup, no unfinished-task selection, no bundles, no completion
+// state. The routine is authoritative for planned SWE work.
 func planSWEBlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayTask, error) {
 	cal := DefaultCalendar()
 	t, err := cal.StartOfDay(localDate)
@@ -680,61 +685,32 @@ func planSWEBlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 	if len(slots) == 0 {
 		return nil, nil
 	}
-	var bundle []db.SWETaskTarget
-	planned := 0
-	var names []string
-	for _, sl := range slots {
-		task, err := currentUnfinishedSWETask(ctx, q, sl.AreaID)
-		if err != nil {
-			return nil, err
-		}
-		planned += sl.DurationSeconds
-		if task == nil {
-			continue
-		}
-		tid := task.ID
-		bundle = append(bundle, db.SWETaskTarget{AreaID: sl.AreaID, TaskID: &tid})
-		names = append(names, task.Title)
-	}
-	if len(bundle) == 0 {
-		return nil, nil
-	}
-	if planned <= 0 {
-		planned = 7200
-	}
-	target, _ := db.MarshalTarget(db.SWETarget{Tasks: bundle})
-	tj := target
-	return []db.TodayTask{{
-		Domain: db.DomainSWE, Kind: db.SessionKindSWE,
-		Title:          "SWE Practice • " + joinPlus(names),
-		PlannedSeconds: planned, TargetJSON: &tj,
-	}}, nil
-}
-
-// currentUnfinishedSWETask selects the first task in area order without a
-// COMPLETED execution. When every task in the area is complete it returns
-// (nil, nil): the planner skips that area rather than scheduling an
-// already-completed task as unfinished work. There is no implicit repeat
-// rule for SWE in this model. DB failures propagate.
-func currentUnfinishedSWETask(ctx context.Context, q db.DBTX, areaID db.ID) (*db.SWETask, error) {
-	tasks, err := catalog.GetSWETasks(ctx, q, areaID)
+	areas, err := catalog.GetSWEAreas(ctx, q)
 	if err != nil {
-		return nil, fmt.Errorf("engine: list swe tasks: %w", err)
+		return nil, fmt.Errorf("engine: swe areas: %w", err)
 	}
-	if len(tasks) == 0 {
-		return nil, nil
+	areaName := map[db.ID]string{}
+	for _, a := range areas {
+		areaName[a.ID] = a.Name
 	}
-	for _, t := range tasks {
-		done, err := IsSWETaskComplete(ctx, q, t.ID)
-		if err != nil {
-			return nil, fmt.Errorf("engine: swe completion: %w", err)
+	var out []db.TodayTask
+	for _, sl := range slots {
+		name, ok := areaName[sl.AreaID]
+		if !ok {
+			return nil, wrapErr("generate", ErrInvalidTarget, fmt.Sprintf("unknown SWE area %q", string(sl.AreaID)))
 		}
-		if !done {
-			c := t
-			return &c, nil
+		if sl.DurationSeconds <= 0 {
+			return nil, wrapErr("generate", ErrInvalidTarget, "SWE slot duration must be > 0")
 		}
+		target, _ := db.MarshalTarget(db.SWETarget{AreaID: sl.AreaID})
+		tj := target
+		out = append(out, db.TodayTask{
+			Domain: db.DomainSWE, Kind: db.SessionKindSWE,
+			Title:          fmt.Sprintf("SWE — %s — %s", name, FormatDurationLong(sl.DurationSeconds)),
+			PlannedSeconds: sl.DurationSeconds, TargetJSON: &tj,
+		})
 	}
-	return nil, nil
+	return out, nil
 }
 
 func joinPlus(xs []string) string {

@@ -59,64 +59,35 @@ func TestParseAvgSpeedRejectNaNInf(t *testing.T) {
 	}
 }
 
-// Legacy SWE area-only targets: readable historically, read-only for new evidence.
-func TestLegacySWEAreaOnlyCoherent(t *testing.T) {
+// SWE area targets validate and start/stop as time blocks (no evidence).
+func TestSWEAreaTargetCoherent(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedSWE(t, ctx, d)
 	now := time.Now()
-	// Current TaskID-based target validates for both historical and new paths.
-	rawCurrent, _ := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{{AreaID: "area-go", TaskID: idp("go-1")}}})
-	stCurrent, _ := db.UnmarshalSWETarget(rawCurrent)
-	if err := engine.ValidateSWETarget(ctx, d, stCurrent); err != nil {
-		t.Fatalf("current target must validate: %v", err)
+	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
+	st, _ := db.UnmarshalSWETarget(raw)
+	if err := engine.ValidateSWETarget(ctx, d, st); err != nil {
+		t.Fatalf("area target must validate: %v", err)
 	}
-	if err := engine.ValidateSWECurrentTarget(ctx, d, stCurrent); err != nil {
-		t.Fatalf("current target must pass strict validation: %v", err)
-	}
-	if engine.IsLegacySWETarget(stCurrent) {
-		t.Fatal("current target must not be legacy")
-	}
-	// Legacy area-only target: historical validation allows, strict rejects.
-	rawLegacy, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
-	stLegacy, _ := db.UnmarshalSWETarget(rawLegacy)
-	if err := engine.ValidateSWETarget(ctx, d, stLegacy); err != nil {
-		t.Fatalf("legacy must remain readable via ValidateSWETarget: %v", err)
-	}
-	if !engine.IsLegacySWETarget(stLegacy) {
-		t.Fatal("legacy not detected")
-	}
-	if err := engine.ValidateSWECurrentTarget(ctx, d, stLegacy); !errors.Is(err, engine.ErrLegacyTarget) {
-		t.Fatalf("strict validation must return ErrLegacyTarget, got %v", err)
-	}
-	// New evidence on legacy must return ErrLegacyTarget (not invalid-target
-	// confusion, not silent attach).
-	mkTask(t, ctx, d, "swe-legacy", "2026-09-20", db.DomainSWE, db.SessionKindSWE, rawLegacy)
-	sess, err := engine.StartTodayTask(ctx, d, "swe-legacy", now)
-	if err == nil {
-		// Starting legacy for new evidence must also be read-only.
-		// If start unexpectedly succeeds (e.g. legacy allowed to start),
-		// the save must still be read-only.
-		_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-		_, err = engine.SaveSWEEvidence(ctx, d, "swe-legacy", sess.ID, []engine.SWEOutcomeInput{{TaskID: "go-1", Status: db.SWEStatusCompleted}}, now)
-		if !errors.Is(err, engine.ErrLegacyTarget) {
-			t.Fatalf("legacy save must return ErrLegacyTarget, got %v", err)
-		}
-	} else {
-		if !errors.Is(err, engine.ErrLegacyTarget) {
-			t.Fatalf("legacy start must return ErrLegacyTarget, got %v", err)
-		}
-	}
-	// Current target still saves fine (different date avoids snapshot revision clash).
-	raw2, _ := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{{AreaID: "area-go", TaskID: idp("go-1")}}})
-	mkTask(t, ctx, d, "swe-cur", "2026-09-21", db.DomainSWE, db.SessionKindSWE, raw2)
-	s2, err := engine.StartTodayTask(ctx, d, "swe-cur", now.Add(2*time.Hour))
+	mkTask(t, ctx, d, "swe-area", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
+	sess, err := engine.StartTodayTask(ctx, d, "swe-area", now)
 	if err != nil {
-		t.Fatalf("current start failed: %v", err)
+		t.Fatalf("area start failed: %v", err)
 	}
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(3*time.Hour))
-	if _, err := engine.SaveSWEEvidence(ctx, d, "swe-cur", s2.ID, []engine.SWEOutcomeInput{{TaskID: "go-1", Status: db.SWEStatusCompleted}}, now); err != nil {
-		t.Fatalf("current save failed: %v", err)
+	closed, err := engine.StopActiveSession(ctx, d, now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.ElapsedSeconds() != 3600 {
+		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
+	}
+	if sess.ID != closed.ID {
+		t.Fatal("stop must close the same session")
+	}
+	// Unknown area rejects.
+	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{AreaID: "no-area"}); !errors.Is(err, engine.ErrInvalidTarget) {
+		t.Fatalf("unknown area must be ErrInvalidTarget, got %v", err)
 	}
 }
 
@@ -157,25 +128,11 @@ func TestLectureCompletionMapMatches(t *testing.T) {
 	if got, err := runtime.GetLectureCompletionMap(ctx, d, nil); err != nil || len(got) != 0 {
 		t.Fatalf("empty map=%v err=%v", got, err)
 	}
-	// SWE completion map matches single checks.
-	seedSWE(t, ctx, d)
-	sweIDs := []db.ID{"go-1", "go-2"}
-	singleMap := map[db.ID]bool{}
-	for _, id := range sweIDs {
-		ok, err := engine.IsSWETaskComplete(ctx, d, id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		singleMap[id] = ok
-	}
-	batch, err := runtime.GetSWETaskCompletionMap(ctx, d, sweIDs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range sweIDs {
-		if batch[id] != singleMap[id] {
-			t.Fatalf("swe %s batch=%v single=%v", id, batch[id], singleMap[id])
-		}
+	// No SWE task tables exist in the time-allocation model.
+	var name string
+	err = d.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name IN ('swe_tasks','swe_executions')`).Scan(&name)
+	if err == nil {
+		t.Fatalf("task-dependent SWE table %q must not exist", name)
 	}
 	_ = catalog.GetGovSubjects
 }

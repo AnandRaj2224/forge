@@ -73,7 +73,7 @@ func seedFlowDB(t *testing.T) *db.DB {
 	_ = catalog.InsertGovExamSyllabus(ctx, database, db.GovExamSyllabus{ExamID: "exam-sbi", TopicID: "topic-a", SortOrder: 1})
 	_ = catalog.InsertDSAProblem(ctx, database, db.DSAProblem{ID: "dsa-1", Title: "Two Sum", Pattern: "Hash Map", Difficulty: "EASY", SortOrder: 1})
 	_ = catalog.InsertSWEArea(ctx, database, db.SWEArea{ID: "area-go", Name: "Go", SortOrder: 1})
-	_ = catalog.InsertSWETask(ctx, database, db.SWETask{ID: "task-go-1", AreaID: "area-go", Title: "Slices", SortOrder: 1})
+	_ = catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 1, AreaID: "area-go", DurationSeconds: 3600})
 	_ = runtime.CreateTodaySnapshot(ctx, database, db.TodaySnapshot{ID: "snap1", LocalDate: "2026-09-20", Revision: 1, GeneratedAt: now})
 	lec, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: "subj-quant", TopicID: "topic-a", LectureID: "lec-a"})
 	prac, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-a", "topic-b"}})

@@ -536,10 +536,11 @@ func (s *ReviewsScreen) reportView(inner int) string {
 		{"Problems passed", fmt.Sprint(rep.DSAPassed)},
 		{"Problems not passed", fmt.Sprint(rep.DSANotPassed)},
 	})
-	sweBlock := DomainDetailBlock("SWE", "SWE EXECUTION", []StatPair{
-		{"Tasks completed", fmt.Sprint(rep.SWECompleted)},
-		{"Tasks partial", fmt.Sprint(rep.SWEPartial)},
-		{"Tasks blocked", fmt.Sprint(rep.SWEBlocked)},
+	sweBlock := DomainDetailBlock("SWE", "SWE TIME", []StatPair{
+		{"Planned SWE time", engine.FormatDurationLong(rep.SWEPlanned)},
+		{"Actual SWE time", engine.FormatDurationLong(rep.SWESeconds)},
+		{"SWE variance", engine.FormatSigned(rep.SWESeconds - rep.SWEPlanned)},
+		{"SWE sessions", fmt.Sprint(rep.SWESessions)},
 	})
 	sb.WriteString(JoinDetailBlocks([]string{govBlock, dsaBlock, sweBlock}, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")

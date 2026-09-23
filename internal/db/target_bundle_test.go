@@ -8,6 +8,7 @@ import (
 
 // Section 31: bundle-capable targets. Legacy singular payloads must keep
 // parsing exactly as before; bundle payloads must normalize to item lists.
+// SWE is a time-allocation target: exactly one area_id, no tasks.
 
 func TestDSATargetLegacySingular(t *testing.T) {
 	got, err := db.UnmarshalDSATarget(`{"problem_id":"dsa-001","mode":"NEW"}`)
@@ -35,25 +36,22 @@ func TestDSATargetBundle(t *testing.T) {
 	}
 }
 
-func TestSWETargetLegacySingular(t *testing.T) {
-	got, err := db.UnmarshalSWETarget(`{"area_id":"swe-docker","task_id":"swe-docker-t4"}`)
+func TestSWETargetAreaOnly(t *testing.T) {
+	got, err := db.UnmarshalSWETarget(`{"area_id":"area-go"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := got.Items()
-	if len(items) != 1 || items[0].AreaID != "swe-docker" || items[0].TaskID == nil || *items[0].TaskID != "swe-docker-t4" {
-		t.Fatalf("legacy singular not preserved: %+v", got)
+	if got.AreaID != "area-go" {
+		t.Fatalf("area not preserved: %+v", got)
 	}
 }
 
-func TestSWETargetBundle(t *testing.T) {
-	raw := `{"tasks":[{"area_id":"swe-docker","task_id":"swe-docker-t4"},{"area_id":"swe-linux","task_id":"swe-linux-t4"}]}`
-	got, err := db.UnmarshalSWETarget(raw)
-	if err != nil {
-		t.Fatal(err)
+func TestSWETargetRejectsUnknownFields(t *testing.T) {
+	if _, err := db.UnmarshalSWETarget(`{"area_id":"area-go","task_id":"go-1"}`); err == nil {
+		t.Fatal("task_id must be rejected in time-allocation model")
 	}
-	if len(got.Items()) != 2 {
-		t.Fatalf("expected 2 bundle items, got %+v", got)
+	if _, err := db.UnmarshalSWETarget(`{"tasks":[{"area_id":"a"}]}`); err == nil {
+		t.Fatal("tasks bundle must be rejected in time-allocation model")
 	}
 }
 
@@ -67,6 +65,20 @@ func TestTargetBundleRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(back.Items()) != 1 || back.Items()[0].ProblemID != "dsa-001" {
+		t.Fatalf("round trip failed: %s", raw)
+	}
+}
+
+func TestSWETargetRoundTrip(t *testing.T) {
+	raw, err := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := db.UnmarshalSWETarget(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.AreaID != "area-go" {
 		t.Fatalf("round trip failed: %s", raw)
 	}
 }

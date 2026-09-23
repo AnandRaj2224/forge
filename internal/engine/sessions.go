@@ -156,9 +156,7 @@ func validateTaskTarget(ctx context.Context, q db.DBTX, task db.TodayTask) error
 		if err != nil {
 			return wrapErr("start", ErrInvalidTarget, err.Error())
 		}
-		// New work requires TaskID bundles; legacy area-only snapshots
-		// remain readable (Evaluate) but cannot start new evidence.
-		return ValidateSWECurrentTarget(ctx, q, st)
+		return ValidateSWETarget(ctx, q, st)
 	default:
 		return wrapErr("start", ErrInvalidTarget, "unknown domain")
 	}

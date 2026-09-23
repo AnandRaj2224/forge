@@ -197,9 +197,7 @@ type DSAItem struct {
 
 type SWEItem struct {
 	AreaID db.ID
-	TaskID *db.ID
 	Area   string
-	Task   string
 }
 
 // ResolveBundle parses a Today task's target_json and resolves names via catalog.
@@ -286,33 +284,15 @@ func ResolveBundle(ctx context.Context, q db.DBTX, t db.TodayTask) Bundle {
 			b.RawNote = "invalid SWE target"
 			return b
 		}
-		areas, _ := catalog.GetSWEAreas(ctx, q)
-		areaName := func(id db.ID) string {
-			for _, a := range areas {
-				if a.ID == id {
-					return a.Name
-				}
-			}
-			return string(id)
-		}
-		for _, item := range st.Items() {
-			si := SWEItem{AreaID: item.AreaID, TaskID: item.TaskID, Area: areaName(item.AreaID)}
-			if item.TaskID != nil {
-				tasks, _ := catalog.GetSWETasks(ctx, q, item.AreaID)
-				for _, tk := range tasks {
-					if tk.ID == *item.TaskID {
-						si.Task = tk.Title
-					}
-				}
-				if si.Task == "" {
-					si.Task = string(*item.TaskID)
-				}
-			}
-			b.SWE = append(b.SWE, si)
-		}
-		if len(b.SWE) == 0 {
+		if st.AreaID == "" {
 			b.RawNote = "empty SWE target"
+			return b
 		}
+		areaName := string(st.AreaID)
+		if a, err := catalog.GetSWEArea(ctx, q, st.AreaID); err == nil {
+			areaName = a.Name
+		}
+		b.SWE = append(b.SWE, SWEItem{AreaID: st.AreaID, Area: areaName})
 		return b
 	}
 	b.RawNote = "unknown domain"
@@ -706,57 +686,6 @@ func LastAttempt(attempts []db.DSAAttempt) *db.DSAAttempt {
 		}
 	}
 	return &best
-}
-
-// SWEAreaProgress: done = tasks with a COMPLETED execution (derived rule).
-//
-// The authoritative product predicate is engine.IsSWETaskComplete; Today
-// startability and bundle completion additionally require exact target
-// satisfaction via engine.EvaluateTodayTask. This helper is presentation
-// aggregation for the SWE browser only and must never gate starting,
-// completion, or evidence.
-type SWEAreaProgress struct {
-	Area  db.SWEArea
-	Total int
-	Done  int
-}
-
-// ComputeSWEProgressE aggregates area progress; DB failures propagate and
-// must surface as data errors instead of silent undercounts.
-// Implemented via one tasks query + one completion-map query.
-func ComputeSWEProgressE(ctx context.Context, q db.DBTX, area db.SWEArea) (SWEAreaProgress, error) {
-	tasks, err := catalog.GetSWETasks(ctx, q, area.ID)
-	if err != nil {
-		return SWEAreaProgress{Area: area}, err
-	}
-	pr := SWEAreaProgress{Area: area, Total: len(tasks)}
-	if len(tasks) == 0 {
-		return pr, nil
-	}
-	ids := make([]db.ID, 0, len(tasks))
-	for _, t := range tasks {
-		ids = append(ids, t.ID)
-	}
-	compMap, err := runtime.GetSWETaskCompletionMap(ctx, q, ids)
-	if err != nil {
-		return pr, err
-	}
-	for _, t := range tasks {
-		if compMap[t.ID] {
-			pr.Done++
-		}
-	}
-	return pr, nil
-}
-
-// ComputeSWEProgress is the silent-compat wrapper.
-//
-// Deprecated: non-authoritative presentation helper that swallows lookup
-// failures as TODO. New code must use ComputeSWEProgressE (or the engine
-// evaluator for task state) and surface errors as data errors.
-func ComputeSWEProgress(ctx context.Context, q db.DBTX, area db.SWEArea) SWEAreaProgress {
-	pr, _ := ComputeSWEProgressE(ctx, q, area)
-	return pr
 }
 
 // ---- Form validation (pure, unit-tested) ----

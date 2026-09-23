@@ -7,7 +7,6 @@ import (
 	"time"
 
 	db "forge/internal/db"
-	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
 )
 
@@ -27,12 +26,6 @@ type DSAAttemptInput struct {
 	Optimal     bool
 	HintUsed    bool
 	SolveSecs   int
-}
-
-// SWEOutcomeInput is one task outcome for a SWE bundle save.
-type SWEOutcomeInput struct {
-	TaskID db.ID
-	Status db.SWEExecutionStatus
 }
 
 // SaveGovLectureEvidence records a lecture YES. NO inserts nothing and leaves
@@ -403,111 +396,4 @@ func addDaysLocal(localDate string, days int) (string, error) {
 		return "", err
 	}
 	return s.AddDate(0, 0, days).Format("2006-01-02"), nil
-}
-
-// SaveSWEEvidence validates the exact bundle, writes all outcomes in ONE
-// transaction, and re-evaluates. Every target task needs exactly one valid
-// outcome; BLOCKED/PARTIAL still complete the bundle as evidence.
-//
-// Legacy area-only targets remain readable via EvaluateTodayTask but are
-// read-only for new evidence: attempting a new save on them returns the
-// domain-level ErrLegacyTarget (never silently attaches evidence to an
-// arbitrary unfinished task).
-func SaveSWEEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.ID, inputs []SWEOutcomeInput, now time.Time) (TaskEvaluation, error) {
-	task, err := runtime.GetTodayTask(ctx, database, taskID)
-	if err != nil {
-		return TaskEvaluation{}, fmt.Errorf("engine: load task: %w", err)
-	}
-	if task.TargetJSON == nil {
-		return TaskEvaluation{}, wrapErr("swe save", ErrInvalidTarget, "no target")
-	}
-	st, err := db.UnmarshalSWETarget(*task.TargetJSON)
-	if err != nil {
-		return TaskEvaluation{}, wrapErr("swe save", ErrInvalidTarget, err.Error())
-	}
-	// Legacy check first so validation and save agree: historical
-	// area-only snapshots are readable (ValidateSWETarget allows them) but
-	// new evidence on them is a read-only domain error.
-	if IsLegacySWETarget(st) {
-		return TaskEvaluation{}, wrapErr("swe save", ErrLegacyTarget, "legacy area-only SWE target is read-only: migrate to task bundle for new evidence")
-	}
-	if err := ValidateSWETarget(ctx, database, st); err != nil {
-		return TaskEvaluation{}, err
-	}
-	sess, err := runtime.GetSession(ctx, database, sessionID)
-	if err != nil {
-		return TaskEvaluation{}, fmt.Errorf("engine: load session: %w", err)
-	}
-	if sess.TodayTaskID != taskID {
-		return TaskEvaluation{}, wrapErr("swe save", ErrValidation, "session does not belong to task")
-	}
-	if sess.Status != db.SessionStatusStopped {
-		return TaskEvaluation{}, wrapErr("swe save", ErrValidation, "evidence requires a STOPPED session")
-	}
-	items := st.Items()
-	targetSet := map[db.ID]db.SWETaskTarget{}
-	for _, it := range items {
-		// Legacy was rejected above; TaskID is guaranteed present here.
-		targetSet[*it.TaskID] = it
-	}
-	if len(inputs) == 0 {
-		return TaskEvaluation{}, wrapErr("swe save", ErrValidation, "no outcomes")
-	}
-	seen := map[db.ID]bool{}
-	for _, in := range inputs {
-		tgt, ok := targetSet[in.TaskID]
-		if !ok {
-			return TaskEvaluation{}, wrapErr("swe save", ErrValidation, fmt.Sprintf("task %q not in target", string(in.TaskID)))
-		}
-		if seen[in.TaskID] {
-			return TaskEvaluation{}, wrapErr("swe save", ErrDuplicate, fmt.Sprintf("duplicate task %q", string(in.TaskID)))
-		}
-		seen[in.TaskID] = true
-		if !validSWEStatus(in.Status) {
-			return TaskEvaluation{}, wrapErr("swe save", ErrValidation, "invalid outcome")
-		}
-		// Verify area/task relationship.
-		tasks, err := catalog.GetSWETasks(ctx, database, tgt.AreaID)
-		if err != nil {
-			return TaskEvaluation{}, fmt.Errorf("engine: swe tasks: %w", err)
-		}
-		found := false
-		for _, t := range tasks {
-			if t.ID == in.TaskID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return TaskEvaluation{}, wrapErr("swe save", ErrValidation, "area/task mismatch")
-		}
-	}
-	ev, err := EvaluateTodayTask(ctx, database, taskID)
-	if err != nil {
-		return TaskEvaluation{}, err
-	}
-	already := map[string]bool{}
-	for _, c := range ev.Completed {
-		already[c] = true
-	}
-	for _, in := range inputs {
-		if already[string(in.TaskID)] {
-			return TaskEvaluation{}, wrapErr("swe save", ErrAlreadySatisfied, fmt.Sprintf("task %q already satisfied", string(in.TaskID)))
-		}
-	}
-	err = database.WithTx(ctx, func(q db.DBTX) error {
-		for _, in := range inputs {
-			id := db.ID(fmt.Sprintf("swex-%d-%s", now.UnixNano(), string(in.TaskID)))
-			if err := runtime.InsertSWEExecution(ctx, q, db.SWEExecution{
-				ID: id, SessionID: sessionID, TaskID: in.TaskID, Status: in.Status, RecordedAt: now,
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return TaskEvaluation{}, fmt.Errorf("engine: save swe: %w", err)
-	}
-	return EvaluateTodayTask(ctx, database, taskID)
 }

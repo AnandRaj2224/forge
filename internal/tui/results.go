@@ -33,18 +33,11 @@ type DSARow struct {
 	Solve     FormField
 }
 
-// SWERow is one task outcome in the SWE result form.
-type SWERow struct {
-	TaskID db.ID
-	Area   string
-	Task   string
-	Radio  RadioGroup
-}
-
 // ResultForm is the domain-specific evidence form embedded in Today's
 // right-bottom panel. SAVE stays disabled until every bundled item validates.
 // Focus order, rendered position, and scroll position derive from one
 // structured field model (fieldDescriptors), never hard-coded line numbers.
+// SWE blocks use no result form: stopping the session records actual time.
 type ResultForm struct {
 	app           *App
 	sessionID     string
@@ -54,7 +47,6 @@ type ResultForm struct {
 	lecture       RadioGroup
 	prows         []PracticeRow
 	drows         []DSARow
-	srows         []SWERow
 	focus         int
 	save          Button
 	err           string
@@ -72,7 +64,7 @@ func (s *ResultForm) Reload(sessionID string, task db.TodayTask) {
 	s.bundle = ResolveBundle(ctx, s.app.DB, task)
 	s.kind = resultKindForTask(task)
 	s.focus, s.err = 0, ""
-	s.prows, s.drows, s.srows = nil, nil, nil
+	s.prows, s.drows = nil, nil
 	s.satisfiedNote = ""
 	s.lecture = NewRadio([]string{"YES", "NO"})
 	// Multi-session partials: already-satisfied target items are shown
@@ -108,21 +100,6 @@ func (s *ResultForm) Reload(sessionID string, task db.TodayTask) {
 				Indep: Checkbox{Label: "Independent"}, Optimal: Checkbox{Label: "Optimal"},
 				Hint: Checkbox{Label: "Hint used"}, Solve: NewField("Solve time", "e.g. 5m", 10)})
 		}
-	case "SWE":
-		for _, sw := range s.bundle.SWE {
-			if sw.TaskID != nil && onlyMissing && !missing[string(*sw.TaskID)] {
-				continue
-			}
-			label := sw.Task
-			if label == "" {
-				label = sw.Area
-			}
-			tid := db.ID("")
-			if sw.TaskID != nil {
-				tid = *sw.TaskID
-			}
-			s.srows = append(s.srows, SWERow{TaskID: tid, Area: sw.Area, Task: label, Radio: NewRadio([]string{"COMPLETED", "PARTIAL", "BLOCKED"})})
-		}
 	}
 	s.updateFocusVisual()
 }
@@ -137,6 +114,7 @@ func resultKindForTask(t db.TodayTask) string {
 	if t.Domain == db.DomainDSA {
 		return "DSA"
 	}
+	// SWE blocks use no result form; stopping the session is sufficient.
 	return "SWE"
 }
 
@@ -148,8 +126,6 @@ func (s *ResultForm) nFocus() int {
 		return len(s.prows)*4 + 1
 	case "DSA":
 		return len(s.drows)*4 + 1
-	case "SWE":
-		return len(s.srows) + 1
 	}
 	return 1
 }
@@ -185,18 +161,6 @@ func (s *ResultForm) revalidate() {
 			}
 		}
 		s.save.Disabled = false
-	case "SWE":
-		if len(s.srows) == 0 {
-			s.save.Disabled = true
-			return
-		}
-		for _, r := range s.srows {
-			if r.Radio.Selected < 0 {
-				s.save.Disabled = true
-				return
-			}
-		}
-		s.save.Disabled = false
 	}
 	s.save.Focused = s.focus == s.nFocus()-1
 }
@@ -214,9 +178,6 @@ func (s *ResultForm) updateFocusVisual() {
 		s.drows[i].Indep.Focused, s.drows[i].Optimal.Focused, s.drows[i].Hint.Focused = false, false, false
 	}
 	s.lecture.Focused = false
-	for i := range s.srows {
-		s.srows[i].Radio.Focused = false
-	}
 	f := s.focus
 	switch s.kind {
 	case "LECTURE":
@@ -250,10 +211,6 @@ func (s *ResultForm) updateFocusVisual() {
 			case 3:
 				s.drows[r].Solve.Input.Focus()
 			}
-		}
-	case "SWE":
-		if f < len(s.srows) {
-			s.srows[f].Radio.Focused = true
 		}
 	}
 	s.save.Focused = f == s.nFocus()-1
@@ -308,11 +265,6 @@ func (s *ResultForm) fieldDescriptors() []string {
 				fmt.Sprintf("d%d-hint", i), fmt.Sprintf("d%d-solve", i))
 		}
 		out = append(out, "save")
-	case "SWE":
-		for i := range s.srows {
-			out = append(out, fmt.Sprintf("s%d-outcome", i))
-		}
-		out = append(out, "save")
 	default:
 		out = []string{"save"}
 	}
@@ -333,12 +285,6 @@ func (s *ResultForm) rowHeights() []int {
 		out := make([]int, len(s.drows))
 		for i := range out {
 			out[i] = 7 // divider + title + 3 checks + solve + validation
-		}
-		return out
-	case "SWE":
-		out := make([]int, len(s.srows))
-		for i := range out {
-			out[i] = 6 // divider + title + 3 radio options + status
 		}
 		return out
 	}
@@ -397,14 +343,6 @@ func (s *ResultForm) focusLine() int {
 		default:
 			return base + 5
 		}
-	case "SWE":
-		var r int
-		fmt.Sscanf(id, "s%d-outcome", &r)
-		base := header
-		for i := 0; i < r; i++ {
-			base += s.rowHeights()[i]
-		}
-		return base + 2
 	}
 	return 0
 }
@@ -507,22 +445,6 @@ func (s *ResultForm) HandleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return nil, false
-	case "SWE":
-		if f < len(s.srows) {
-			switch ks {
-			case "left", "h":
-				s.srows[f].Radio.Move(-1)
-			case "right", "l":
-				s.srows[f].Radio.Move(1)
-			case " ", "space", "enter":
-				s.srows[f].Radio.Choose()
-			default:
-				return nil, false
-			}
-			s.updateFocusVisual()
-			return nil, true
-		}
-		return nil, false
 	}
 	return nil, false
 }
@@ -591,17 +513,6 @@ func (s *ResultForm) saveAll() error {
 		}
 		_, err := engine.SaveDSAEvidence(ctx, s.app.DB, taskID, sessionID, inputs, now)
 		return err
-	case "SWE":
-		var inputs []engine.SWEOutcomeInput
-		for _, r := range s.srows {
-			if r.Radio.Selected < 0 {
-				return fmt.Errorf("%s: outcome required", r.Task)
-			}
-			st := db.SWEExecutionStatus(r.Radio.Options[r.Radio.Selected])
-			inputs = append(inputs, engine.SWEOutcomeInput{TaskID: r.TaskID, Status: st})
-		}
-		_, err := engine.SaveSWEEvidence(ctx, s.app.DB, taskID, sessionID, inputs, now)
-		return err
 	}
 	return fmt.Errorf("unknown result kind")
 }
@@ -659,19 +570,6 @@ func (s *ResultForm) ViewFor(inner int) string {
 					dur = FormatDurationLong(*solveSecs)
 				}
 				sb.WriteString("  " + thSuccess.Render("✓ "+dur) + "  " + thMeta.Render("e.g. 30s, 5m, 1h 15m") + "\n")
-			}
-		}
-	case "SWE":
-		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TASKS", len(s.srows))) + "\n")
-		for i, r := range s.srows {
-			sb.WriteString(div + "\n")
-			_ = i
-			sb.WriteString(thPrimary.Render(TruncateToWidth(r.Area+"  ·  "+r.Task, inner-2)) + "\n")
-			sb.WriteString(r.Radio.View() + "\n")
-			if r.Radio.Selected < 0 {
-				sb.WriteString("  " + thWarn.Render("○ outcome required") + "\n")
-			} else {
-				sb.WriteString("  " + thSuccess.Render("✓ "+r.Radio.Options[r.Radio.Selected]) + "\n")
 			}
 		}
 	}

@@ -77,7 +77,7 @@ func TestRoutineDBFailurePropagates(t *testing.T) {
 	})
 	t.Run("swe routine", func(t *testing.T) {
 		d := newSeeded(t)
-		if _, err := d.ExecContext(ctx, `DROP TABLE swe_routine`); err != nil {
+		if _, err := d.ExecContext(ctx, `DROP TABLE swe_routine_slots`); err != nil {
 			t.Fatal(err)
 		}
 		// 2026-09-21 is a Monday with routine slots: the failure is on the
@@ -130,7 +130,7 @@ func TestTargetValidationAbsenceVsFailure(t *testing.T) {
 	if err := engine.ValidateDSATarget(ctx, broken, badDSA); err == nil || errors.Is(err, engine.ErrInvalidTarget) {
 		t.Fatalf("DB failure must not read as invalid target, got %v", err)
 	}
-	badSWE := db.SWETarget{Tasks: []db.SWETaskTarget{{AreaID: "no-area", TaskID: withID("no-task")}}}
+	badSWE := db.SWETarget{AreaID: "no-area"}
 	if err := engine.ValidateSWETarget(ctx, d, badSWE); !errors.Is(err, engine.ErrInvalidTarget) {
 		t.Fatalf("unknown area must be ErrInvalidTarget, got %v", err)
 	}
@@ -144,11 +144,6 @@ func TestTargetValidationAbsenceVsFailure(t *testing.T) {
 	if err := engine.ValidateMockSection(ctx, broken, "exam-1", badSec); err == nil || errors.Is(err, engine.ErrValidation) {
 		t.Fatalf("DB failure must not read as validation error, got %v", err)
 	}
-}
-
-func withID(s string) *db.ID {
-	id := db.ID(s)
-	return &id
 }
 
 // mkTaskDate creates a task on date, allocating the next revision when the
@@ -199,30 +194,9 @@ func TestEvaluatorAbsenceVsFailure(t *testing.T) {
 	}
 }
 
-// ---- SWE exhausted area skips instead of scheduling completed work ----
+// ---- SWE routine generates area blocks directly (no task progression) ----
 
-func completeSWETask(t *testing.T, ctx context.Context, d *db.DB, taskID, areaID, date string, now time.Time) {
-	t.Helper()
-	raw, err := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{{AreaID: db.ID(areaID), TaskID: withID(taskID)}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	name := "swe-" + taskID
-	mkTaskDate(t, ctx, d, name, date, db.DomainSWE, db.SessionKindSWE, raw)
-	sess, err := engine.StartTodayTask(ctx, d, db.ID(name), now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.StopActiveSession(ctx, d, now.Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.SaveSWEEvidence(ctx, d, db.ID(name), sess.ID,
-		[]engine.SWEOutcomeInput{{TaskID: db.ID(taskID), Status: db.SWEStatusCompleted}}, now.Add(2*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func sweTargetTaskIDs(t *testing.T, tasks []db.TodayTask) []string {
+func sweTargetAreaIDs(t *testing.T, tasks []db.TodayTask) []string {
 	t.Helper()
 	var out []string
 	for _, tk := range tasks {
@@ -233,52 +207,50 @@ func sweTargetTaskIDs(t *testing.T, tasks []db.TodayTask) []string {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, it := range st.Items() {
-			if it.TaskID != nil {
-				out = append(out, string(*it.TaskID))
-			}
-		}
+		out = append(out, string(st.AreaID))
 	}
 	return out
 }
 
-func TestSWEExhaustedAreaSkips(t *testing.T) {
+func TestSWERoutineGeneratesAreaBlocks(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
 	seedSWE(t, ctx, d)
 	now := time.Now()
-	// Exhaust area-go (both tasks) with COMPLETED executions.
-	completeSWETask(t, ctx, d, "go-1", "area-go", "2026-09-18", now)
-	completeSWETask(t, ctx, d, "go-2", "area-go", "2026-09-19", now.Add(4*time.Hour))
-	// Monday 2026-09-21 routine covers area-go + area-sql.
+	// Monday 2026-09-21 routine covers area-go + area-sql: two blocks.
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now.Add(8*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range sweTargetTaskIDs(t, tasks) {
-		if id == "go-1" || id == "go-2" {
-			t.Fatalf("exhausted area task %q must never schedule as unfinished", id)
+	got := sweTargetAreaIDs(t, tasks)
+	if len(got) != 2 {
+		t.Fatalf("want 2 SWE blocks, got %v", got)
+	}
+	seen := map[string]bool{}
+	for _, id := range got {
+		seen[id] = true
+	}
+	if !seen["area-go"] || !seen["area-sql"] {
+		t.Fatalf("routine areas missing: %v", got)
+	}
+	// Duration comes from the routine slot.
+	for _, tk := range tasks {
+		if tk.Domain != db.DomainSWE {
+			continue
+		}
+		if tk.PlannedSeconds != 3600 {
+			t.Fatalf("SWE planned=%d want 3600", tk.PlannedSeconds)
 		}
 	}
-	foundSQL := false
-	for _, id := range sweTargetTaskIDs(t, tasks) {
-		if id == "sql-1" {
-			foundSQL = true
-		}
-	}
-	if !foundSQL {
-		t.Fatal("mixed areas: unfinished area must still schedule")
-	}
-	// Exhaust everything: no SWE block at all, never a fabricated bundle.
-	completeSWETask(t, ctx, d, "sql-1", "area-sql", "2026-09-20", now.Add(12*time.Hour))
-	_, tasks2, err := engine.GenerateToday(ctx, d, "2026-09-22", now.Add(16*time.Hour))
+	// Sunday has no routine: no SWE blocks, never fabricated.
+	_, tasks2, err := engine.GenerateToday(ctx, d, "2026-09-27", now.Add(16*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sweTargetTaskIDs(t, tasks2)) != 0 {
-		t.Fatal("all areas exhausted: no SWE bundle may be fabricated")
+	if len(sweTargetAreaIDs(t, tasks2)) != 0 {
+		t.Fatal("day without routine must yield no SWE blocks")
 	}
 }
 

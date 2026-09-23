@@ -266,7 +266,6 @@ func Test10_UnlimitedRepeatAttemptsAllowed(t *testing.T) {
 func seedSWEPrereqs(t *testing.T, ctx context.Context, database *db.DB, sessID string) {
 	t.Helper()
 	_ = catalog.InsertSWEArea(ctx, database, db.SWEArea{ID: "go", Name: "Go", SortOrder: 1})
-	_ = catalog.InsertSWETask(ctx, database, db.SWETask{ID: "go-1", AreaID: "go", Title: "Slices", SortOrder: 1})
 	now := testNow()
 	snap := db.ID("snap-" + sessID)
 	if err := runtime.CreateTodaySnapshot(ctx, database, db.TodaySnapshot{ID: snap, LocalDate: "2026-09-22", Revision: 1, GeneratedAt: now}); err != nil {
@@ -279,18 +278,26 @@ func seedSWEPrereqs(t *testing.T, ctx context.Context, database *db.DB, sessID s
 	_ = runtime.CreateSession(ctx, database, db.Session{ID: db.ID(sessID), TodayTaskID: db.ID("task-" + sessID), Domain: db.DomainSWE, Kind: db.SessionKindSWE, TitleSnapshot: "S", PlannedSeconds: 1800, StartedAt: now, StoppedAt: &st, Status: db.SessionStatusStopped})
 }
 
-func Test11_OnlyValidSWEStatusesAccepted(t *testing.T) {
+func Test11_SWERoutineSlotsRequireValidArea(t *testing.T) {
 	database := openTestDB(t)
 	ctx := context.Background()
-	seedSWEPrereqs(t, ctx, database, "sess1")
-	now := testNow()
-	for _, st := range []db.SWEExecutionStatus{db.SWEStatusCompleted, db.SWEStatusPartial, db.SWEStatusBlocked} {
-		if err := runtime.InsertSWEExecution(ctx, database, db.SWEExecution{ID: db.ID("e-" + string(st)), SessionID: "sess1", TaskID: "go-1", Status: st, RecordedAt: now}); err != nil {
-			t.Fatalf("status %s should succeed: %v", st, err)
-		}
+	_ = catalog.InsertSWEArea(ctx, database, db.SWEArea{ID: "go", Name: "Go", SortOrder: 1})
+	if err := catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 1, AreaID: "go", DurationSeconds: 3600}); err != nil {
+		t.Fatalf("valid routine slot should succeed: %v", err)
 	}
-	if err := runtime.InsertSWEExecution(ctx, database, db.SWEExecution{ID: "e-bad", SessionID: "sess1", TaskID: "go-1", Status: "DONE", RecordedAt: now}); err == nil {
-		t.Fatal("expected invalid status rejection")
+	// Unknown area must fail FK.
+	if err := catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "mon-2", Weekday: 1, Position: 2, AreaID: "nope", DurationSeconds: 3600}); err == nil {
+		t.Fatal("expected FK violation for missing SWE area")
+	}
+	// Duplicate weekday/position must fail.
+	if err := catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "mon-3", Weekday: 1, Position: 1, AreaID: "go", DurationSeconds: 1800}); err == nil {
+		t.Fatal("expected UNIQUE(weekday, position) violation")
+	}
+	// No task tables may remain in the time-allocation model.
+	var name string
+	err := database.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name IN ('swe_tasks','swe_executions')`).Scan(&name)
+	if err == nil {
+		t.Fatalf("task-dependent SWE table %q must not exist", name)
 	}
 }
 
@@ -431,8 +438,8 @@ func Test18_FKCannotPointToMissingStatic(t *testing.T) {
 		"dsa_attempt_missing_problem": func() error {
 			return runtime.InsertDSAAttempt(ctx, database, db.DSAAttempt{ID: "a1", SessionID: "sess1", ProblemID: "nope", Mode: db.DSAModeRepeat, AttemptedAt: now})
 		},
-		"swe_execution_missing_task": func() error {
-			return runtime.InsertSWEExecution(ctx, database, db.SWEExecution{ID: "e1", SessionID: "sess1", TaskID: "nope", Status: db.SWEStatusCompleted, RecordedAt: now})
+		"swe_routine_missing_area": func() error {
+			return catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "bad-slot", Weekday: 1, Position: 9, AreaID: "nope", DurationSeconds: 3600})
 		},
 		"practice_missing_topic": func() error {
 			return runtime.InsertGovPracticeRecord(ctx, database, db.GovPracticeRecord{ID: "p1", SessionID: "sess1", TopicID: "nope", TimeSpentSeconds: 1, Attempted: 1, Correct: 1, RecordedAt: now})
@@ -553,9 +560,6 @@ func TestSmoke_RepresentativeData(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := catalog.InsertSWEArea(ctx, database, db.SWEArea{ID: "go", Name: "Go", SortOrder: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.InsertSWETask(ctx, database, db.SWETask{ID: "go-1", AreaID: "go", Title: "Slices", SortOrder: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err := catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 1, AreaID: "go", DurationSeconds: 3600}); err != nil {

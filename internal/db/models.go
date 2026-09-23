@@ -48,18 +48,6 @@ const (
 // PracticeMode is an alias kept for API symmetry with the spec.
 type PracticeMode = DSAMode
 
-// SWEExecutionStatus is the outcome of one SWE execution.
-type SWEExecutionStatus string
-
-const (
-	SWEStatusCompleted SWEExecutionStatus = "COMPLETED"
-	SWEStatusPartial   SWEExecutionStatus = "PARTIAL"
-	SWEStatusBlocked   SWEExecutionStatus = "BLOCKED"
-)
-
-// PracticeStatus is an alias for SWE execution status vocabulary.
-type PracticeStatus = SWEExecutionStatus
-
 // GovPracticeSelectionMode selects how a practice slot resolves subjects.
 type GovPracticeSelectionMode string
 
@@ -159,14 +147,6 @@ type SWEArea struct {
 	SortOrder int
 }
 
-// SWETask belongs to exactly one area.
-type SWETask struct {
-	ID        ID
-	AreaID    ID
-	Title     string
-	SortOrder int
-}
-
 // SWERoutineSlot maps a weekday/position to an area (not a task).
 type SWERoutineSlot struct {
 	ID              ID
@@ -228,15 +208,6 @@ type DSARepeatState struct {
 	CurrentIntervalDays int
 	NextReviewDate      string // YYYY-MM-DD
 	UpdatedAt           time.Time
-}
-
-// SWEExecution preserves one execution outcome.
-type SWEExecution struct {
-	ID         ID
-	SessionID  ID
-	TaskID     ID
-	Status     SWEExecutionStatus
-	RecordedAt time.Time
 }
 
 // TodaySnapshot is an immutable generated projection revision.
@@ -398,29 +369,12 @@ func (t DSATarget) Items() []DSAProblemTarget {
 	return nil
 }
 
+// SWETarget identifies the SWE area for one Today SWE block.
+// SWE is a time-allocation system: routine slot -> area + duration ->
+// Today block -> generic session -> elapsed time. No tasks, no bundles,
+// no completion state.
 type SWETarget struct {
-	// Legacy singular task assignment.
-	AreaID ID  `json:"area_id,omitempty"`
-	TaskID *ID `json:"task_id,omitempty"`
-	// Bundle assignment: the daily task combination.
-	Tasks []SWETaskTarget `json:"tasks,omitempty"`
-}
-
-// SWETaskTarget is one task inside a SWE block bundle.
-type SWETaskTarget struct {
-	AreaID ID  `json:"area_id"`
-	TaskID *ID `json:"task_id,omitempty"`
-}
-
-// Items normalizes legacy singular and bundle shapes into one list.
-func (t SWETarget) Items() []SWETaskTarget {
-	if len(t.Tasks) > 0 {
-		return t.Tasks
-	}
-	if t.AreaID != "" {
-		return []SWETaskTarget{{AreaID: t.AreaID, TaskID: t.TaskID}}
-	}
-	return nil
+	AreaID ID `json:"area_id"`
 }
 
 // MarshalTarget marshals a typed target payload strictly.

@@ -832,33 +832,25 @@ func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 		}
 		return area, typ, joinPlus(titles)
 	case len(b.SWE) > 0:
-		seen := map[string]bool{}
-		var areas, names []string
-		allTask, anyTask := true, false
+		area := b.SWE[0].Area
+		names := make([]string, 0, len(b.SWE))
 		for _, sw := range b.SWE {
-			if !seen[sw.Area] {
-				seen[sw.Area] = true
-				areas = append(areas, sw.Area)
+			names = append(names, sw.Area)
+		}
+		if len(b.SWE) > 1 {
+			seen := map[string]bool{}
+			var uniq []string
+			for _, sw := range b.SWE {
+				if !seen[sw.Area] {
+					seen[sw.Area] = true
+					uniq = append(uniq, sw.Area)
+				}
 			}
-			if sw.TaskID != nil {
-				anyTask = true
-				names = append(names, sw.Task)
-			} else {
-				allTask = false
-				names = append(names, sw.Area)
+			if len(uniq) > 1 {
+				area = "Mixed"
 			}
 		}
-		area = areas[0]
-		if len(areas) > 1 {
-			area = "Mixed"
-		}
-		typ = "Mixed"
-		if allTask {
-			typ = "Task"
-		} else if !anyTask {
-			typ = "Area"
-		}
-		return area, typ, joinPlus(names)
+		return area, "Area", joinPlus(names)
 	default:
 		return "—", "—", task.Title
 	}

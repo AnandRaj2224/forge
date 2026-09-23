@@ -60,7 +60,7 @@ func main() {
 	if err := catalog.InsertSWEArea(ctx, database, db.SWEArea{ID: "go", Name: "Go", SortOrder: 1}); err != nil {
 		fatal(err)
 	}
-	if err := catalog.InsertSWETask(ctx, database, db.SWETask{ID: "go-1", AreaID: "go", Title: "Slices", SortOrder: 1}); err != nil {
+	if err := catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 1, AreaID: "go", DurationSeconds: 3600}); err != nil {
 		fatal(err)
 	}
 

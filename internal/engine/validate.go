@@ -182,87 +182,18 @@ func requireGenuinelyNew(ctx context.Context, q db.DBTX, problemID db.ID) error 
 	return nil
 }
 
-// ValidateSWETarget validates a SWE bundle: non-empty, no duplicate tasks,
-// every area exists, every task exists and belongs to its area.
-//
-// Legacy area-only items (TaskID == nil) remain readable here for historical
-// snapshots (EvaluateTodayTask, History). They are NOT valid for new work:
-// new evidence paths (Start/Save) must reject them with ErrLegacyTarget via
-// ValidateSWECurrentTarget / SaveSWEEvidence instead of silently attaching
-// evidence to an arbitrary task.
+// ValidateSWETarget validates a SWE area target: the area must exist.
+// SWE is a time-allocation system: routine slot -> area -> Today block.
+// There are no tasks, bundles, or completion states.
 func ValidateSWETarget(ctx context.Context, q db.DBTX, st db.SWETarget) error {
-	items := st.Items()
-	if len(items) == 0 {
-		return wrapErr("swe target", ErrInvalidTarget, "empty task bundle")
+	if st.AreaID == "" {
+		return wrapErr("swe target", ErrInvalidTarget, "area required")
 	}
-	areas, err := catalog.GetSWEAreas(ctx, q)
-	if err != nil {
-		return fmt.Errorf("engine: list swe areas: %w", err)
-	}
-	areaOK := map[db.ID]bool{}
-	for _, a := range areas {
-		areaOK[a.ID] = true
-	}
-	seen := map[string]bool{}
-	for _, it := range items {
-		if it.AreaID == "" {
-			return wrapErr("swe target", ErrInvalidTarget, "area required")
+	if _, err := catalog.GetSWEArea(ctx, q, st.AreaID); err != nil {
+		if isNotFoundErr(err) {
+			return wrapErr("swe target", ErrInvalidTarget, fmt.Sprintf("unknown area %q", string(st.AreaID)))
 		}
-		if !areaOK[it.AreaID] {
-			return wrapErr("swe target", ErrInvalidTarget, fmt.Sprintf("unknown area %q", string(it.AreaID)))
-		}
-		if it.TaskID == nil {
-			// Legacy area-only: allowed for historical snapshots.
-			key := "area:" + string(it.AreaID)
-			if seen[key] {
-				return wrapErr("swe target", ErrInvalidTarget, "duplicate area target")
-			}
-			seen[key] = true
-			continue
-		}
-		key := "task:" + string(*it.TaskID)
-		if seen[key] {
-			return wrapErr("swe target", ErrInvalidTarget, fmt.Sprintf("duplicate task %q", string(*it.TaskID)))
-		}
-		seen[key] = true
-		tasks, err := catalog.GetSWETasks(ctx, q, it.AreaID)
-		if err != nil {
-			return fmt.Errorf("engine: list swe tasks: %w", err)
-		}
-		found := false
-		for _, t := range tasks {
-			if t.ID == *it.TaskID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return wrapErr("swe target", ErrInvalidTarget, fmt.Sprintf("task %q not in area %q", string(*it.TaskID), string(it.AreaID)))
-		}
+		return fmt.Errorf("engine: swe area lookup: %w", err)
 	}
 	return nil
-}
-
-// IsLegacySWETarget reports whether a SWE target contains any legacy
-// area-only item (TaskID == nil). Such targets remain readable for
-// historical snapshots but are read-only for new evidence.
-func IsLegacySWETarget(st db.SWETarget) bool {
-	for _, it := range st.Items() {
-		if it.TaskID == nil {
-			return true
-		}
-	}
-	return false
-}
-
-// ValidateSWECurrentTarget validates a SWE bundle for NEW work: identical to
-// ValidateSWETarget except legacy area-only items are rejected with the
-// domain-level ErrLegacyTarget (read-only) instead of being accepted.
-// Newly generated Today SWE targets must always contain TaskID; historical
-// area-only snapshots stay readable via ValidateSWETarget/EvaluateTodayTask.
-func ValidateSWECurrentTarget(ctx context.Context, q db.DBTX, st db.SWETarget) error {
-	if IsLegacySWETarget(st) {
-		return wrapErr("swe target", ErrLegacyTarget, "legacy area-only SWE target is read-only: migrate to task bundle for new evidence")
-	}
-	return ValidateSWETarget(ctx, q, st)
 }

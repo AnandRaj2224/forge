@@ -443,68 +443,71 @@ func TestPracticeTargetMembership(t *testing.T) {
 	}
 }
 
-func TestSWEPartialStaysTodoThenCompletes(t *testing.T) {
+func TestSWEStaysTodoWithoutEvidenceForm(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedSWE(t, ctx, d)
-	raw, _ := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{
-		{AreaID: "area-go", TaskID: idp("go-1")},
-		{AreaID: "area-sql", TaskID: idp("sql-1")},
-	}})
+	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
 	mkTask(t, ctx, d, "swep", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
 	now := time.Now()
-	sess, _ := engine.StartTodayTask(ctx, d, "swep", now)
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	ev, err := engine.SaveSWEEvidence(ctx, d, "swep", sess.ID, []engine.SWEOutcomeInput{
-		{TaskID: "go-1", Status: db.SWEStatusCompleted},
-	}, now)
+	sess, err := engine.StartTodayTask(ctx, d, "swep", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := engine.StopActiveSession(ctx, d, now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.ElapsedSeconds() != 3600 {
+		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
+	}
+	// No evidence form exists: the block stays TODO by design.
+	ev, err := engine.EvaluateTodayTask(ctx, d, "swep")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ev.State != engine.StateTodo {
-		t.Fatalf("partial SWE bundle must stay TODO, got %s", ev.State)
+		t.Fatalf("SWE must stay TODO without evidence, got %s", ev.State)
 	}
+	// Restart works as a normal session.
 	sess2, err := engine.StartTodayTask(ctx, d, "swep", now.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = sess
 	_, _ = engine.StopActiveSession(ctx, d, now.Add(3*time.Hour))
-	ev, err = engine.SaveSWEEvidence(ctx, d, "swep", sess2.ID, []engine.SWEOutcomeInput{
-		{TaskID: "sql-1", Status: db.SWEStatusBlocked},
-	}, now)
+	ev, err = engine.EvaluateTodayTask(ctx, d, "swep")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.State != engine.StateCompleted {
-		t.Fatalf("full SWE bundle must complete, got %s", ev.State)
+	if ev.State != engine.StateTodo {
+		t.Fatalf("SWE must remain TODO, got %s", ev.State)
 	}
+	_ = sess2
 }
 
-func TestSWEAtomicity(t *testing.T) {
+func TestSWESessionTimeRecorded(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedSWE(t, ctx, d)
-	raw, _ := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{
-		{AreaID: "area-go", TaskID: idp("go-1")},
-		{AreaID: "area-sql", TaskID: idp("sql-1")},
-	}})
+	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-sql"})
 	mkTask(t, ctx, d, "swea", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
 	now := time.Now()
-	sess, _ := engine.StartTodayTask(ctx, d, "swea", now)
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	// Second outcome invalid: nothing may persist.
-	_, err := engine.SaveSWEEvidence(ctx, d, "swea", sess.ID, []engine.SWEOutcomeInput{
-		{TaskID: "go-1", Status: db.SWEStatusCompleted},
-		{TaskID: "sql-1", Status: db.SWEExecutionStatus("BOGUS")},
-	}, now)
-	if err == nil {
-		t.Fatal("invalid outcome must fail")
+	sess, err := engine.StartTodayTask(ctx, d, "swea", now)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var n int
-	_ = d.QueryRowContext(ctx, `SELECT COUNT(*) FROM swe_executions WHERE session_id = ?`, string(sess.ID)).Scan(&n)
-	if n != 0 {
-		t.Fatalf("failed bundle must roll back, got %d rows", n)
+	closed, err := engine.StopActiveSession(ctx, d, now.Add(30*time.Minute))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if closed.ElapsedSeconds() != 1800 {
+		t.Fatalf("elapsed=%d want 1800", closed.ElapsedSeconds())
+	}
+	if closed.PlannedSeconds != 3600 {
+		t.Fatalf("planned=%d want 3600", closed.PlannedSeconds)
+	}
+	_ = sess
 }
 
 // ---- DSA strictness ----

@@ -279,7 +279,7 @@ func TestAcceptHistoryDesign(t *testing.T) {
 	app.history.nowFn = func() time.Time { return time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC) }
 	app.goTab(TabHistory)
 	h := stripANSIForTest(app.history.dayBody(120))
-	for _, want := range []string{"DAILY ACTIVITY", "PLANNED", "ACTUAL", "VARIANCE", "TASKS", "SESSIONS", "COMPLETION", "TIME BY DOMAIN", "DAILY WORK", "Lectures completed", "Questions attempted", "Questions correct", "Questions incorrect", "Accuracy", "Problems attempted", "Problems passed", "Problems not passed", "Tasks completed", "Tasks partial", "Tasks blocked", "UNFINISHED"} {
+	for _, want := range []string{"DAILY ACTIVITY", "PLANNED", "ACTUAL", "VARIANCE", "TASKS", "SESSIONS", "COMPLETION", "TIME BY DOMAIN", "DAILY WORK", "Lectures completed", "Questions attempted", "Questions correct", "Questions incorrect", "Accuracy", "Problems attempted", "Problems passed", "Problems not passed", "Planned SWE time", "Actual SWE time", "SWE variance", "SWE sessions", "UNFINISHED"} {
 		if !strings.Contains(h, want) {
 			t.Fatalf("history missing %q", want)
 		}
@@ -294,7 +294,7 @@ func TestAcceptReviewDesign(t *testing.T) {
 	app := acceptApp(t)
 	app.goTab(TabReviews)
 	r := stripANSIForTest(app.reviews.reportView(120))
-	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "SWE EXECUTION", "What worked well", "What should change"} {
+	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "SWE TIME", "What worked well", "What should change"} {
 		if !strings.Contains(strings.ToUpper(r), strings.ToUpper(want)) {
 			t.Fatalf("reviews missing %q", want)
 		}

@@ -221,29 +221,8 @@ func ComputeDailySummary(ctx context.Context, q db.DBTX, dateStr string) (DailyS
 			}()
 		}
 	}
-	// SWE executions that day.
-	{
-		rows, err := q.QueryContext(ctx, `SELECT status FROM swe_executions WHERE recorded_at >= ? AND recorded_at < ?`,
-			dayStart(dateStr), dayStart(dateStr)+86400)
-		if err == nil {
-			func() {
-				defer rows.Close()
-				for rows.Next() {
-					var st string
-					if rows.Scan(&st) == nil {
-						switch st {
-						case "COMPLETED":
-							s.SWECompleted++
-						case "PARTIAL":
-							s.SWEPartial++
-						case "BLOCKED":
-							s.SWEBlocked++
-						}
-					}
-				}
-			}()
-		}
-	}
+	// SWE time derives from sessions (no execution table exists in the
+	// time-allocation model). Legacy SWE outcome counts stay zero.
 	return s, nil
 }
 
@@ -285,9 +264,6 @@ func sessionHasEvidenceRaw(ctx context.Context, q db.DBTX, sid string) bool {
 		return true
 	}
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM dsa_attempts WHERE session_id = ?`, sid).Scan(&n); err == nil && n > 0 {
-		return true
-	}
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM swe_executions WHERE session_id = ?`, sid).Scan(&n); err == nil && n > 0 {
 		return true
 	}
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_lecture_completions WHERE session_id = ?`, sid).Scan(&n); err == nil && n > 0 {
@@ -590,26 +566,8 @@ func ComputeWeeklyEvidence(ctx context.Context, q db.DBTX, weekStart, weekEnd st
 		}
 	}
 	// SWE.
-	{
-		rows, err := q.QueryContext(ctx, `SELECT status FROM swe_executions WHERE recorded_at >= ? AND recorded_at < ?`, lo, hi)
-		if err == nil {
-			func() {
-				defer rows.Close()
-				for rows.Next() {
-					var st string
-					if rows.Scan(&st) == nil {
-						switch st {
-						case "COMPLETED":
-							e.SWECompleted++
-						case "PARTIAL":
-							e.SWEPartial++
-						case "BLOCKED":
-							e.SWEBlocked++
-						}
-					}
-				}
-			}()
-		}
-	}
+	// No execution table exists in the time-allocation model; weekly SWE
+	// time derives from sessions in the authoritative engine report.
+	// Legacy SWE outcome counts stay zero.
 	return e
 }

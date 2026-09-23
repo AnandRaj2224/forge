@@ -78,7 +78,7 @@ func TestReportAggregationFailureFails(t *testing.T) {
 		return d
 	}
 	ctx := context.Background()
-	for _, table := range []string{"gov_lecture_completions", "gov_practice_records", "dsa_attempts", "swe_executions"} {
+	for _, table := range []string{"gov_lecture_completions", "gov_practice_records", "dsa_attempts"} {
 		t.Run(table, func(t *testing.T) {
 			d := newWeekDB(t)
 			if _, err := d.ExecContext(ctx, `DROP TABLE `+table); err != nil {
@@ -572,15 +572,13 @@ func TestHistoryEnrichmentFailureIsDataError(t *testing.T) {
 			t.Fatal("unresolvable DSA problem must fail the report, not render partial names")
 		}
 	})
-	t.Run("swe task", func(t *testing.T) {
+	t.Run("swe area", func(t *testing.T) {
 		d := openEngineDB(t)
 		seedSWE(t, ctx, d)
-		raw, _ := db.MarshalTarget(db.SWETarget{Tasks: []db.SWETaskTarget{
-			{AreaID: "area-go", TaskID: withID("go-NOPE")},
-		}})
+		raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "no-area"})
 		mkTaskDate(t, ctx, d, "enr-s", "2026-09-22", db.DomainSWE, db.SessionKindSWE, raw)
 		if _, err := engine.BuildDailyReport(ctx, d, "2026-09-22"); err == nil {
-			t.Fatal("unresolvable SWE task must fail the report, not render the title as detail")
+			t.Fatal("unresolvable SWE area must fail the report, not render the title as detail")
 		}
 	})
 	t.Run("healthy enrichment renders names", func(t *testing.T) {

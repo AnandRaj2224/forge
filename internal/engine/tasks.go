@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	db "forge/internal/db"
-	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
 )
 
@@ -341,83 +340,14 @@ func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 			return ev, nil
 		}
 	}
-	items := st.Items()
-	ev.Total = len(items)
-	satisfied := map[string]bool{}
-	for _, s := range evidenceSessions(sessions, cutoff) {
-		execs, err := runtime.GetSWEExecutionsBySession(ctx, q, s.ID)
-		if err != nil {
-			return TaskEvaluation{}, fmt.Errorf("engine: swe executions: %w", err)
-		}
-		for _, e := range execs {
-			if !beforeCutoff(e.RecordedAt.Unix(), cutoff) {
-				continue
-			}
-			if !validSWEStatus(e.Status) {
-				continue
-			}
-			satisfied[string(e.TaskID)] = true
-		}
-	}
-	for _, it := range items {
-		if it.TaskID == nil {
-			// Legacy area-only target: satisfied when any execution exists
-			// for a task in that area from this task's sessions.
-			ok, err := areaSatisfied(ctx, q, it.AreaID, sessions, cutoff)
-			if err != nil {
-				return TaskEvaluation{}, err
-			}
-			if ok {
-				ev.Done++
-				ev.Completed = append(ev.Completed, "area:"+string(it.AreaID))
-			} else {
-				ev.Missing = append(ev.Missing, "area:"+string(it.AreaID))
-			}
-			continue
-		}
-		if satisfied[string(*it.TaskID)] {
-			ev.Done++
-			ev.Completed = append(ev.Completed, string(*it.TaskID))
-		} else {
-			ev.Missing = append(ev.Missing, string(*it.TaskID))
-		}
-	}
-	if ev.Active != nil {
-		ev.State = StateActive
-	} else if ev.Done == ev.Total && ev.Total > 0 {
-		ev.State = StateCompleted
-	} else {
+	// Time-allocation semantics: a SWE block is never "completed" via
+	// evidence. It is TODO until a session is ACTIVE, and TODO again once
+	// the session stops. Actual time comes from generic sessions; no SWE
+	// execution rows exist.
+	ev.Total = 1
+	ev.Missing = []string{string(st.AreaID)}
+	if ev.Active == nil {
 		ev.State = StateTodo
 	}
 	return ev, nil
-}
-
-func validSWEStatus(s db.SWEExecutionStatus) bool {
-	return s == db.SWEStatusCompleted || s == db.SWEStatusPartial || s == db.SWEStatusBlocked
-}
-
-func areaSatisfied(ctx context.Context, q db.DBTX, areaID db.ID, sessions []db.Session, cutoff int64) (bool, error) {
-	tasks, err := catalog.GetSWETasks(ctx, q, areaID)
-	if err != nil {
-		return false, fmt.Errorf("engine: list swe tasks: %w", err)
-	}
-	ids := map[string]bool{}
-	for _, t := range tasks {
-		ids[string(t.ID)] = true
-	}
-	for _, s := range evidenceSessions(sessions, cutoff) {
-		execs, err := runtime.GetSWEExecutionsBySession(ctx, q, s.ID)
-		if err != nil {
-			return false, fmt.Errorf("engine: swe executions: %w", err)
-		}
-		for _, e := range execs {
-			if !beforeCutoff(e.RecordedAt.Unix(), cutoff) {
-				continue
-			}
-			if ids[string(e.TaskID)] && validSWEStatus(e.Status) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
 }
