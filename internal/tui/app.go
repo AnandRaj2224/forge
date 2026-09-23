@@ -83,6 +83,15 @@ type App struct {
 	// from SQLite on TickMsg. Tick only recomputes the elapsed label.
 	active     *db.Session
 	activeInfo string
+
+	// quoteDate is the Forge local date the current quote was selected
+	// for. quoteText/quoteAuthor hold the current quote in application
+	// state. Empty quoteText means the fallback header quote is shown
+	// (empty quotes table). View never queries the database for these.
+	quoteDate   string
+	quoteText   string
+	quoteAuthor string
+	quoteID     *int
 }
 
 func NewApp(database *db.DB) *App {
@@ -94,6 +103,7 @@ func NewApp(database *db.DB) *App {
 	a.mocks = NewMocksScreen(a)
 	a.history = NewHistoryScreen(a)
 	a.reviews = NewReviewsScreen(a)
+	a.loadDailyQuote()
 	return a
 }
 
@@ -244,8 +254,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		a.now = time.Time(m)
 		// 1-second repaint only: recompute the elapsed label from the
-		// in-memory session. No SQLite query here by design.
+		// in-memory session. No SQLite query here by design, except a
+		// daily-quote refresh when the local day actually changed (same
+		// day is a pure in-memory no-op).
 		a.updateActiveIndicator()
+		a.ensureDailyQuote()
 		return a, tickCmd()
 	case ReloadMsg:
 		a.reloadCurrent()
@@ -474,11 +487,13 @@ func (a *App) headerView(w int) string {
 	logoOuter, rightOuter := ComputeHeaderWidths(w, logoContentW)
 	// The full quote text goes to the bounded right-side block, which wraps
 	// it naturally (styling owned by QuoteRegion). Never truncated here.
+	// Content is dynamic from application state; geometry/typography kept.
+	quoteText, quoteAttr := a.quoteDisplay()
 	sh := ShellHeader{
 		Logo: LogoRegion{Lines: forgeLogoLines, Width: logoOuter},
 		Right: RightRegion{
-			QuoteText: "“Everyone sees what you appear to be, few experience what you really are.”",
-			QuoteAttr: "— Niccolò Machiavelli, The Prince",
+			QuoteText: quoteText,
+			QuoteAttr: quoteAttr,
 			NavLine:   navLine,
 			Width:     rightOuter,
 		},

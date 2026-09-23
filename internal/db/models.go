@@ -331,6 +331,25 @@ type MockWeakTopic struct {
 	RankOrder int
 }
 
+// Quote is one daily-quote catalogue entry.
+// Author is never NULL; empty/missing upstream authors are stored as "Unknown".
+type Quote struct {
+	ID     int
+	Quote  string
+	Author string
+}
+
+// DailyQuoteState is the singleton daily selection state (id = 1).
+// It persists the current quote's local date so restarting Forge on the
+// same day reuses the same quote instead of picking another one.
+type DailyQuoteState struct {
+	ID        int
+	LocalDate string // YYYY-MM-DD (Forge local date)
+	QuoteID   *int   // nullable FK to quotes(id)
+	QuoteText string
+	Author    string
+}
+
 // Typed target payloads for today_tasks.target_json / sessions.target_snapshot_json.
 
 type GovLectureTarget struct {
