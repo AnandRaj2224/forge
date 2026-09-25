@@ -229,7 +229,7 @@ func TestWorkspacesFitViewport(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"ACTIVE SESSION", "SELECTED TASK", "SYLLABUS COVERAGE", "PRACTICE READINESS", "PATTERNS", "AREAS", "WEEKLY REPORT"} {
+	for _, want := range []string{"ACTIVE SESSION", "SELECTED TASK", "SYLLABUS COVERAGE", "PRACTICE READINESS", "PATTERNS", "SWE ROUTINE", "WEEKLY REPORT"} {
 		found := false
 		app.width, app.height = 140, 40
 		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {

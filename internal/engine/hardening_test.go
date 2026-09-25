@@ -448,40 +448,39 @@ func TestSWEStaysTodoWithoutEvidenceForm(t *testing.T) {
 	ctx := context.Background()
 	seedSWE(t, ctx, d)
 	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
+	// Partial time stays TODO: mkTask plans 3600, stop after 30m (1800).
 	mkTask(t, ctx, d, "swep", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
 	now := time.Now()
-	sess, err := engine.StartTodayTask(ctx, d, "swep", now)
+	if _, err := engine.StartTodayTask(ctx, d, "swep", now); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := engine.StopActiveSession(ctx, d, now.Add(30*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
-	closed, err := engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
+	if closed.ElapsedSeconds() != 1800 {
+		t.Fatalf("elapsed=%d want 1800", closed.ElapsedSeconds())
 	}
-	if closed.ElapsedSeconds() != 3600 {
-		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
-	}
-	// No evidence form exists: the block stays TODO by design.
+	// No evidence form exists and time is partial: stays TODO by design.
 	ev, err := engine.EvaluateTodayTask(ctx, d, "swep")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ev.State != engine.StateTodo {
-		t.Fatalf("SWE must stay TODO without evidence, got %s", ev.State)
+		t.Fatalf("partial SWE must stay TODO, got %s", ev.State)
 	}
-	// Restart works as a normal session.
+	// Second session reaches the target cumulatively: 1800 + 1800 = 3600.
 	sess2, err := engine.StartTodayTask(ctx, d, "swep", now.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = sess
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(3*time.Hour))
+	_, _ = engine.StopActiveSession(ctx, d, now.Add(2*time.Hour).Add(30*time.Minute))
 	ev, err = engine.EvaluateTodayTask(ctx, d, "swep")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.State != engine.StateTodo {
-		t.Fatalf("SWE must remain TODO, got %s", ev.State)
+	if ev.State != engine.StateCompleted {
+		t.Fatalf("cumulative SWE reaching target must be COMPLETED, got %s", ev.State)
 	}
 	_ = sess2
 }

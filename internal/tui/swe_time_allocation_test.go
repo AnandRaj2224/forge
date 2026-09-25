@@ -10,8 +10,9 @@ import (
 	"forge/internal/db/catalog"
 )
 
-// SWE TUI is an area/routine view: areas list + routine slots, no task
-// lists, no completion percentages, no outcomes.
+// SWE TUI is a day-card grid (GOV dashboard IA): one card per weekday,
+// all slots for a day inside that card, no task lists, no completion
+// percentages, no outcomes.
 
 func seedSWETUI(t *testing.T, database *db.DB) {
 	t.Helper()
@@ -35,9 +36,19 @@ func TestSWEScreenShowsAreasAndSlots(t *testing.T) {
 	app.width, app.height = 120, 36
 	app.goTab(TabSWE)
 	view := stripANSIForTest(app.swe.View())
-	for _, want := range []string{"SWE AREAS", "Go", "Docker", "ROUTINE SLOTS", "SCHEDULED TIME"} {
+	for _, want := range []string{"SWE ROUTINE", "Monday", "Go", "Docker"} {
 		if !strings.Contains(strings.ToUpper(view), strings.ToUpper(want)) {
 			t.Fatalf("SWE view missing %q:\n%s", want, view)
+		}
+	}
+	// One day = one card: Monday appears once with both slots.
+	if strings.Count(view, "Monday") != 1 {
+		t.Fatalf("Monday must appear once (one day = one card):\n%s", view)
+	}
+	// Old two-panel chrome must be gone.
+	for _, bad := range []string{"SWE Areas", "Weekly Routine", "Routine Slots"} {
+		if strings.Contains(view, bad) {
+			t.Fatalf("SWE view must not show two-panel %q:\n%s", bad, view)
 		}
 	}
 	for _, bad := range []string{"COMPLETED", "PARTIAL", "BLOCKED", "✓  DONE", "○  TODO", "EXECUTIONS", "TASKS"} {

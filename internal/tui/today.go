@@ -46,6 +46,10 @@ type TodayScreen struct {
 	// evidence caches completed-task evidence loaded once in Reload so
 	// View rendering performs no database access.
 	evidence map[db.ID]*todayEvidence
+	// sweActual caches total SWE seconds spent per task (stopped durations
+	// plus live active elapsed) so the completed SWE detail can show
+	// persisted time without DB access in View.
+	sweActual map[db.ID]int
 }
 
 // todayEvidence holds preloaded read-only evidence for one task.
@@ -165,12 +169,31 @@ func (s *TodayScreen) Reload() {
 // Completed) exactly as before, but without performing I/O.
 func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 	s.evidence = make(map[db.ID]*todayEvidence, len(s.tasks))
+	s.sweActual = make(map[db.ID]int, len(s.tasks))
 	if len(s.tasks) == 0 {
 		return
 	}
 	sessList, err := runtime.ListSessions(ctx, s.app.DB)
 	if err != nil {
 		return
+	}
+	// SWE actual: total time spent per task (stopped durations + live
+	// active elapsed) so COMPLETED SWE detail reflects persisted DB data.
+	nowUnix := s.now().Unix()
+	for _, sess := range sessList {
+		if sess.Domain != db.DomainSWE {
+			continue
+		}
+		switch {
+		case sess.Status == db.SessionStatusStopped && sess.StoppedAt != nil:
+			if d := sess.StoppedAt.Unix() - sess.StartedAt.Unix(); d > 0 {
+				s.sweActual[sess.TodayTaskID] += int(d)
+			}
+		case sess.Status == db.SessionStatusActive:
+			if d := nowUnix - sess.StartedAt.Unix(); d > 0 {
+				s.sweActual[sess.TodayTaskID] += int(d)
+			}
+		}
 	}
 	sessToTask := make(map[db.ID]db.ID, len(sessList))
 	sessionsByTask := make(map[db.ID][]db.ID, len(s.tasks))
@@ -707,8 +730,8 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		return strings.TrimRight(sb.String(), "\n")
 	case len(b.SWE) > 0:
 		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
-		sb.WriteString(SectionHeader(strings.ToUpper(TruncateToWidth(b.SWE[0].Area, inner-2))) + "\n")
-		sb.WriteString(thPrimary.Render(TruncateToWidth(b.SWE[0].Area+" · "+FormatDurationLong(t.PlannedSeconds), inner)) + "\n")
+		sb.WriteString(SectionHeader(TruncateToWidth(SWEDisplayName(b.SWE[0].Area), inner-2)) + "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(SWEDisplayName(b.SWE[0].Area)+" · "+FormatDurationLong(t.PlannedSeconds), inner)) + "\n")
 		sb.WriteString(div + "\n")
 		if maxLines < 13 {
 			sb.WriteString(s.startBtn.CompactView())
@@ -807,8 +830,13 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 		}
 	case len(b.SWE) > 0:
 		sb.WriteString(SectionHeader("SWE BLOCK") + "\n")
-		sb.WriteString(thPrimary.Render(TruncateToWidth(b.SWE[0].Area, inner-2)) + "\n")
-		sb.WriteString(MetaRow("Planned", FormatDurationLong(task.PlannedSeconds), 12))
+		sb.WriteString(thPrimary.Render(TruncateToWidth(SWEDisplayName(b.SWE[0].Area), inner-2)) + "\n")
+		sb.WriteString(MetaRow("Planned", FormatDurationLong(task.PlannedSeconds), 12) + "\n")
+		if actual, ok := s.sweActual[task.ID]; ok && actual > 0 {
+			sb.WriteString(MetaRow("Actual", FormatDurationLong(actual), 12))
+		} else {
+			sb.WriteString(MetaRow("Actual", FormatDurationLong(task.PlannedSeconds), 12))
+		}
 	default:
 		sb.WriteString(thPrimary.Render(TruncateToWidth(task.Title, inner)))
 	}

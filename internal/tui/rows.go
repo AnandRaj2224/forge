@@ -7,7 +7,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	db "forge/internal/db"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // Forge row system: every navigable list item is a structured row separated
@@ -25,12 +24,18 @@ type RowItem struct {
 
 // RowList is the Forge navigable list: real component with cursor, viewport
 // scrolling, thin dividers, and polished selected states.
+//
+// Cursor is a LOGICAL ROW INDEX over Items. The viewport is PHYSICAL-LINE
+// based: each row may wrap to multiple physical lines (see SelectableRow
+// LineCount), dividers cost one line each, and Height is a visible line
+// budget. The visible window is calculated from summed physical line cost
+// so tall rows stay fully visible, never clipped or skipped.
 type RowList struct {
 	Items    []RowItem
 	Cursor   int
-	Offset   int // first visible index
+	Offset   int // first visible logical index
 	Width    int // content width for divider span
-	Height   int // max visible rows (viewport)
+	Height   int // visible line budget (physical lines, incl. dividers)
 	Focused  bool
 	Numbered bool // global row rule: visible number/index where appropriate
 }
@@ -61,7 +66,7 @@ func (r *RowList) SetWidth(w int) {
 	r.Width = w
 }
 
-// SetHeight sets the viewport row count.
+// SetHeight sets the viewport line budget (physical lines).
 func (r *RowList) SetHeight(h int) {
 	if h < 1 {
 		h = 1
@@ -70,22 +75,26 @@ func (r *RowList) SetHeight(h int) {
 }
 
 // FitHeight sizes the viewport to content up to maxLines visible lines.
-// Each row plus its divider costs ~2 lines, so rows = (lines+1)/2.
+// The budget is physical lines (row heights + dividers). When content fits,
+// the viewport shrinks to the exact physical cost so panels never float in
+// padding; otherwise it caps at maxLines.
 func (r *RowList) FitHeight(maxLines int) {
 	if maxLines < 3 {
 		maxLines = 3
 	}
-	rows := (maxLines + 1) / 2
-	if rows < 1 {
-		rows = 1
+	if len(r.Items) == 0 {
+		r.Height = 1
+		return
 	}
-	if rows > len(r.Items) {
-		rows = len(r.Items)
+	total := r.TotalHeight()
+	if total < 1 {
+		total = 1
 	}
-	if rows < 1 {
-		rows = 1
+	if total < maxLines {
+		r.Height = total
+		return
 	}
-	r.Height = rows
+	r.Height = maxLines
 }
 
 // Select moves the cursor to i.
@@ -139,18 +148,87 @@ func (r *RowList) ensureVisible() {
 	if r.Height < 1 {
 		r.Height = 1
 	}
+	if len(r.Items) == 0 {
+		r.Offset = 0
+		return
+	}
+	if r.Cursor >= len(r.Items) {
+		r.Cursor = len(r.Items) - 1
+	}
+	if r.Cursor < 0 {
+		r.Cursor = 0
+	}
 	if r.Cursor < r.Offset {
 		r.Offset = r.Cursor
 	}
-	if r.Cursor >= r.Offset+r.Height {
-		r.Offset = r.Cursor - r.Height + 1
+	// Advance the offset until the cursor block fits the physical line
+	// budget. Window cost = sum of row heights + one divider between
+	// consecutive rows. A single oversize row is always shown (offset ==
+	// cursor) even when taller than the viewport.
+	for {
+		total := 0
+		for i := r.Offset; i <= r.Cursor; i++ {
+			total += r.RowHeight(i)
+			if i > r.Offset {
+				total++ // divider
+			}
+		}
+		if total <= r.Height || r.Offset >= r.Cursor {
+			break
+		}
+		r.Offset++
 	}
 	if r.Offset < 0 {
 		r.Offset = 0
 	}
 }
 
-// View renders visible rows joined by thin dividers.
+// RowHeight returns the physical line count of logical row i (wrapped
+// title/meta lines, dividers excluded). Narrow widths never panic and never
+// truncate: heights grow as content wraps.
+func (r RowList) RowHeight(i int) int {
+	if i < 0 || i >= len(r.Items) {
+		return 1
+	}
+	num := ""
+	if r.Numbered {
+		num = fmt.Sprintf("%02d", i+1)
+	}
+	n := SelectableRow{
+		Num:     num,
+		Mark:    r.Items[i].Mark,
+		Title:   r.Items[i].Title,
+		Meta:    r.Items[i].Meta,
+		MetaSub: r.Items[i].MetaSub,
+		Width:   r.Width,
+	}.LineCount()
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// TotalHeight returns the full physical content height: summed row heights
+// plus one divider line between consecutive rows.
+func (r RowList) TotalHeight() int {
+	if len(r.Items) == 0 {
+		return 0
+	}
+	total := 0
+	for i := range r.Items {
+		total += r.RowHeight(i)
+		if i > 0 {
+			total++ // divider
+		}
+	}
+	return total
+}
+
+// View renders the visible window joined by thin dividers. The window is
+// selected from summed physical line cost (not row count): rows are added
+// while the budget allows, tall rows expand, and the cursor row is always
+// included even when oversize. Selection highlight covers every physical
+// line of the selected row.
 func (r RowList) View() string {
 	if len(r.Items) == 0 {
 		return EmptyState("Nothing here yet.")
@@ -159,12 +237,29 @@ func (r RowList) View() string {
 	if h < 1 {
 		h = 1
 	}
-	end := r.Offset + h
-	if end > len(r.Items) {
-		end = len(r.Items)
+	off := r.Offset
+	if off < 0 {
+		off = 0
+	}
+	if off >= len(r.Items) {
+		off = len(r.Items) - 1
 	}
 	var sb strings.Builder
-	for i := r.Offset; i < end; i++ {
+	used := 0
+	end := off
+	for i := off; i < len(r.Items); i++ {
+		cost := r.RowHeight(i)
+		add := cost
+		if i > off {
+			add++ // divider before this row
+		}
+		if used+add > h && i > off {
+			break
+		}
+		if i > off {
+			sb.WriteString(RowDivider(r.Width) + "\n")
+			used++
+		}
 		num := ""
 		if r.Numbered {
 			num = fmt.Sprintf("%02d", i+1)
@@ -178,15 +273,12 @@ func (r RowList) View() string {
 			Selected: i == r.Cursor,
 			Focused:  r.Focused && i == r.Cursor,
 			Width:    r.Width,
-		}.View())
-		if i < end-1 {
-			sb.WriteString("\n" + RowDivider(r.Width) + "\n")
-		} else {
-			sb.WriteString("\n")
-		}
+		}.View() + "\n")
+		used += cost
+		end = i + 1
 	}
 	// Scroll hints stay subtle and single-line.
-	if r.Offset > 0 {
+	if off > 0 {
 		sb.WriteString(thHelp.Render("↑ more above") + "\n")
 	}
 	if end < len(r.Items) {
@@ -277,6 +369,11 @@ func (t rowTheme) domain(domain, text string) rowCell {
 // optional prominent right value (Meta) with a dimmer suffix (MetaSub,
 // e.g. actual time plus planned time). Full-width tint in every state;
 // the divider is rendered by the owning list.
+//
+// Long cells wrap instead of truncating: the row grows to the tallest
+// wrapped cell, every physical line carries the selection background, and
+// no content is replaced with ellipsis. The logical cursor still moves one
+// row at a time; only the physical height changes.
 type SelectableRow struct {
 	Num      string
 	Mark     string
@@ -288,9 +385,38 @@ type SelectableRow struct {
 	Width    int
 }
 
-// View renders the row forced to Width cells.
-func (r SelectableRow) View() string {
-	w := r.Width
+// LineCount returns the physical line count of the row at its Width.
+// Short rows stay one line; overflow wraps to more lines; multiple wrapped
+// cells use the tallest height. Never panics on narrow widths.
+func (r SelectableRow) LineCount() int {
+	_, _, _, _, _, titleLines, rightLines, hasRight, fitsSingle := r.layout()
+	if !hasRight {
+		if len(titleLines) < 1 {
+			return 1
+		}
+		return len(titleLines)
+	}
+	if fitsSingle {
+		if len(titleLines) < 1 {
+			return 1
+		}
+		return len(titleLines)
+	}
+	n := len(titleLines)
+	if len(rightLines) > n {
+		n = len(rightLines)
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// layout computes column widths and wrapped lines without rendering.
+// hasRight reports whether a right block exists; fitsSingle reports whether
+// the right block fits on one line (preserving distinct meta/sub styles).
+func (r SelectableRow) layout() (w, pw, titleW, rightW int, pre string, titleLines, rightLines []string, hasRight, fitsSingle bool) {
+	w = r.Width
 	if w < 10 {
 		w = 10
 	}
@@ -298,49 +424,66 @@ func (r SelectableRow) View() string {
 	if mark == "" {
 		mark = " "
 	}
-	pre := prefixPlain(r.Num, mark)
-	pw := len([]rune(pre))
+	pre = prefixPlain(r.Num, mark)
+	pw = len([]rune(pre))
 	inner := w - 2
 	if inner < 4 {
 		inner = 4
 	}
-	// Right block: prominent value + optional dimmer suffix, capped at half.
 	budget := inner / 2
+	if budget < 1 {
+		budget = 1
+	}
 	meta := r.Meta
+	// Difficulty labels keep semantic meaning in uppercase for scannability.
+	if isDifficulty(meta) {
+		meta = strings.ToUpper(strings.TrimSpace(meta))
+	}
 	sub := ""
 	if r.MetaSub != "" {
 		sub = "  " + r.MetaSub
 	}
-	rightW := lipgloss.Width(meta) + lipgloss.Width(sub)
-	if rightW > budget {
-		// Shrink the dimmer suffix first so the prominent value survives.
-		subAllow := budget - min(lipgloss.Width(meta), budget)
-		if subAllow < 0 {
-			subAllow = 0
-		}
-		sub = TruncateToWidth(sub, subAllow)
-		metaAllow := budget - lipgloss.Width(sub)
-		if lipgloss.Width(meta) > metaAllow {
-			meta = TruncateToWidth(meta, metaAllow)
-		}
-		rightW = lipgloss.Width(meta) + lipgloss.Width(sub)
-	}
-	titleW := w - 1 - pw - 2 - rightW
-	if rightW == 0 {
+	hasRight = meta != "" || sub != ""
+	if !hasRight {
 		titleW = w - 1 - pw
+		if titleW < 1 {
+			titleW = 1
+		}
+		titleLines = wrapCell(r.Title, titleW)
+		return w, pw, titleW, 0, pre, titleLines, nil, false, false
 	}
+	totalRight := lipgloss.Width(meta) + lipgloss.Width(sub)
+	if totalRight <= budget {
+		rightW = totalRight
+		if rightW < 1 {
+			rightW = 1
+		}
+		titleW = w - 1 - pw - 2 - rightW
+		if titleW < 1 {
+			titleW = 1
+		}
+		titleLines = wrapCell(r.Title, titleW)
+		fitsSingle = true
+		return w, pw, titleW, rightW, pre, titleLines, nil, true, true
+	}
+	rightW = budget
+	if rightW < 1 {
+		rightW = 1
+	}
+	titleW = w - 1 - pw - 2 - rightW
 	if titleW < 1 {
 		titleW = 1
 	}
-	title := PadToWidth(TruncateToWidth(r.Title, titleW), titleW)
-	used := 1 + pw + titleW
-	if rightW > 0 {
-		used += 2 + rightW
-	}
-	trailW := w - used
-	if trailW < 0 {
-		trailW = 0
-	}
+	titleLines = wrapCell(r.Title, titleW)
+	rightLines = wrapCell(meta+sub, rightW)
+	return w, pw, titleW, rightW, pre, titleLines, rightLines, true, false
+}
+
+// View renders the row forced to Width cells, wrapping to multiple physical
+// lines when content overflows. Selection highlight covers every physical
+// line; no ellipsis is ever emitted.
+func (r SelectableRow) View() string {
+	w, pw, titleW, rightW, pre, titleLines, rightLines, hasRight, fitsSingle := r.layout()
 	th, edged := rowThemeFor(r.Selected, r.Focused)
 	lead := " "
 	if edged {
@@ -349,9 +492,11 @@ func (r SelectableRow) View() string {
 	// Difficulty labels keep semantic color (green/amber/red) on any row
 	// background; selection tint + focus edge stay independent.
 	metaStyle := th.strong
+	meta := r.Meta
 	if isDifficulty(meta) {
+		meta = strings.ToUpper(strings.TrimSpace(meta))
 		var fg color.Color
-		switch strings.ToUpper(strings.TrimSpace(meta)) {
+		switch meta {
 		case "EASY":
 			fg = cSuccess
 		case "MEDIUM":
@@ -363,44 +508,86 @@ func (r SelectableRow) View() string {
 		if th.bg != nil {
 			metaStyle = metaStyle.Background(th.bg)
 		}
-		// Normalize display to uppercase for scannability.
-		meta = strings.ToUpper(strings.TrimSpace(meta))
-		// Recompute widths after normalization (same visible length for
-		// EASY/MEDIUM/HARD, but keep logic safe).
-		rightW = lipgloss.Width(meta) + lipgloss.Width(sub)
-		titleW = w - 1 - pw - 2 - rightW
-		if rightW == 0 {
-			titleW = w - 1 - pw
+	}
+	sub := ""
+	if r.MetaSub != "" {
+		sub = "  " + r.MetaSub
+	}
+	height := len(titleLines)
+	if !hasRight {
+		if height < 1 {
+			height = 1
 		}
-		if titleW < 1 {
-			titleW = 1
+	} else if fitsSingle {
+		if height < 1 {
+			height = 1
 		}
-		title = PadToWidth(TruncateToWidth(r.Title, titleW), titleW)
-		used = 1 + pw + titleW
-		if rightW > 0 {
+	} else {
+		if len(rightLines) > height {
+			height = len(rightLines)
+		}
+		if height < 1 {
+			height = 1
+		}
+	}
+	blank := func(n int) string {
+		if n < 0 {
+			n = 0
+		}
+		return strings.Repeat(" ", n)
+	}
+	blankPre := blank(pw)
+	lines := make([]string, 0, height)
+	for li := 0; li < height; li++ {
+		var tl string
+		if li < len(titleLines) {
+			tl = titleLines[li]
+		} else {
+			tl = blank(titleW)
+			// wrapCell already pads to width; ensure exact.
+			tl = PadToWidth("", titleW)
+		}
+		curPre := pre
+		if li > 0 {
+			curPre = blankPre
+		}
+		segs := []rowCell{
+			{lead, th.edge},
+			{curPre, th.main},
+			{tl, th.main},
+		}
+		if hasRight {
+			segs = append(segs, rowCell{"  ", th.gap})
+			if fitsSingle {
+				if li == 0 {
+					segs = append(segs, rowCell{meta, metaStyle}, rowCell{sub, th.faint})
+				} else {
+					segs = append(segs, rowCell{PadToWidth("", rightW), th.gap})
+				}
+			} else {
+				var rl string
+				if li < len(rightLines) {
+					rl = rightLines[li]
+				} else {
+					rl = PadToWidth("", rightW)
+				}
+				segs = append(segs, rowCell{rl, th.strong})
+			}
+		}
+		used := 1 + pw + titleW
+		if hasRight {
 			used += 2 + rightW
 		}
-		trailW = w - used
+		trailW := w - used
 		if trailW < 0 {
 			trailW = 0
 		}
+		if trailW > 0 {
+			segs = append(segs, rowCell{strings.Repeat(" ", trailW), th.gap})
+		}
+		lines = append(lines, paintCells(segs...))
 	}
-	segs := []rowCell{
-		{lead, th.edge},
-		{pre, th.main},
-		{title, th.main},
-	}
-	if rightW > 0 {
-		segs = append(segs, rowCell{"  ", th.gap}, rowCell{meta, metaStyle}, rowCell{sub, th.faint})
-	}
-	if trailW > 0 {
-		segs = append(segs, rowCell{strings.Repeat(" ", trailW), th.gap})
-	}
-	out := paintCells(segs...)
-	if lipgloss.Width(out) > w {
-		out = ansi.Truncate(out, w, "…")
-	}
-	return out
+	return strings.Join(lines, "\n")
 }
 
 func prefixPlain(num, mark string) string {
@@ -486,7 +673,9 @@ type TodayTaskRow struct {
 	Width    int
 }
 
-// View renders the row forced to Width cells.
+// View renders the row forced to Width cells, wrapping long cells instead
+// of truncating. Row height equals the tallest wrapped cell; selection
+// covers every physical line; no ellipsis is emitted.
 func (r TodayTaskRow) View() string {
 	w := r.Width
 	if w < 30 {
@@ -497,12 +686,12 @@ func (r TodayTaskRow) View() string {
 	if taskW < 4 {
 		taskW = 4
 	}
-	num := PadToWidth(fmt.Sprint(r.Num), numW)
-	dom := PadToWidth(TruncateToWidth(r.Domain, domW), domW)
-	are := PadToWidth(TruncateToWidth(r.Area, areaW), areaW)
-	ty := PadToWidth(TruncateToWidth(r.Typ, typW), typW)
-	title := PadToWidth(TruncateToWidth(r.Title, taskW), taskW)
-	dur := PadToWidth(TruncateToWidth(r.Duration, durW), durW)
+	numBase := fmt.Sprint(r.Num)
+	domBase := string(r.Domain)
+	areaBase := r.Area
+	typBase := r.Typ
+	titleBase := r.Title
+	durBase := r.Duration
 	stTxt := "TODO"
 	switch r.Status {
 	case TaskActive:
@@ -510,40 +699,118 @@ func (r TodayTaskRow) View() string {
 	case TaskCompleted:
 		stTxt = "DONE"
 	}
-	stCell := PadToWidth(stTxt, stW)
+	// Wrap every potentially-long cell; height is the tallest.
+	numLines := wrapCell(numBase, numW)
+	domLines := wrapCell(domBase, domW)
+	areaLines := wrapCell(areaBase, areaW)
+	typLines := wrapCell(typBase, typW)
+	titleLines := wrapCell(titleBase, taskW)
+	durLines := wrapCell(durBase, durW)
+	stLines := wrapCell(stTxt, stW)
+	height := len(numLines)
+	for _, n := range []int{len(domLines), len(areaLines), len(typLines), len(titleLines), len(durLines), len(stLines)} {
+		if n > height {
+			height = n
+		}
+	}
+	if height < 1 {
+		height = 1
+	}
+	at := func(lines []string, i, width int) string {
+		if i < len(lines) {
+			return lines[i]
+		}
+		return PadToWidth("", width)
+	}
 	th, edged := rowThemeFor(r.Selected, r.Focused)
 	lead := " "
 	if edged {
 		lead = "▌"
 	}
-	out := paintCells(
-		rowCell{lead, th.edge},
-		rowCell{num, th.main},
-		rowCell{"  ", th.gap},
-		th.domain(r.Domain, dom),
-		rowCell{"  ", th.gap},
-		rowCell{are, th.main},
-		rowCell{"  ", th.gap},
-		rowCell{ty, th.main},
-		rowCell{"  ", th.gap},
-		rowCell{title, th.main},
-		rowCell{"  ", th.gap},
-		rowCell{dur, th.main},
-		rowCell{"  ", th.gap},
-		rowCell{stCell, th.main},
-	)
-	if lipgloss.Width(out) > w {
-		out = ansi.Truncate(out, w, "…")
+	lines := make([]string, 0, height)
+	for li := 0; li < height; li++ {
+		nl := at(numLines, li, numW)
+		dl := at(domLines, li, domW)
+		al := at(areaLines, li, areaW)
+		tl := at(typLines, li, typW)
+		tal := at(titleLines, li, taskW)
+		du := at(durLines, li, durW)
+		sl := at(stLines, li, stW)
+		domCell := rowCell{dl, th.main}
+		if r.Domain == "GOV" || r.Domain == "DSA" || r.Domain == "SWE" {
+			domCell = th.domain(r.Domain, dl)
+		}
+		out := paintCells(
+			rowCell{lead, th.edge},
+			rowCell{nl, th.main},
+			rowCell{"  ", th.gap},
+			domCell,
+			rowCell{"  ", th.gap},
+			rowCell{al, th.main},
+			rowCell{"  ", th.gap},
+			rowCell{tl, th.main},
+			rowCell{"  ", th.gap},
+			rowCell{tal, th.main},
+			rowCell{"  ", th.gap},
+			rowCell{du, th.main},
+			rowCell{"  ", th.gap},
+			rowCell{sl, th.main},
+		)
+		lines = append(lines, out)
 	}
-	return out
+	return strings.Join(lines, "\n")
+}
+
+// LineCount returns the physical height of the row at its Width.
+func (r TodayTaskRow) LineCount() int {
+	w := r.Width
+	if w < 30 {
+		w = 30
+	}
+	numW, domW, areaW, typW, durW, stW := measureTodayCols(w)
+	taskW := w - 1 - (numW + domW + areaW + typW + durW + stW) - 6*2
+	if taskW < 4 {
+		taskW = 4
+	}
+	n := len(wrapCell(fmt.Sprint(r.Num), numW))
+	if m := len(wrapCell(string(r.Domain), domW)); m > n {
+		n = m
+	}
+	if m := len(wrapCell(r.Area, areaW)); m > n {
+		n = m
+	}
+	if m := len(wrapCell(r.Typ, typW)); m > n {
+		n = m
+	}
+	if m := len(wrapCell(r.Title, taskW)); m > n {
+		n = m
+	}
+	if m := len(wrapCell(r.Duration, durW)); m > n {
+		n = m
+	}
+	stTxt := "TODO"
+	switch r.Status {
+	case TaskActive:
+		stTxt = "ACTIVE"
+	case TaskCompleted:
+		stTxt = "DONE"
+	}
+	if m := len(wrapCell(stTxt, stW)); m > n {
+		n = m
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 // wrapCell word-wraps s to width w on word boundaries, padding every line
 // to exactly w. It never returns empty and never ellipsizes: overlong
 // single words are hard-split. Widths are rune-based (cells are plain).
+// Narrow widths (>=1) are supported without panic; no content is discarded.
 func wrapCell(s string, w int) []string {
-	if w < 4 {
-		w = 4
+	if w < 1 {
+		w = 1
 	}
 	words := strings.Fields(s)
 	if len(words) == 0 {
@@ -663,8 +930,9 @@ func (t *TodayTaskTable) MoveUp(n int) {
 // CursorPos returns the cursor.
 func (t TodayTaskTable) CursorPos() int { return t.Cursor }
 
-// lineCost returns the rendered line count of logical row i (wrapped TASK
-// lines, dividers excluded).
+// lineCost returns the rendered line count of logical row i (tallest wrapped
+// cell among AREA/TYPE/TASK, dividers excluded). Full content is preserved:
+// overflow wraps and the row grows instead of truncating with ellipsis.
 func (t *TodayTaskTable) lineCost(i int) int {
 	if i < 0 || i >= len(t.Tasks) {
 		return 1
@@ -678,8 +946,25 @@ func (t *TodayTaskTable) lineCost(i int) int {
 	if i < len(t.Bundles) {
 		b = t.Bundles[i]
 	}
-	_, _, label := TaskColumns(t.Tasks[i], b)
-	n := len(wrapCell(label, taskW))
+	area, typ, label := TaskColumns(t.Tasks[i], b)
+	n := len(wrapCell(area, areaW))
+	if m := len(wrapCell(typ, typW)); m > n {
+		n = m
+	}
+	if m := len(wrapCell(label, taskW)); m > n {
+		n = m
+	}
+	// Short fixed columns (NUM/DOMAIN/DUR/STATUS) stay single-line in
+	// practice; include them for narrow-width safety (no panic, no clip).
+	if m := len(wrapCell(fmt.Sprint(i+1), numW)); m > n {
+		n = m
+	}
+	if m := len(wrapCell(string(t.Tasks[i].Domain), domW)); m > n {
+		n = m
+	}
+	if m := len(wrapCell(FormatDurationLong(t.Tasks[i].PlannedSeconds), durW)); m > n {
+		n = m
+	}
 	if n < 1 {
 		n = 1
 	}
@@ -832,18 +1117,19 @@ func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 		}
 		return area, typ, joinPlus(titles)
 	case len(b.SWE) > 0:
-		area := b.SWE[0].Area
+		area := SWEDisplayName(b.SWE[0].Area)
 		names := make([]string, 0, len(b.SWE))
 		for _, sw := range b.SWE {
-			names = append(names, sw.Area)
+			names = append(names, SWEDisplayName(sw.Area))
 		}
 		if len(b.SWE) > 1 {
 			seen := map[string]bool{}
 			var uniq []string
 			for _, sw := range b.SWE {
-				if !seen[sw.Area] {
-					seen[sw.Area] = true
-					uniq = append(uniq, sw.Area)
+				disp := SWEDisplayName(sw.Area)
+				if !seen[disp] {
+					seen[disp] = true
+					uniq = append(uniq, disp)
 				}
 			}
 			if len(uniq) > 1 {
@@ -856,11 +1142,12 @@ func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 	}
 }
 
-// rowBlock renders logical row i as one or more physical lines. The TASK
-// column word-wraps; DUR and STATUS stay right-aligned on the first line;
-// continuation lines carry the wrapped task text. A selected row paints
+// rowBlock renders logical row i as one or more physical lines. AREA, TYPE
+// and TASK wrap independently; row height equals the tallest wrapped cell.
+// DUR and STATUS stay on the first line with blanks on continuation lines;
+// fixed short columns (NUM/DOMAIN) behave the same. A selected row paints
 // every line of the block, so the highlight covers the full expanded width
-// and height as ONE component. j/k move between logical rows.
+// and height as ONE component. j/k move between logical rows. No ellipsis.
 func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w int) []string {
 	task := t.Tasks[i]
 	st := TaskTodo
@@ -872,14 +1159,14 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 		b = t.Bundles[i]
 	}
 	area, typ, label := TaskColumns(task, b)
-	// Plain fixed-width cells; color is applied per segment below so every
-	// state paints identical column geometry edge to edge.
-	num := PadToWidth(fmt.Sprint(i+1), numW)
-	dom := PadToWidth(TruncateToWidth(string(task.Domain), domW), domW)
-	are := PadToWidth(TruncateToWidth(area, areaW), areaW)
-	ty := PadToWidth(TruncateToWidth(typ, typW), typW)
-	tasks := wrapCell(label, taskW)
-	dur := PadToWidth(TruncateToWidth(FormatDurationLong(task.PlannedSeconds), durW), durW)
+	// Wrap every variable cell; height is the tallest. Fixed short cells
+	// are wrapped too for narrow-width safety (they stay one line normally).
+	numLines := wrapCell(fmt.Sprint(i+1), numW)
+	domLines := wrapCell(string(task.Domain), domW)
+	areaLines := wrapCell(area, areaW)
+	typLines := wrapCell(typ, typW)
+	taskLines := wrapCell(label, taskW)
+	durLines := wrapCell(FormatDurationLong(task.PlannedSeconds), durW)
 	stTxt := "TODO"
 	switch st {
 	case TaskActive:
@@ -887,16 +1174,33 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 	case TaskCompleted:
 		stTxt = "DONE"
 	}
-	stCell := PadToWidth(stTxt, stW)
+	stCellLines := wrapCell(stTxt, stW)
+	height := len(numLines)
+	for _, n := range []int{len(domLines), len(areaLines), len(typLines), len(taskLines), len(durLines), len(stCellLines)} {
+		if n > height {
+			height = n
+		}
+	}
+	if height < 1 {
+		height = 1
+	}
+	at := func(lines []string, idx, width int) string {
+		if idx < len(lines) {
+			return lines[idx]
+		}
+		return PadToWidth("", width)
+	}
 	selected := i == t.Cursor
 	th, edged := rowThemeFor(selected, t.Focus && selected)
 	lead := " "
 	if edged {
 		lead = "▌"
 	}
-	domCell := rowCell{text: dom, style: th.main}
+	// First-line domain accent; continuation domain stays blank (aligned).
+	firstDom := at(domLines, 0, domW)
+	domCellFirst := rowCell{text: firstDom, style: th.main}
 	if string(task.Domain) == "GOV" || string(task.Domain) == "DSA" || string(task.Domain) == "SWE" {
-		domCell = th.domain(string(task.Domain), dom)
+		domCellFirst = th.domain(string(task.Domain), firstDom)
 	}
 	gap := rowCell{"  ", th.gap}
 	blank := func(n int) rowCell {
@@ -905,40 +1209,40 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 		}
 		return rowCell{strings.Repeat(" ", n), th.gap}
 	}
-	lines := make([]string, 0, len(tasks))
-	for li, tl := range tasks {
+	lines := make([]string, 0, height)
+	for li := 0; li < height; li++ {
 		var segs []rowCell
 		if li == 0 {
 			segs = []rowCell{
 				{lead, th.edge},
-				{num, th.main},
+				{at(numLines, 0, numW), th.main},
 				{"  ", th.gap},
-				domCell,
+				domCellFirst,
 				{"  ", th.gap},
-				{are, th.main},
+				{at(areaLines, 0, areaW), th.main},
 				{"  ", th.gap},
-				{ty, th.main},
+				{at(typLines, 0, typW), th.main},
 				{"  ", th.gap},
-				{tl, th.main},
+				{at(taskLines, 0, taskW), th.main},
 				{"  ", th.gap},
-				{dur, th.main},
+				{at(durLines, 0, durW), th.main},
 				{"  ", th.gap},
-				{stCell, th.main},
+				{at(stCellLines, 0, stW), th.main},
 			}
 		} else {
-			// Continuation: wrapped task text under the TASK column;
-			// DUR/STATUS stay on the first line, aligned right.
+			// Continuation: wrapped AREA/TYPE/TASK text in place;
+			// NUM/DOMAIN/DUR/STATUS stay on the first line, aligned right.
 			segs = []rowCell{
 				{lead, th.edge},
 				blank(numW),
 				gap,
 				blank(domW),
 				gap,
-				blank(areaW),
+				{at(areaLines, li, areaW), th.main},
 				gap,
-				blank(typW),
+				{at(typLines, li, typW), th.main},
 				gap,
-				{tl, th.main},
+				{at(taskLines, li, taskW), th.main},
 				gap,
 				blank(durW),
 				gap,
@@ -946,9 +1250,6 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 			}
 		}
 		out := paintCells(segs...)
-		if lipgloss.Width(out) > w {
-			out = ansi.Truncate(out, w, "…")
-		}
 		lines = append(lines, out)
 	}
 	_ = gap

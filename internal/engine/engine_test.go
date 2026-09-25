@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -449,24 +450,20 @@ func TestSWEAreaTargetValidation(t *testing.T) {
 	if closed.ElapsedSeconds() != 3600 {
 		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
 	}
-	// SWE blocks never complete via evidence: stopping is sufficient and
-	// the task stays TODO (time allocation, not task progression).
+	// SWE time allocation: stopping with total >= planned completes the
+	// block (no evidence form; recorded time is sufficient).
 	ev, err := engine.EvaluateTodayTask(ctx, d, "tswe")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.State != engine.StateTodo {
-		t.Fatalf("SWE block must stay TODO after stop, got %s", ev.State)
+	if ev.State != engine.StateCompleted {
+		t.Fatalf("SWE block must be COMPLETED after exact target, got %s", ev.State)
 	}
-	// Restarting the same block creates a normal new session.
-	sess2, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(2*time.Hour))
-	if err != nil {
-		t.Fatalf("SWE restart must succeed: %v", err)
+	// Completed SWE blocks cannot restart (read-only).
+	if _, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(2*time.Hour)); !errors.Is(err, engine.ErrTaskCompleted) {
+		t.Fatalf("completed SWE restart must return ErrTaskCompleted, got %v", err)
 	}
-	if sess2.ID == sess.ID {
-		t.Fatal("restart must create a new session")
-	}
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(3*time.Hour))
+	_ = sess
 }
 
 func TestTodayGeneration(t *testing.T) {

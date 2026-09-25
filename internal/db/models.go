@@ -375,8 +375,9 @@ func (t DSATarget) Items() []DSAProblemTarget {
 
 // SWETarget identifies the SWE area for one Today SWE block.
 // SWE is a time-allocation system: routine slot -> area + duration ->
-// Today block -> generic session -> elapsed time. No tasks, no bundles,
-// no completion state.
+// Today block -> generic session -> elapsed time. No tasks, no bundles.
+// Completion is time-based: total SWE time spent >= PlannedSeconds means
+// COMPLETED (engine evaluation, consistent across all screens).
 type SWETarget struct {
 	AreaID ID `json:"area_id"`
 }

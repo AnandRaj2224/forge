@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
@@ -340,14 +341,73 @@ func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 			return ev, nil
 		}
 	}
-	// Time-allocation semantics: a SWE block is never "completed" via
-	// evidence. It is TODO until a session is ACTIVE, and TODO again once
-	// the session stops. Actual time comes from generic sessions; no SWE
-	// execution rows exist.
+	// Time-allocation semantics: total SWE time spent >= PlannedSeconds
+	// means COMPLETED. Actual time comes from generic sessions (stopped
+	// durations plus live active elapsed); no SWE execution rows exist.
+	// Stopping is sufficient: no evidence form, no result form.
 	ev.Total = 1
+	total := sweTotalSeconds(sessions, cutoff)
+	planned := int64(task.PlannedSeconds)
+	if planned > 0 && total >= planned {
+		ev.Done = 1
+		ev.Completed = []string{string(st.AreaID)}
+		ev.State = StateCompleted
+		return ev, nil
+	}
 	ev.Missing = []string{string(st.AreaID)}
 	if ev.Active == nil {
 		ev.State = StateTodo
+	} else {
+		ev.State = StateActive
 	}
 	return ev, nil
+}
+
+// sweTotalSeconds sums SWE time spent for one task as of the cutoff.
+// Live (cutoff == 0): all stopped durations plus live active elapsed
+// (wall clock, clamped >= 0). Historical (cutoff != 0): only time strictly
+// before the cutoff counts; sessions spanning the cutoff contribute
+// cutoff - started; sessions starting at/after the cutoff contribute 0.
+func sweTotalSeconds(sessions []db.Session, cutoff int64) int64 {
+	var total int64
+	if cutoff == 0 {
+		nowUnix := time.Now().Unix()
+		for _, s := range sessions {
+			if s.Status == db.SessionStatusStopped && s.StoppedAt != nil {
+				d := s.StoppedAt.Unix() - s.StartedAt.Unix()
+				if d > 0 {
+					total += d
+				}
+				continue
+			}
+			if s.Status == db.SessionStatusActive {
+				d := nowUnix - s.StartedAt.Unix()
+				if d > 0 {
+					total += d
+				}
+			}
+		}
+		return total
+	}
+	for _, s := range sessions {
+		start := s.StartedAt.Unix()
+		if start >= cutoff {
+			continue
+		}
+		var end int64
+		switch {
+		case s.Status == db.SessionStatusActive:
+			end = cutoff
+		case s.StoppedAt != nil && s.StoppedAt.Unix() > cutoff:
+			end = cutoff
+		case s.StoppedAt != nil:
+			end = s.StoppedAt.Unix()
+		default:
+			continue
+		}
+		if end > start {
+			total += end - start
+		}
+	}
+	return total
 }
