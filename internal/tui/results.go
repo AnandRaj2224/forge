@@ -13,13 +13,14 @@ import (
 )
 
 // PracticeRow is one editable topic row in the GOV practice result form.
+// Raw facts only: Time spent, Questions attempted, Questions correct.
+// Incorrect and Avg time/question are DERIVED (read-only), never entered.
 type PracticeRow struct {
 	TopicID db.ID
 	Topic   string
 	Time    FormField
 	Att     FormField
 	Corr    FormField
-	Avg     FormField
 }
 
 // DSARow is one problem block in the DSA result form.
@@ -88,8 +89,8 @@ func (s *ResultForm) Reload(sessionID string, task db.TodayTask) {
 				continue
 			}
 			s.prows = append(s.prows, PracticeRow{TopicID: p.TopicID, Topic: p.Topic,
-				Time: NewField("Time", "e.g. 20m", 10), Att: NewField("Attempted", "e.g. 20", 10),
-				Corr: NewField("Correct", "e.g. 16", 10), Avg: NewField("Avg speed", "e.g. 17.2s", 10)})
+				Time: NewField("Time spent", "e.g. 20m", 10), Att: NewField("Attempted", "e.g. 20", 10),
+				Corr: NewField("Correct", "e.g. 16", 10)})
 		}
 	case "DSA":
 		for _, d := range s.bundle.DSA {
@@ -123,7 +124,7 @@ func (s *ResultForm) nFocus() int {
 	case "LECTURE":
 		return 2
 	case "PRACTICE":
-		return len(s.prows)*4 + 1
+		return len(s.prows)*3 + 1
 	case "DSA":
 		return len(s.drows)*4 + 1
 	}
@@ -140,10 +141,9 @@ func (s *ResultForm) revalidate() {
 			return
 		}
 		for _, r := range s.prows {
-			// Authoritative engine rule: every required target item valid,
-			// including average speed (empty values are truly empty via
-			// "e.g." placeholders, never fake pre-filled values).
-			if _, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value(), true); msg != "" {
+			// Raw facts only: Time spent + Attempted + Correct. Incorrect
+			// and Avg time/question are derived, never entered.
+			if _, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), "", false); msg != "" {
 				s.save.Disabled = true
 				return
 			}
@@ -171,7 +171,6 @@ func (s *ResultForm) updateFocusVisual() {
 		s.prows[i].Time.Input.Blur()
 		s.prows[i].Att.Input.Blur()
 		s.prows[i].Corr.Input.Blur()
-		s.prows[i].Avg.Input.Blur()
 	}
 	for i := range s.drows {
 		s.drows[i].Solve.Input.Blur()
@@ -185,8 +184,8 @@ func (s *ResultForm) updateFocusVisual() {
 			s.lecture.Focused = true
 		}
 	case "PRACTICE":
-		if f < len(s.prows)*4 {
-			r, c := f/4, f%4
+		if f < len(s.prows)*3 {
+			r, c := f/3, f%3
 			switch c {
 			case 0:
 				s.prows[r].Time.Input.Focus()
@@ -194,8 +193,6 @@ func (s *ResultForm) updateFocusVisual() {
 				s.prows[r].Att.Input.Focus()
 			case 2:
 				s.prows[r].Corr.Input.Focus()
-			case 3:
-				s.prows[r].Avg.Input.Focus()
 			}
 		}
 	case "DSA":
@@ -223,7 +220,7 @@ func (s *ResultForm) updateFocusVisual() {
 func (s *ResultForm) textFocus() bool {
 	switch s.kind {
 	case "PRACTICE":
-		return s.focus < len(s.prows)*4
+		return s.focus < len(s.prows)*3
 	case "DSA":
 		if s.focus >= len(s.drows)*4 {
 			return false
@@ -255,7 +252,7 @@ func (s *ResultForm) fieldDescriptors() []string {
 		for i := range s.prows {
 			out = append(out,
 				fmt.Sprintf("p%d-time", i), fmt.Sprintf("p%d-att", i),
-				fmt.Sprintf("p%d-corr", i), fmt.Sprintf("p%d-avg", i))
+				fmt.Sprintf("p%d-corr", i))
 		}
 		out = append(out, "save")
 	case "DSA":
@@ -315,7 +312,7 @@ func (s *ResultForm) focusLine() int {
 	switch s.kind {
 	case "PRACTICE":
 		// p{r}-{field}: base = header + sum of prior row heights.
-		// Time/Attempted share the first field line, Correct/Avg the second.
+		// Time/Attempted share the first field line, Correct + derived second.
 		var r int
 		fmt.Sscanf(id, "p%d-", &r)
 		base := header
@@ -394,8 +391,8 @@ func (s *ResultForm) HandleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 		return nil, false
 	case "PRACTICE":
-		if f < len(s.prows)*4 {
-			r, c := f/4, f%4
+		if f < len(s.prows)*3 {
+			r, c := f/3, f%3
 			var fld *FormField
 			switch c {
 			case 0:
@@ -404,8 +401,6 @@ func (s *ResultForm) HandleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				fld = &s.prows[r].Att
 			case 2:
 				fld = &s.prows[r].Corr
-			case 3:
-				fld = &s.prows[r].Avg
 			}
 			var cmd tea.Cmd
 			fld.Input, cmd = fld.Input.Update(msg)
@@ -487,7 +482,7 @@ func (s *ResultForm) saveAll() error {
 	case "PRACTICE":
 		var inputs []engine.GovPracticeInput
 		for _, r := range s.prows {
-			in, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value(), true)
+			in, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), "", false)
 			if msg != "" {
 				return fmt.Errorf("%s: %s", r.Topic, msg)
 			}
@@ -540,15 +535,20 @@ func (s *ResultForm) ViewFor(inner int) string {
 	case "PRACTICE":
 		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TOPICS", len(s.prows))) + "\n")
 		for i, r := range s.prows {
-			fbase := i * 4
+			fbase := i * 3
 			sb.WriteString(div + "\n")
 			sb.WriteString(thPrimary.Render(fmt.Sprintf("%d. %s", i+1, TruncateToWidth(r.Topic, inner-4))) + "\n")
 			sb.WriteString("  " + r.Time.View(s.focus == fbase, 11) + "  " + r.Att.View(s.focus == fbase+1, 11) + "\n")
-			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 11) + "  " + r.Avg.View(s.focus == fbase+3, 11) + "\n")
-			if in, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), r.Avg.Input.Value(), true); msg != "" {
+			sb.WriteString("  " + r.Corr.View(s.focus == fbase+2, 11) + "\n")
+			if in, msg := engine.ValidateGovPracticeInput(r.Topic, r.Time.Input.Value(), r.Att.Input.Value(), r.Corr.Input.Value(), "", false); msg != "" {
 				sb.WriteString("  " + thError.Render("✕ "+msg) + "\n")
 			} else {
-				sb.WriteString("  " + thSuccess.Render("✓ "+engine.FormatDurationLong(in.TimeSecs)) + "\n")
+				incorrect := in.Attempted - in.Correct
+				avg := "—"
+				if in.AvgSpeed != nil {
+					avg = fmt.Sprintf("%.1fs", *in.AvgSpeed)
+				}
+				sb.WriteString("  " + thSuccess.Render("✓ "+engine.FormatDurationLong(in.TimeSecs)+" · Incorrect "+fmt.Sprint(incorrect)+" · Avg time/question "+avg) + "\n")
 			}
 		}
 	case "DSA":

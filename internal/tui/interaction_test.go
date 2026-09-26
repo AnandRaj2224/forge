@@ -170,6 +170,7 @@ func TestGovDashboardFlow(t *testing.T) {
 
 // Practice form: digits reach inputs (not global 1-5 tab shortcuts),
 // every bundled topic validates, SAVE persists all rows.
+// Raw facts only: Time spent + Attempted + Correct (no Avg field).
 func TestPracticeFormTypingAndSave(t *testing.T) {
 	app := newFlowApp(t)
 	app.width, app.height = 120, 36
@@ -180,8 +181,8 @@ func TestPracticeFormTypingAndSave(t *testing.T) {
 	if app.today.right != "result" {
 		t.Fatalf("expected practice form, got %q", app.today.right)
 	}
-	typeKeys := []string{"1", "2", "0", "0", "down", "1", "5", "down", "1", "2", "down", "1", "8", ".", "5", "down",
-		"9", "0", "0", "down", "1", "0", "down", "8", "down", "2", "0", "down"}
+	typeKeys := []string{"1", "2", "0", "0", "down", "1", "5", "down", "1", "2", "down",
+		"9", "0", "0", "down", "1", "0", "down", "8", "down"}
 	for _, k := range typeKeys {
 		testSend(app, k)
 	}
@@ -229,7 +230,7 @@ func TestWorkspacesFitViewport(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"ACTIVE SESSION", "SELECTED TASK", "SYLLABUS COVERAGE", "PRACTICE READINESS", "PATTERNS", "SWE ROUTINE", "WEEKLY REPORT"} {
+	for _, want := range []string{"ACTIVE SESSION", "SELECTED TASK", "SYLLABUS COVERAGE", "PATTERNS", "SWE ROUTINE", "WEEKLY REPORT"} {
 		found := false
 		app.width, app.height = 140, 40
 		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {

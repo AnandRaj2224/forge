@@ -173,11 +173,12 @@ func TestAcceptGovPractice(t *testing.T) {
 		t.Fatal("invalid save must stay in the form")
 	}
 	// Fill the missing row with human durations and save.
+	// Raw facts only: Time spent + Attempted + Correct (Incorrect and
+	// Avg time/question are derived, never entered).
 	r := &app.today.result.prows[0]
 	r.Time.Input.SetValue("15m")
 	r.Att.Input.SetValue("10")
 	r.Corr.Input.SetValue("8")
-	r.Avg.Input.SetValue("17.5s")
 	app.today.result.updateFocusVisual()
 	if app.today.result.save.Disabled {
 		t.Fatal("valid bundle must enable SAVE")

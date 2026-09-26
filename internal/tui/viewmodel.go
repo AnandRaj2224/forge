@@ -591,14 +591,17 @@ func TopicLectureProgressMap(ctx context.Context, q db.DBTX, topicIDs []db.ID) (
 }
 
 // TopicPracticeStats aggregates raw practice rows; no progression formula.
+// OVERALL meaning: aggregate across ALL historical practice records.
+// AvgSpeed is avg time/question = total time / total attempted (nil-safe).
 type TopicPracticeStats struct {
 	Rows      int
 	Attempted int
 	Correct   int
 	Incorrect int
 	Accuracy  float64 // 0 when no attempts
-	AvgSpeed  float64 // mean of non-null speeds, 0 when none
+	AvgSpeed  float64 // total time / total attempted, 0 when none
 	HasSpeed  bool
+	TotalTime int
 }
 
 func ComputeTopicPracticeStatsE(ctx context.Context, q db.DBTX, topicID db.ID) (TopicPracticeStats, error) {
@@ -607,26 +610,278 @@ func ComputeTopicPracticeStatsE(ctx context.Context, q db.DBTX, topicID db.ID) (
 		return TopicPracticeStats{}, err
 	}
 	var st TopicPracticeStats
-	var weightedSum float64
-	var weightedN int
 	for _, r := range hist {
 		st.Rows++
 		st.Attempted += r.Attempted
 		st.Correct += r.Correct
-		if r.AvgQuestionSpeedSeconds != nil {
-			weightedSum += *r.AvgQuestionSpeedSeconds * float64(r.Attempted)
-			weightedN += r.Attempted
-		}
+		st.TotalTime += r.TimeSpentSeconds
 	}
 	st.Incorrect = st.Attempted - st.Correct
 	if st.Attempted > 0 {
 		st.Accuracy = float64(st.Correct) / float64(st.Attempted)
 	}
-	if weightedN > 0 {
-		st.AvgSpeed = weightedSum / float64(weightedN)
+	if st.Attempted > 0 && st.TotalTime > 0 {
+		st.AvgSpeed = float64(st.TotalTime) / float64(st.Attempted)
+		st.HasSpeed = true
+	} else if st.Attempted > 0 {
+		// Attempted>0 but no time (should not happen via validation):
+		// fall back to weighted stored speeds for old rows.
+		var wsum float64
+		var wn int
+		for _, r := range hist {
+			if r.AvgQuestionSpeedSeconds != nil {
+				wsum += *r.AvgQuestionSpeedSeconds * float64(r.Attempted)
+				wn += r.Attempted
+			}
+		}
+		if wn > 0 {
+			st.AvgSpeed = wsum / float64(wn)
+			st.HasSpeed = true
+		}
+	}
+	return st, nil
+}
+
+// RecentQuestionWindow is the question-count window for RECENT stats.
+const RecentQuestionWindow = 30
+
+// TrendBucketQuestions is the question-count per chronological trend bucket.
+const TrendBucketQuestions = 20
+
+// TopicRecentStats is RECENT meaning: most recent ~30 attempted questions
+// worth of recorded practice (partial records weighted proportionally).
+type TopicRecentStats = TopicPracticeStats
+
+// ComputeTopicRecentStatsE walks history newest-backward until ~30 attempted
+// questions are represented, weighting a partial boundary record
+// proportionally (correct and time scaled by fraction).
+func ComputeTopicRecentStatsE(ctx context.Context, q db.DBTX, topicID db.ID) (TopicRecentStats, error) {
+	hist, err := runtime.GetGovPracticeHistory(ctx, q, topicID)
+	if err != nil {
+		return TopicRecentStats{}, err
+	}
+	var st TopicRecentStats
+	if len(hist) == 0 {
+		return st, nil
+	}
+	remaining := float64(RecentQuestionWindow)
+	var attF, corrF, timeF float64
+	for i := len(hist) - 1; i >= 0 && remaining > 0; i-- {
+		r := hist[i]
+		if r.Attempted <= 0 {
+			st.Rows++
+			continue
+		}
+		st.Rows++
+		a := float64(r.Attempted)
+		c := float64(r.Correct)
+		t := float64(r.TimeSpentSeconds)
+		if a <= remaining {
+			attF += a
+			corrF += c
+			timeF += t
+			remaining -= a
+		} else {
+			frac := remaining / a
+			attF += remaining
+			corrF += c * frac
+			timeF += t * frac
+			remaining = 0
+		}
+	}
+	st.Attempted = int(attF + 0.5)
+	st.Correct = int(corrF + 0.5)
+	if st.Attempted > 0 {
+		st.Accuracy = float64(st.Correct) / float64(st.Attempted)
+	}
+	st.Incorrect = st.Attempted - st.Correct
+	if st.Incorrect < 0 {
+		st.Incorrect = 0
+	}
+	st.TotalTime = int(timeF + 0.5)
+	if attF > 0 && timeF > 0 {
+		st.AvgSpeed = timeF / attF
 		st.HasSpeed = true
 	}
 	return st, nil
+}
+
+// TopicTrend holds chronological question-count buckets and direction.
+type TopicTrend struct {
+	Buckets []float64 // weighted accuracy per ~20-question bucket, oldest->newest
+	HasData bool      // enough buckets to be meaningful
+	Label   string    // "↑ Improving", "→ Stable", "↓ Declining" or ""
+}
+
+// ComputeTopicTrendE builds chronological ~20-question buckets (oldest->newest),
+// splitting records proportionally at bucket boundaries. Each bucket value is
+// its weighted accuracy. Trend needs at least 3 buckets; otherwise HasData=false.
+func ComputeTopicTrendE(ctx context.Context, q db.DBTX, topicID db.ID) (TopicTrend, error) {
+	hist, err := runtime.GetGovPracticeHistory(ctx, q, topicID)
+	if err != nil {
+		return TopicTrend{}, err
+	}
+	if len(hist) == 0 {
+		return TopicTrend{}, nil
+	}
+	type bucket struct{ att, corr float64 }
+	var buckets []bucket
+	curAtt, curCorr := 0.0, 0.0
+	flush := func() {
+		if curAtt > 0 {
+			buckets = append(buckets, bucket{curAtt, curCorr})
+			curAtt, curCorr = 0, 0
+		}
+	}
+	for _, r := range hist {
+		if r.Attempted <= 0 {
+			continue
+		}
+		a := float64(r.Attempted)
+		c := float64(r.Correct)
+		t := float64(r.TimeSpentSeconds)
+		_ = t
+		remain := a
+		cRemain := c
+		for remain > 0 {
+			space := float64(TrendBucketQuestions) - curAtt
+			if remain < space {
+				curAtt += remain
+				curCorr += cRemain
+				remain = 0
+			} else {
+				frac := space / remain
+				curAtt += space
+				curCorr += cRemain * frac
+				cRemain = cRemain * (1 - frac)
+				remain -= space
+				flush()
+			}
+			if curAtt >= float64(TrendBucketQuestions)-1e-9 {
+				flush()
+			}
+		}
+	}
+	if curAtt > 0 {
+		// Keep a trailing partial bucket only if it holds a meaningful
+		// share (>= half a bucket); otherwise merge into the previous one.
+		if curAtt >= float64(TrendBucketQuestions)/2 && len(buckets) > 0 {
+			buckets = append(buckets, bucket{curAtt, curCorr})
+		} else if len(buckets) == 0 {
+			buckets = append(buckets, bucket{curAtt, curCorr})
+		} else if curAtt > 0 {
+			last := len(buckets) - 1
+			buckets[last].att += curAtt
+			buckets[last].corr += curCorr
+		}
+	}
+	if len(buckets) < 3 {
+		return TopicTrend{}, nil
+	}
+	acc := make([]float64, 0, len(buckets))
+	for _, b := range buckets {
+		if b.att > 0 {
+			acc = append(acc, b.corr/b.att)
+		} else {
+			acc = append(acc, 0)
+		}
+	}
+	diff := acc[len(acc)-1] - acc[0]
+	label := "→ Stable"
+	if diff > 0.050001 {
+		label = "↑ Improving"
+	} else if diff < -0.050001 {
+		label = "↓ Declining"
+	}
+	return TopicTrend{Buckets: acc, HasData: true, Label: label}, nil
+}
+
+// TopicPracticeDetail bundles OVERALL + RECENT + TREND + LAST PRACTICED.
+type TopicPracticeDetail struct {
+	Overall       TopicPracticeStats
+	Recent        TopicRecentStats
+	Trend         TopicTrend
+	LastPracticed *time.Time
+	HasHistory    bool
+}
+
+// ComputeTopicPracticeDetailE aggregates all practice views for a topic.
+func ComputeTopicPracticeDetailE(ctx context.Context, q db.DBTX, topicID db.ID) (TopicPracticeDetail, error) {
+	var d TopicPracticeDetail
+	overall, err := ComputeTopicPracticeStatsE(ctx, q, topicID)
+	if err != nil {
+		return d, err
+	}
+	recent, err := ComputeTopicRecentStatsE(ctx, q, topicID)
+	if err != nil {
+		return d, err
+	}
+	trend, err := ComputeTopicTrendE(ctx, q, topicID)
+	if err != nil {
+		return d, err
+	}
+	d.Overall = overall
+	d.Recent = recent
+	d.Trend = trend
+	d.HasHistory = overall.Rows > 0
+	if d.HasHistory {
+		hist, err := runtime.GetGovPracticeHistory(ctx, q, topicID)
+		if err != nil {
+			return d, err
+		}
+		if len(hist) > 0 {
+			latest := hist[len(hist)-1].RecordedAt
+			for _, r := range hist {
+				if r.RecordedAt.After(latest) {
+					latest = r.RecordedAt
+				}
+			}
+			d.LastPracticed = &latest
+		}
+	}
+	return d, nil
+}
+
+// FormatLastPracticed renders "Never", "today", "yesterday", "N days ago"
+// (under 30 days) or "02 Jan 2006" for older dates.
+func FormatLastPracticed(t *time.Time, now time.Time) string {
+	if t == nil {
+		return "Never"
+	}
+	ny, nm, nd := now.Date()
+	ty, tm, td := t.Date()
+	tMid := time.Date(ty, tm, td, 0, 0, 0, 0, time.UTC)
+	nMid := time.Date(ny, nm, nd, 0, 0, 0, 0, time.UTC)
+	days := int(nMid.Sub(tMid).Hours() / 24)
+	if days < 0 {
+		days = 0
+	}
+	switch {
+	case days == 0:
+		return "today"
+	case days == 1:
+		return "yesterday"
+	case days < 30:
+		return fmt.Sprintf("%d days ago", days)
+	default:
+		return t.Format("02 Jan 2006")
+	}
+}
+
+// FormatPracticeAccuracy renders accuracy or "—" when attempted==0.
+func FormatPracticeAccuracy(attempted, correct int) string {
+	if attempted <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1f%%", float64(correct)/float64(attempted)*100)
+}
+
+// FormatPracticeAvg renders avg time/question or "—" when unavailable.
+func FormatPracticeAvg(has bool, avg float64) string {
+	if !has {
+		return "—"
+	}
+	return fmt.Sprintf("%.1fs", avg)
 }
 
 // ExamsForTopic returns exam names mapping a global topic (derived grouping).

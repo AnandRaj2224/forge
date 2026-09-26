@@ -475,7 +475,8 @@ func (c ExamCard) Percent() float64 {
 }
 
 // View renders the card with structured sections. Fixed 8 content lines so
-// grid rows stay uniform; see examCardHeight.
+// grid rows stay uniform; see examCardHeight. Shows SYLLABUS COVERAGE only;
+// PRACTICE READINESS is intentionally absent.
 func (c ExamCard) View() string {
 	w := c.Width
 	if w < 28 {
@@ -502,8 +503,8 @@ func (c ExamCard) View() string {
 	sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
 	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
-	sb.WriteString(SectionHeader("PRACTICE READINESS") + "\n")
-	sb.WriteString(thHelp.Render("not yet calculated") + "\n")
+	sb.WriteString("" + "\n")
+	sb.WriteString("" + "\n")
 	sb.WriteString("" + "\n")
 	lines := strings.Split(strings.TrimRight(sb.String(), "\n"), "\n")
 	for len(lines) < 8 {

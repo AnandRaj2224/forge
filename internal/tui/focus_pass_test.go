@@ -185,8 +185,9 @@ func TestPracticeSaveBecomesReadOnlyDone(t *testing.T) {
 		t.Fatalf("invalid Save must not persist, got %d rows", n)
 	}
 	// Valid bundle saves atomically (3 topics = 1 task with 2 topics here = 2 rows).
-	for _, k := range []string{"2", "0", "m", "down", "1", "5", "down", "1", "2", "down", "1", "8", ".", "5", "down",
-		"9", "0", "0", "down", "1", "0", "down", "8", "down", "2", "0", "down"} {
+	// Raw facts only: Time spent + Attempted + Correct per topic (no Avg field).
+	for _, k := range []string{"2", "0", "m", "down", "1", "5", "down", "1", "2", "down",
+		"9", "0", "0", "down", "1", "0", "down", "8", "down"} {
 		testSend(app, k)
 	}
 	testSend(app, "enter")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -73,6 +74,7 @@ type GovTopicView struct {
 	Flags    []bool
 	Lectures []db.GovLecture
 	Stats    TopicPracticeStats
+	Detail   TopicPracticeDetail
 	UsedBy   []string
 }
 
@@ -338,8 +340,13 @@ func (s *GovScreen) openTopic(topicID string) {
 		s.err = "data error: " + err.Error()
 		return
 	}
+	detail, err := ComputeTopicPracticeDetailE(ctx, s.app.DB, tp.ID)
+	if err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
 	s.detail = &GovTopicView{Topic: tp, Subject: subj, Done: done, Total: total, Flags: flags, Lectures: lecs,
-		Stats: stats, UsedBy: ExamsForTopic(ctx, s.app.DB, tp.ID)}
+		Stats: stats, Detail: detail, UsedBy: ExamsForTopic(ctx, s.app.DB, tp.ID)}
 	s.returnTo = s.level
 	s.level = govTopic
 	s.detailScroll.Reset()
@@ -642,8 +649,6 @@ func (s *GovScreen) examView(w, h int) string {
 		sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
 		sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
 		sb.WriteString(RowDivider(rw-6) + "\n")
-		sb.WriteString(SectionHeader("PRACTICE READINESS") + "  " + thHelp.Render("not yet calculated") + "\n")
-		sb.WriteString(RowDivider(rw-6) + "\n")
 		sb.WriteString(DomainSection("GOV", "TOPICS — "+strings.ToUpper(TruncateToWidth(s.examSubject, 24))) + "\n")
 		sb.WriteString(s.topicList.View())
 		right = PanelFixed(strings.ToUpper(TruncateToWidth(s.examSubject, 20)), sb.String(), rw, bodyH, s.zone == gzRight)
@@ -761,19 +766,9 @@ func (s *GovScreen) topicBody(inner int) string {
 	}
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("PRACTICE") + "\n")
-	st := v.Stats
-	if st.Attempted == 0 {
-		sb.WriteString(thHelp.Render("not yet calculated") + "\n")
-	} else {
-		sb.WriteString(ProgressBar{Ratio: accuracyRatio(st), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
-	}
-	sb.WriteString(MetaRow("Questions attempted", fmt.Sprint(st.Attempted), 19) + "\n")
-	sb.WriteString(MetaRow("Questions correct", fmt.Sprint(st.Correct), 19) + "\n")
-	sb.WriteString(MetaRow("Questions incorrect", fmt.Sprint(st.Incorrect), 19) + "\n")
-	sb.WriteString(MetaRow("Accuracy", fmt.Sprintf("%.1f%%", st.Accuracy*100), 19) + "\n")
-	sb.WriteString(MetaRow("Avg speed", avgStr(st), 19) + "\n")
+	sb.WriteString(renderTopicPractice(inner, v.Detail))
 	sb.WriteString(RowDivider(inner) + "\n")
-	sb.WriteString(SectionHeader("LECTURES") + "\n")
+	sb.WriteString(SectionHeader("LECTURE LIST") + "\n")
 	for i, l := range v.Lectures {
 		mark := "○"
 		if i < len(v.Flags) && v.Flags[i] {
@@ -791,6 +786,50 @@ func (s *GovScreen) topicBody(inner int) string {
 	sb.WriteString(SectionHeader("USED BY") + "\n" + thMeta.Render(strings.Join(v.UsedBy, "  ·  ")))
 	return sb.String()
 }
+
+// renderTopicPractice renders OVERALL + RECENT side-by-side plus TREND and
+// LAST PRACTICED. No accuracy bar: numeric accuracy already communicates.
+// Row labels mirror exactly between OVERALL and RECENT with unchanged casing.
+func renderTopicPractice(inner int, d TopicPracticeDetail) string {
+	var sb strings.Builder
+	if !d.HasHistory {
+		sb.WriteString(thHelp.Render("No practice recorded yet.") + "\n")
+		return sb.String()
+	}
+	ov, rc := d.Overall, d.Recent
+	// Two-column header.
+	sb.WriteString(SectionHeader("OVERALL") + strings.Repeat(" ", 24) + SectionHeader("RECENT") + "\n")
+	sb.WriteString(practiceSideRow("Questions attempted", fmt.Sprint(ov.Attempted), fmt.Sprint(rc.Attempted)) + "\n")
+	sb.WriteString(practiceSideRow("Questions correct", fmt.Sprint(ov.Correct), fmt.Sprint(rc.Correct)) + "\n")
+	sb.WriteString(practiceSideRow("Questions incorrect", fmt.Sprint(ov.Incorrect), fmt.Sprint(rc.Incorrect)) + "\n")
+	sb.WriteString(practiceSideRow("Accuracy", FormatPracticeAccuracy(ov.Attempted, ov.Correct), FormatPracticeAccuracy(rc.Attempted, rc.Correct)) + "\n")
+	sb.WriteString(practiceSideRow("Avg time / question", FormatPracticeAvg(ov.HasSpeed, ov.AvgSpeed), FormatPracticeAvg(rc.HasSpeed, rc.AvgSpeed)) + "\n")
+	sb.WriteString("\n")
+	sb.WriteString(SectionHeader("TREND") + "\n")
+	if !d.Trend.HasData {
+		sb.WriteString(thHelp.Render("Not enough data") + "\n")
+	} else {
+		parts := make([]string, 0, len(d.Trend.Buckets))
+		for _, b := range d.Trend.Buckets {
+			parts = append(parts, fmt.Sprintf("%.0f%%", b*100))
+		}
+		sb.WriteString(thPrimary.Render(strings.Join(parts, " → ")) + "\n")
+		sb.WriteString(thMeta.Render("                                      "+d.Trend.Label) + "\n")
+	}
+	sb.WriteString("\n")
+	sb.WriteString(SectionHeader("LAST PRACTICED") + "\n")
+	sb.WriteString(thPrimary.Render(FormatLastPracticed(d.LastPracticed, timeNowUTC())) + "\n")
+	_ = inner
+	return sb.String()
+}
+
+// practiceSideRow aligns Overall and Recent values row-for-row.
+func practiceSideRow(label, overallVal, recentVal string) string {
+	// Label column mirrors MetaRow casing exactly; values align in two columns.
+	return thMeta.Render(padRight(label, 19)) + "  " + thPrimary.Render(padRight(overallVal, 12)) + "  " + thMeta.Render(padRight(label, 19)) + "  " + thPrimary.Render(recentVal)
+}
+
+func timeNowUTC() time.Time { return time.Now().UTC() }
 
 func ratio(a, b int) float64 {
 	if b == 0 {

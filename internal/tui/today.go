@@ -795,11 +795,16 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 				sb.WriteString(MetaRow("Time spent", FormatDurationLong(r.TimeSpentSeconds), 12) + "\n")
 				sb.WriteString(MetaRow("Attempted", fmt.Sprint(r.Attempted), 12) + "\n")
 				sb.WriteString(MetaRow("Correct", fmt.Sprint(r.Correct), 12) + "\n")
+				sb.WriteString(MetaRow("Incorrect", fmt.Sprint(r.Attempted-r.Correct), 12) + "\n")
 				avg := "—"
-				if r.AvgQuestionSpeedSeconds != nil {
-					avg = fmt.Sprintf("%.1fs", *r.AvgQuestionSpeedSeconds)
+				if r.Attempted > 0 {
+					if r.AvgQuestionSpeedSeconds != nil {
+						avg = fmt.Sprintf("%.1fs", *r.AvgQuestionSpeedSeconds)
+					} else if r.TimeSpentSeconds > 0 {
+						avg = fmt.Sprintf("%.1fs", float64(r.TimeSpentSeconds)/float64(r.Attempted))
+					}
 				}
-				sb.WriteString(MetaRow("Avg speed", avg, 12))
+				sb.WriteString(MetaRow("Avg time/question", avg, 12))
 			} else {
 				sb.WriteString(thMeta.Render("—"))
 			}

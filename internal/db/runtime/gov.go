@@ -244,6 +244,29 @@ FROM gov_practice_records WHERE session_id IN (`+strings.Join(place, ",")+`) ORD
 	return scanPracticeRecords(rows)
 }
 
+// GetGovPracticeRecordsForTopics returns practice rows for a bounded set of
+// topics in ONE query, ordered by recorded_at. Used to derive pure
+// round-robin topic rotation from existing history without new state.
+func GetGovPracticeRecordsForTopics(ctx context.Context, q db.DBTX, topicIDs []db.ID) ([]db.GovPracticeRecord, error) {
+	if len(topicIDs) == 0 {
+		return nil, nil
+	}
+	place := make([]string, 0, len(topicIDs))
+	args := make([]any, 0, len(topicIDs))
+	for _, id := range topicIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `
+SELECT id, session_id, topic_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+FROM gov_practice_records WHERE topic_id IN (`+strings.Join(place, ",")+`) ORDER BY recorded_at, id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: practice for topics: %w", err)
+	}
+	defer rows.Close()
+	return scanPracticeRecords(rows)
+}
+
 // ---- Gov practice rotation state ----
 
 // GetGovPracticeRotationState returns the singleton rotation state.

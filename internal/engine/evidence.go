@@ -78,9 +78,27 @@ func SaveGovLectureEvidence(ctx context.Context, database *db.DB, taskID, sessio
 	return EvaluateTodayTask(ctx, database, taskID)
 }
 
-// ValidateGovPracticeInput validates one practice row: time>0, attempted>=0,
-// 0<=correct<=attempted, avg speed >0 when present. New bundle saves require
-// avg speed (engine rule); pass requireAvg=false for legacy-tolerant checks.
+// DerivePracticeAvgSpeed calculates avg time per question from raw values:
+// time_spent_seconds / attempted. Returns nil when attempted == 0 (no
+// meaningful average). Never invents a value when time is 0; callers keep
+// the existing time>0 validation.
+func DerivePracticeAvgSpeed(timeSecs, attempted int) *float64 {
+	if attempted <= 0 {
+		return nil
+	}
+	v := float64(timeSecs) / float64(attempted)
+	if v <= 0 {
+		return nil
+	}
+	return &v
+}
+
+// ValidateGovPracticeInput validates one practice row from RAW facts only:
+// time>0, attempted>=0, 0<=correct<=attempted. Avg speed is DERIVED as
+// time/attempted (nil when attempted==0), never user-entered. The avgS
+// parameter is kept for backward compatibility with old records/tests:
+// when non-empty it is validated but the derived value takes precedence
+// for new saves; when empty the derived value is used directly.
 func ValidateGovPracticeInput(topicName, timeS, attS, corrS, avgS string, requireAvg bool) (GovPracticeInput, string) {
 	var out GovPracticeInput
 	tSecs, msg := ParseDurationSeconds(timeS)
@@ -107,14 +125,15 @@ func ValidateGovPracticeInput(topicName, timeS, attS, corrS, avgS string, requir
 	}
 	out.Attempted = att
 	out.Correct = corr
-	avg, msg4 := ParseAvgSpeed(avgS)
-	if msg4 != "" {
-		return out, msg4
+	// Backward compat: validate a provided avg when present, but always
+	// derive the stored value from raw facts.
+	if avgS != "" {
+		if _, msg4 := ParseAvgSpeed(avgS); msg4 != "" {
+			return out, msg4
+		}
 	}
-	if requireAvg && avg == nil {
-		return out, "average speed required"
-	}
-	out.AvgSpeed = avg
+	_ = requireAvg
+	out.AvgSpeed = DerivePracticeAvgSpeed(tSecs, att)
 	_ = topicName
 	return out, ""
 }
@@ -180,7 +199,7 @@ func SaveGovPracticeEvidence(ctx context.Context, database *db.DB, taskID, sessi
 		return TaskEvaluation{}, wrapErr("practice save", ErrValidation, "no evidence items")
 	}
 	seen := map[db.ID]bool{}
-	for _, in := range inputs {
+	for i, in := range inputs {
 		if !targetSet[in.TopicID] {
 			return TaskEvaluation{}, wrapErr("practice save", ErrValidation, fmt.Sprintf("topic %q not in target", string(in.TopicID)))
 		}
@@ -197,8 +216,11 @@ func SaveGovPracticeEvidence(ctx context.Context, database *db.DB, taskID, sessi
 		if in.AvgSpeed != nil && *in.AvgSpeed <= 0 {
 			return TaskEvaluation{}, wrapErr("practice save", ErrValidation, "avg speed must be > 0")
 		}
+		// Derive avg time/question from raw values when not provided
+		// (new form never asks for it). Old records carrying an explicit
+		// avg remain readable and accepted as-is.
 		if in.AvgSpeed == nil {
-			return TaskEvaluation{}, wrapErr("practice save", ErrValidation, "average speed required")
+			inputs[i].AvgSpeed = DerivePracticeAvgSpeed(in.TimeSecs, in.Attempted)
 		}
 	}
 	// Reject already-satisfied target items (no duplicate completion evidence).

@@ -380,9 +380,9 @@ func planPracticeSlots(ctx context.Context, database *db.DB, extraActive map[db.
 			// No eligible topic: the subject is skipped for practice.
 			continue
 		}
-		topics := eligible
-		if len(topics) > 3 {
-			topics = topics[:3]
+		topics, err := NextPracticeTopics(ctx, database, eligible)
+		if err != nil {
+			return nil, nil, err
 		}
 		subj, err := catalog.GetGovSubject(ctx, database, subjectID)
 		if err != nil {
@@ -418,6 +418,107 @@ func topicIDs(ts []db.GovTopic) []db.ID {
 		out = append(out, t.ID)
 	}
 	return out
+}
+
+// NextPracticeTopics selects the next up-to-3 topics for a practice block
+// using SIMPLE PURE ROUND-ROBIN derived from EXISTING practice history.
+//
+// Eligible topics are already ordered by sort_order. The algorithm finds
+// the last topic position reached by the most recent practice rotation and
+// continues from the next topic, wrapping around:
+//
+//	A B C / D E F / G H I / A B C ...
+//	A B C / D E F / G H I / J A B / C D E ... (10 topics)
+//
+// No new state table: the start offset is reconstructed from
+// gov_practice_records (topic_id + recorded_at) for the eligible topics.
+//   - no history -> start at 0 (first 3)
+//   - history -> find max recorded_at among eligible topics' records,
+//     take that timestamp's bundle, find its cyclic start (the member
+//     whose predecessor is absent), advance by bundle size.
+//   - fewer than 3 eligible -> all; exactly 3 -> all.
+//   - new eligible topics slot into normal sort_order without resetting;
+//     ineligible topics are skipped safely.
+//
+// Subject rotation is untouched; this only rotates topics inside the
+// already-selected subject.
+func NextPracticeTopics(ctx context.Context, q db.DBTX, eligible []db.GovTopic) ([]db.GovTopic, error) {
+	if len(eligible) == 0 {
+		return nil, nil
+	}
+	if len(eligible) <= 3 {
+		out := make([]db.GovTopic, len(eligible))
+		copy(out, eligible)
+		return out, nil
+	}
+	ids := make([]db.ID, 0, len(eligible))
+	indexOf := make(map[db.ID]int, len(eligible))
+	for i, t := range eligible {
+		ids = append(ids, t.ID)
+		indexOf[t.ID] = i
+	}
+	recs, err := runtime.GetGovPracticeRecordsForTopics(ctx, q, ids)
+	if err != nil {
+		return nil, fmt.Errorf("engine: topic rotation history: %w", err)
+	}
+	if len(recs) == 0 {
+		out := make([]db.GovTopic, 3)
+		copy(out, eligible[:3])
+		return out, nil
+	}
+	var maxTS int64 = -1
+	for _, r := range recs {
+		if ts := r.RecordedAt.Unix(); ts > maxTS {
+			maxTS = ts
+		}
+	}
+	inBundle := map[int]bool{}
+	var bundleIdx []int
+	for _, r := range recs {
+		if r.RecordedAt.Unix() != maxTS {
+			continue
+		}
+		if idx, ok := indexOf[r.TopicID]; ok {
+			if !inBundle[idx] {
+				inBundle[idx] = true
+				bundleIdx = append(bundleIdx, idx)
+			}
+		}
+	}
+	if len(bundleIdx) == 0 {
+		out := make([]db.GovTopic, 3)
+		copy(out, eligible[:3])
+		return out, nil
+	}
+	n := len(eligible)
+	// Cyclic start: member whose predecessor (mod n) is absent from the bundle.
+	start := -1
+	for _, idx := range bundleIdx {
+		prev := (idx - 1 + n) % n
+		if !inBundle[prev] {
+			start = idx
+			break
+		}
+	}
+	var next int
+	if start >= 0 {
+		next = (start + len(bundleIdx)) % n
+	} else {
+		// Non-contiguous (eligibility changed mid-history): fall back to
+		// max index + 1 to skip safely without panic or stall.
+		maxIdx := bundleIdx[0]
+		for _, idx := range bundleIdx[1:] {
+			if idx > maxIdx {
+				maxIdx = idx
+			}
+		}
+		next = (maxIdx + 1) % n
+	}
+	out := make([]db.GovTopic, 0, 3)
+	for i := 0; i < 3; i++ {
+		out = append(out, eligible[(next+i)%n])
+	}
+	return out, nil
 }
 
 // examMemberSet returns the subject IDs belonging to an exam.
