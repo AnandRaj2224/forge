@@ -93,8 +93,8 @@ func minInt(a, b int) int {
 // ProgressBar is the NORMAL STATIC progress component for syllabus coverage,
 // lecture progress, practice progression, pattern/area progress.
 // Clean quiet bar: ████████░░░░░░ 60% with percentage/count. The fill stays
-// neutral by default and may carry one restrained domain accent (GOV violet,
-// DSA cyan, SWE rose) via Accent. Never a gradient.
+// neutral by default and may carry one restrained domain accent (GOV peach,
+// DSA cyan, SWE pink) via Accent. Never a gradient.
 type ProgressBar struct {
 	Ratio   float64 // 0..1
 	Width   int
@@ -135,7 +135,7 @@ func (p ProgressBar) View() string {
 }
 
 // SessionProgressBar is the LIVE SESSION gradient treatment only.
-// Violet → purple → blue → cyan → green, animated by Frame phase shift.
+// Smooth continuous palette gradient, animated by Frame phase shift.
 // Never use for static coverage bars.
 type SessionProgressBar struct {
 	Ratio   float64 // 0..1
@@ -183,12 +183,15 @@ func (p SessionProgressBar) View() string {
 		}
 	}
 	if p.ShowPct {
-		return fmt.Sprintf("%s %s", sb.String(), thPrimary.Render(fmt.Sprintf("%3.0f%%", r*100)))
+		return fmt.Sprintf("%s %s", sb.String(), lipgloss.NewStyle().Bold(true).Foreground(cWhite).Render(fmt.Sprintf("%3.0f%%", r*100)))
 	}
 	return sb.String()
 }
 
-var gradStops = []string{"#A78BFA", "#E879F9", "#8B5CF6", "#60A5FA", "#22D3EE", "#34D399"}
+// gradStops is the continuous logo/session gradient treatment.
+// Palette only, flowing dark → accent → warm → light:
+// ocean night → neon purple → sunset pink → miami peach → vice cyan.
+var gradStops = []string{"#0B0F2B", "#BC6CFF", "#FF5CA8", "#FFB86B", "#00F0FF"}
 
 func gradientAt(t float64) color.Color {
 	if t < 0 {
@@ -297,7 +300,8 @@ func (r RadioGroup) View() string {
 		}
 		if r.Focused && i == r.Cursor {
 			// Both focus arrow and selection glyph always visible.
-			sb.WriteString(thFocusMark.Render("▶ ") + thPrimary.Render(glyph+"  "+o) + "\n")
+			// Focused option text is white; unfocused stays muted gray.
+			sb.WriteString(thFocusMark.Render("▶ ") + lipgloss.NewStyle().Bold(true).Foreground(cWhite).Render(glyph+"  "+o) + "\n")
 		} else {
 			sb.WriteString("  " + thPrimary.Render(glyph+"  "+o) + "\n")
 		}
@@ -318,12 +322,16 @@ type Checkbox struct {
 func (c Checkbox) View() string {
 	var glyph string
 	var line string
+	labelStyle := thPrimary
+	if c.Focused {
+		labelStyle = lipgloss.NewStyle().Bold(true).Foreground(cWhite)
+	}
 	if c.Checked {
 		glyph = thSuccess.Render("■")
-		line = glyph + "  " + thPrimary.Render(c.Label)
+		line = glyph + "  " + labelStyle.Render(c.Label)
 	} else {
 		glyph = thMeta.Render("□")
-		line = glyph + "  " + thPrimary.Render(c.Label)
+		line = glyph + "  " + labelStyle.Render(c.Label)
 	}
 	if c.Focused {
 		return thFocusMark.Render("▶ ") + line
@@ -366,9 +374,9 @@ func (f FormField) View(focused bool, labelWidth int) string {
 }
 
 // KeyBadge renders one compact [key] chip for the footer command bar.
-// Single line, neutral badge: bright text on a dark neutral surface.
+// Single line: white key text on the ocean night structural surface.
 func KeyBadge(key string) string {
-	return lipgloss.NewStyle().Bold(true).Foreground(cFgPrimary).Background(lipgloss.Color("#23232E")).Padding(0, 1).Render(key)
+	return lipgloss.NewStyle().Bold(true).Foreground(cWhite).Background(cBorder).Padding(0, 1).Render(key)
 }
 
 // lipglossJoin places two panels side by side with a gap.
@@ -389,7 +397,7 @@ func (i listItem) FilterValue() string { return i.title }
 
 // Navigator is the shared Forge list: thin dividers, polished selection,
 // viewport scrolling, single focus convention. Built on RowList — no Bubbles
-// chrome, no pink defaults. All master navigators build on it.
+// chrome, no accent defaults. All master navigators build on it.
 type Navigator struct {
 	rows RowList
 }

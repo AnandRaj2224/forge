@@ -138,15 +138,15 @@ func isDifficulty(s string) bool {
 	return false
 }
 
-// DifficultyBadge renders EASY/MEDIUM/HARD with semantic colors:
-// green / amber / red. Only the badge carries color; selection
+// DifficultyBadge renders EASY/MEDIUM/HARD with palette-only colors:
+// cyan / peach / pink. Only the badge carries color; selection
 // backgrounds are applied by the owning row.
 func DifficultyBadge(diff string) string {
 	switch strings.ToUpper(strings.TrimSpace(diff)) {
 	case "EASY":
 		return lipgloss.NewStyle().Bold(true).Foreground(cSuccess).Render(strings.ToUpper(strings.TrimSpace(diff)))
 	case "MEDIUM":
-		return lipgloss.NewStyle().Bold(true).Foreground(cWarning).Render(strings.ToUpper(strings.TrimSpace(diff)))
+		return lipgloss.NewStyle().Bold(true).Foreground(cActiveBlue).Render(strings.ToUpper(strings.TrimSpace(diff)))
 	case "HARD":
 		return lipgloss.NewStyle().Bold(true).Foreground(cError).Render(strings.ToUpper(strings.TrimSpace(diff)))
 	default:

@@ -333,27 +333,28 @@ type rowTheme struct {
 }
 
 // rowThemeFor returns the style set for normal / cursor / focused-selected.
+// No solid selection rectangle: focus = thin purple edge + brighter/white
+// text on a transparent background. Unfocused cursor is white text without
+// the edge; normal rows stay muted gray.
 func rowThemeFor(selected, focused bool) (rowTheme, bool) {
 	switch {
 	case selected && focused:
-		bg := lipgloss.Color("#2A2547")
 		return rowTheme{
-			bg:     bg,
-			edge:   lipgloss.NewStyle().Foreground(cActive).Background(bg),
-			main:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(bg),
-			strong: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(bg),
-			faint:  lipgloss.NewStyle().Foreground(cFgSecondary).Background(bg),
-			gap:    lipgloss.NewStyle().Background(bg),
+			bg:     nil,
+			edge:   lipgloss.NewStyle().Foreground(cPrimary),
+			main:   lipgloss.NewStyle().Bold(true).Foreground(cWhite),
+			strong: lipgloss.NewStyle().Bold(true).Foreground(cWhite),
+			faint:  lipgloss.NewStyle().Foreground(cFgSecondary),
+			gap:    lipgloss.NewStyle(),
 		}, true
 	case selected:
-		bg := lipgloss.Color("#1E1B33")
 		return rowTheme{
-			bg:     bg,
-			edge:   lipgloss.NewStyle().Background(bg),
-			main:   lipgloss.NewStyle().Foreground(cFgPrimary).Background(bg),
-			strong: lipgloss.NewStyle().Foreground(cFgPrimary).Background(bg),
-			faint:  lipgloss.NewStyle().Foreground(cFgSecondary).Background(bg),
-			gap:    lipgloss.NewStyle().Background(bg),
+			bg:     nil,
+			edge:   lipgloss.NewStyle(),
+			main:   lipgloss.NewStyle().Foreground(cWhite),
+			strong: lipgloss.NewStyle().Bold(true).Foreground(cWhite),
+			faint:  lipgloss.NewStyle().Foreground(cFgSecondary),
+			gap:    lipgloss.NewStyle(),
 		}, false
 	default:
 		return rowTheme{
@@ -377,8 +378,8 @@ func (t rowTheme) domain(domain, text string) rowCell {
 	return rowCell{text: text, style: s}
 }
 
-// statusCellFor styles the STATUS cell with restrained semantic color over
-// the row background: TODO muted, ACTIVE accent, COMPLETE green. Selection
+// statusCellFor styles the STATUS cell over the row background:
+// TODO subdued neutral, ACTIVE peach, COMPLETE cyan. Selection
 // background is preserved; only the status text carries semantics.
 func statusCellFor(th rowTheme, st TaskStatus, text string) rowCell {
 	var s lipgloss.Style
@@ -388,7 +389,7 @@ func statusCellFor(th rowTheme, st TaskStatus, text string) rowCell {
 	case TaskCompleted:
 		s = lipgloss.NewStyle().Bold(true).Foreground(cSuccess)
 	default:
-		s = lipgloss.NewStyle().Foreground(cFgTertiary)
+		s = lipgloss.NewStyle().Foreground(cTodo)
 	}
 	if th.bg != nil {
 		s = s.Background(th.bg)
@@ -520,8 +521,8 @@ func (r SelectableRow) View() string {
 	if edged {
 		lead = "▌"
 	}
-	// Difficulty labels keep semantic color (green/amber/red) on any row
-	// background; selection tint + focus edge stay independent.
+	// Difficulty labels keep palette-only semantic color (cyan/peach/pink)
+	// on any row background; selection tint + focus edge stay independent.
 	metaStyle := th.strong
 	meta := r.Meta
 	if isDifficulty(meta) {
@@ -531,7 +532,7 @@ func (r SelectableRow) View() string {
 		case "EASY":
 			fg = cSuccess
 		case "MEDIUM":
-			fg = cWarning
+			fg = cActiveBlue
 		default:
 			fg = cError
 		}

@@ -456,7 +456,7 @@ var forgeLogoLines = []string{
 	"█████╗  ██║   ██║██████╔╝██║  ███╗█████╗",
 	"██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝",
 	"██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗",
-	"╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
+	"╚═╝     ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
 }
 
 // headerView is the Forge shell header: LEFT 6-line gradient ASCII
@@ -466,9 +466,10 @@ var forgeLogoLines = []string{
 // NO clock. Header height stays at the 6-line logo (no growth).
 func (a *App) headerView(w int) string {
 	names := []string{"TODAY", "GOV", "DSA", "SWE", "MOCKS", "HISTORY", "REVIEWS"}
-	// Compact pills so all 7 items fit; active keeps an accent fill.
-	navActive := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#0B0B13")).Background(cPrimary).Padding(0, 1)
-	navInactive := lipgloss.NewStyle().Foreground(cFgSecondary).Padding(0, 1)
+	// Compact pills so all 7 items fit; active keeps the purple accent fill
+	// with white text, inactive stays muted gray.
+	navActive := lipgloss.NewStyle().Bold(true).Foreground(cWhite).Background(cPrimary).Padding(0, 1)
+	navInactive := lipgloss.NewStyle().Foreground(cFgPrimary).Padding(0, 1)
 	pills := make([]string, 0, len(names))
 	for i, n := range names {
 		if TopTab(i) == a.tab {
@@ -502,9 +503,17 @@ func (a *App) headerView(w int) string {
 	return sh.View()
 }
 
-// gradientLogoLine renders one wordmark line with a smooth horizontal
-// gradient: violet → magenta → purple → blue → cyan → green. Controlled and
-// deliberate; the logo is the one place where expressive color is allowed.
+// gradientLogoLine renders one wordmark line with one continuous smooth
+// gradient flowing across the warm retro palette. Controlled; the logo is
+// the one place where expressive color is allowed.
+// logoGradientMinT floors the gradient parameter so the leading glyph
+// never samples the near-background darkest extreme of the gradient.
+// Without this, the F's left strokes render in near-black ocean night and
+// smear into the dark terminal background while O/R/G/E stay vivid.
+// Clamping only affects t values below the floor (the F's left columns);
+// every other rune keeps its exact existing color.
+const logoGradientMinT = 0.12
+
 func gradientLogoLine(line string) string {
 	runes := []rune(line)
 	n := len(runes)
@@ -516,6 +525,9 @@ func gradientLogoLine(line string) string {
 		t := 0.0
 		if n > 1 {
 			t = float64(i) / float64(n-1)
+		}
+		if t < logoGradientMinT {
+			t = logoGradientMinT
 		}
 		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(gradientAt(t)).Render(string(r)))
 	}
