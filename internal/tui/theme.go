@@ -107,6 +107,13 @@ var (
 	cDSA = lipgloss.Color("#00F0FF")
 	cSWE = lipgloss.Color("#FF5CA8")
 
+	// LeetCode difficulty language (DSA screen difficulty labels only):
+	// bright deep green for easy, bright deep yellow for medium,
+	// bright deep red for hard.
+	cEasy   = lipgloss.Color("#00E676")
+	cMedium = lipgloss.Color("#FFD60A")
+	cHard   = lipgloss.Color("#FF3131")
+
 	// Live session / logo stops: palette only.
 	cGrad0 = lipgloss.Color("#0B0F2B")
 	cGrad1 = lipgloss.Color("#BC6CFF")

@@ -521,8 +521,9 @@ func (r SelectableRow) View() string {
 	if edged {
 		lead = "▌"
 	}
-	// Difficulty labels keep palette-only semantic color (cyan/peach/pink)
-	// on any row background; selection tint + focus edge stay independent.
+	// Difficulty labels keep classic LeetCode colors (easy green / medium
+	// yellow / hard red) on any row background; selection tint + focus edge
+	// stay independent.
 	metaStyle := th.strong
 	meta := r.Meta
 	if isDifficulty(meta) {
@@ -530,11 +531,11 @@ func (r SelectableRow) View() string {
 		var fg color.Color
 		switch meta {
 		case "EASY":
-			fg = cSuccess
+			fg = cEasy
 		case "MEDIUM":
-			fg = cActiveBlue
+			fg = cMedium
 		default:
-			fg = cError
+			fg = cHard
 		}
 		metaStyle = lipgloss.NewStyle().Bold(true).Foreground(fg)
 		if th.bg != nil {
