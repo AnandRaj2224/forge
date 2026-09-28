@@ -12,20 +12,17 @@ import (
 	"forge/internal/engine"
 )
 
-// ---------- SWE: read-only weekly overview day-card grid ----------
+// ---------- SWE: read-only weekly day-card grid ----------
 //
-// Primary objects are DAYS: one day = one static read-only card across the
-// full content area (no left Areas panel, no right Routine panel). There is
-// no slot selection, no cursor, no per-slot navigation: the user simply
-// looks at the weekly schedule.
+// Primary objects are DAYS: one compact card per weekday in a weekly grid
+// (row 1: Monday–Thursday, row 2: Friday–Sunday). There is no slot
+// selection, no cursor, no per-slot navigation: the user simply looks at
+// the weekly routine.
 type SWEScreen struct {
 	app   *App
 	areas []db.SWEArea
 	slots []db.SWERoutineSlot
-	// gridCols is the responsive grid width used by the last
-	// routineCardsView render.
-	gridCols int
-	err      string
+	err   string
 }
 
 func NewSWEScreen(a *App) *SWEScreen {
@@ -45,9 +42,9 @@ func (s *SWEScreen) Reload() {
 
 func (s *SWEScreen) reloadSlots() {
 	ctx := context.Background()
-	// Weekly routine grid: all slots grouped by weekday. The grid always
-	// shows the full week so multiple day cards are visible with real DB
-	// data (each weekday carries its slots).
+	// Weekly grid: all slots grouped by weekday. The view always shows
+	// the full week so all seven day cards are visible with real DB data
+	// (each weekday carries its slots).
 	slots, err := catalog.GetSWERoutineAll(ctx, s.app.DB)
 	if err != nil {
 		s.err = err.Error()
@@ -72,27 +69,6 @@ func (s *SWEScreen) onBack() bool {
 	return false
 }
 
-func weekdayName(wd int) string {
-	switch wd {
-	case 1:
-		return "Mon"
-	case 2:
-		return "Tue"
-	case 3:
-		return "Wed"
-	case 4:
-		return "Thu"
-	case 5:
-		return "Fri"
-	case 6:
-		return "Sat"
-	case 7:
-		return "Sun"
-	default:
-		return fmt.Sprintf("Day %d", wd)
-	}
-}
-
 // Update is a no-op: the routine overview is read-only. There is no slot
 // cursor and no per-card navigation; j/k/h/l/arrows never move anything
 // here. Global navigation (tabs, back, quit) is owned by the app shell.
@@ -100,9 +76,9 @@ func (s *SWEScreen) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// View renders the SWE screen as a full read-only card grid: a compact
-// header/summary followed directly by day cards across the whole content
-// area. No left Areas panel, no right Routine panel.
+// View renders the SWE screen as a header/summary followed directly by the
+// weekly day-card grid across the whole content area. No left Areas panel,
+// no right Routine panel.
 func (s *SWEScreen) View() string {
 	w, h := s.app.contentViewport()
 	total := 0
@@ -122,41 +98,42 @@ func (s *SWEScreen) View() string {
 	if availLines < 4 {
 		availLines = 4
 	}
-	grid := s.routineCardsView(w, availLines)
-	if grid == "" {
+	cards := s.routineCardsView(w, availLines)
+	if cards == "" {
 		return header
 	}
-	return header + "\n" + grid
+	return header + "\n" + cards
 }
 
-// sweGridCols picks responsive grid columns from the full content width.
-//
-// Wide terminals prefer 4 columns so 7 days fit in 2 rows (4 + 3).
-// Medium uses 3, narrower uses 2, very narrow uses 1. Thresholds derive
-// from the minimum compact card width (28) plus the 3-cell grid gap, the
-// same geometry BentoGridCardW uses:
-//
-//	4 cols need 4*28 + 3*3 = 121  ->  >= 130
-//	3 cols need 3*28 + 2*3 = 90   ->  >= 90
-//	2 cols need 2*28 + 1*3 = 59   ->  >= 60
-func sweGridCols(availW int) int {
-	if availW >= 130 {
-		return 4
+// scheduleEdgeRow places left/right text on one line sharing a single
+// right edge at width: left stays left, right ends exactly at width.
+// Padding is calculated from ANSI-aware visible widths (never manual
+// per-day coordinates). Day names and totals are far shorter than any
+// real width, so the guard below only fires on degenerate widths.
+func scheduleEdgeRow(left, right string, width int) string {
+	pad := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if pad < 1 {
+		pad = 1
 	}
-	if availW >= 90 {
-		return 3
-	}
-	if availW >= 60 {
-		return 2
-	}
-	return 1
+	return left + strings.Repeat(" ", pad) + right
 }
 
-// routineCardsView renders day-wise compact read-only cards in a responsive
-// grid (same visual family as the GOV exam dashboard: borders, padding,
-// title + divider treatment, spacing). Each weekday gets exactly one static
-// card; multiple slots on the same weekday stay inside that day's card.
-// There is no cursor, no selection, no nested selectable list: card
+// padLeftToWidth right-aligns s inside w visible cells so every duration
+// shares one fixed column. s is never truncated; widths are ANSI-aware.
+func padLeftToWidth(s string, w int) string {
+	if d := w - lipgloss.Width(s); d > 0 {
+		return strings.Repeat(" ", d) + s
+	}
+	return s
+}
+
+// routineCardsView renders the weekly routine as a grid of compact
+// read-only day cards: row 1 holds Monday–Thursday, row 2 the remaining
+// days. Cards are evenly sized: one shared width from the available width
+// and one shared height that fills the available lines, so the grid uses
+// the content area instead of floating at the top. Durations share one
+// fixed column across every card (measured once from all data), so task
+// durations align grid-wide. There is no cursor, no selection: card
 // contents are plain read-only text lines.
 func (s *SWEScreen) routineCardsView(availW, availLines int) string {
 	if len(s.slots) == 0 {
@@ -172,123 +149,82 @@ func (s *SWEScreen) routineCardsView(availW, availLines int) string {
 	if len(groups) == 0 {
 		return EmptyState("No routine slots.")
 	}
-	// Enrich day-card slots with area display names (storage unchanged).
+	// Resolve display names and day totals once; measure the shared task
+	// columns from every slot on screen.
+	type schedSlot struct {
+		name string
+		dur  string
+	}
+	type schedDay struct {
+		name  string
+		total string
+		slots []schedSlot
+	}
 	areaDisp := s.areaDisplayNames()
-	for gi := range groups {
-		for si := range groups[gi].Slots {
-			if disp, ok := areaDisp[groups[gi].Slots[si].AreaID]; ok && disp != "" {
-				groups[gi].Slots[si].Area = disp
-			} else if groups[gi].Slots[si].AreaID != "" {
-				groups[gi].Slots[si].Area = SWEDisplayName(groups[gi].Slots[si].AreaID)
+	days := make([]schedDay, 0, len(groups))
+	nameW, durW := 0, 0
+	for _, g := range groups {
+		d := schedDay{name: strings.ToUpper(g.DayName)}
+		daySecs := 0
+		for _, sl := range g.Slots {
+			name := sl.Area
+			if disp, ok := areaDisp[sl.AreaID]; ok && disp != "" {
+				name = disp
+			} else if name == "" && sl.AreaID != "" {
+				name = SWEDisplayName(sl.AreaID)
 			}
+			if strings.TrimSpace(name) == "" {
+				name = "—"
+			}
+			if w := lipgloss.Width(name); w > nameW {
+				nameW = w
+			}
+			dur := FormatDurationLong(sl.DurationSeconds)
+			if w := lipgloss.Width(dur); w > durW {
+				durW = w
+			}
+			d.slots = append(d.slots, schedSlot{name: name, dur: dur})
+			daySecs += sl.DurationSeconds
 		}
+		d.total = FormatDurationLong(daySecs)
+		days = append(days, d)
 	}
-	cols := sweGridCols(availW)
-	if cols < 1 {
-		cols = 1
-	}
-	s.gridCols = cols
-	cardW := BentoGridCardW(availW, cols, 3)
+	// Even cards: one width for the whole grid (4 across), one height that
+	// fills the available lines over two rows plus the inter-row gap.
+	cardW := BentoGridCardW(availW, 4, 3)
 	if cardW < 28 {
 		cardW = 28
 	}
-	// Render all cards once to measure physical heights (read-only: no
-	// focused or selected card, no cursor).
-	rendered := make([]string, 0, len(groups))
-	heights := make([]int, 0, len(groups))
-	for _, g := range groups {
-		card := SWERoutineCard{
-			Day:   g.DayName,
-			Slots: g.Slots,
-			Width: cardW,
-		}
-		v := card.View()
-		rendered = append(rendered, v)
-		h := len(strings.Split(v, "\n"))
-		if h < 1 {
-			h = 1
-		}
-		heights = append(heights, h)
+	cardH := (availLines - 1) / 2
+	if cardH < 6 {
+		cardH = 6
 	}
-	// Chunk groups into grid rows of cols cards (GOV dashboard pattern).
-	gridRows := [][]int{}
-	for i := 0; i < len(groups); i += cols {
-		end := i + cols
-		if end > len(groups) {
-			end = len(groups)
+	rendered := make([]string, 0, len(days))
+	for _, d := range days {
+		tasks := make([]SWECardTask, 0, len(d.slots))
+		for _, sl := range d.slots {
+			tasks = append(tasks, SWECardTask{Name: sl.name, Dur: sl.dur})
 		}
-		row := make([]int, 0, end-i)
-		for gi := i; gi < end; gi++ {
-			row = append(row, gi)
-		}
-		gridRows = append(gridRows, row)
+		rendered = append(rendered, SWERoutineCard{
+			Day: d.name, Total: d.total, Tasks: tasks,
+			Width: cardW, Height: cardH, NameW: nameW, DurW: durW,
+		}.View())
 	}
-	rowHeights := make([]int, len(gridRows))
-	for ri, row := range gridRows {
-		mx := 0
-		for _, gi := range row {
-			if heights[gi] > mx {
-				mx = heights[gi]
+	// Weekly rows of 4 cards (Monday–Thursday, then Friday–Sunday).
+	var rows []string
+	for i := 0; i < len(rendered); i += 4 {
+		end := i + 4
+		if end > len(rendered) {
+			end = len(rendered)
+		}
+		parts := make([]string, 0, (end-i)*2-1)
+		for j := i; j < end; j++ {
+			if j > i {
+				parts = append(parts, "   ")
 			}
+			parts = append(parts, rendered[j])
 		}
-		if mx < 1 {
-			mx = 1
-		}
-		rowHeights[ri] = mx
+		rows = append(rows, lipgloss.JoinHorizontal(lipgloss.Top, parts...))
 	}
-	// Uniform row height: pad shorter cards in the same visual row to the
-	// row max so bottom borders align (no truncation, only blank padding).
-	for ri, row := range gridRows {
-		for _, gi := range row {
-			if heights[gi] < rowHeights[ri] {
-				g := groups[gi]
-				padded := SWERoutineCard{
-					Day:   g.DayName,
-					Slots: g.Slots,
-					Width: cardW,
-				}.ViewWithHeight(rowHeights[ri])
-				rendered[gi] = padded
-				heights[gi] = rowHeights[ri]
-			}
-		}
-	}
-	// Visible grid rows from summed physical cost (gap = 1 blank line).
-	// Read-only: always start at the first row; show as many full rows as
-	// fit in availLines. Compact cards + 4 cols let all 7 days fit in
-	// 2 rows on wide terminals without scrolling.
-	gap := "   "
-	var renderedRows []string
-	used := 0
-	endRow := 0
-	for ri := range gridRows {
-		add := rowHeights[ri]
-		if ri > 0 {
-			add++ // gap
-		}
-		if used+add > availLines && ri > 0 {
-			break
-		}
-		parts := make([]string, 0, len(gridRows[ri])*2-1)
-		for i, gi := range gridRows[ri] {
-			if i > 0 {
-				parts = append(parts, gap)
-			}
-			parts = append(parts, rendered[gi])
-		}
-		renderedRows = append(renderedRows, lipgloss.JoinHorizontal(lipgloss.Top, parts...))
-		if ri > 0 {
-			used++ // gap line
-		}
-		used += rowHeights[ri]
-		endRow = ri + 1
-	}
-	var sb strings.Builder
-	sb.WriteString(strings.Join(renderedRows, "\n\n"))
-	if endRow < len(gridRows) {
-		if sb.Len() > 0 && !strings.HasSuffix(sb.String(), "\n") {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(thHelp.Render("↓ more below") + "\n")
-	}
-	return strings.TrimRight(sb.String(), "\n")
+	return strings.Join(rows, "\n\n")
 }

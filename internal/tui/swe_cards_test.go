@@ -96,14 +96,15 @@ func TestSWEGroupMultipleSlotsSameWeekday(t *testing.T) {
 	}
 }
 
-func TestSWEReadOnlyCardContent(t *testing.T) {
+func TestSWERoutineCardContent(t *testing.T) {
 	card := SWERoutineCard{
-		Day:   "Monday",
-		Slots: []SWECardSlot{{ID: "s1", Position: 0, DurationSeconds: 5400, Area: "Go"}},
+		Day:   "MONDAY",
+		Total: "1h 30m",
+		Tasks: []SWECardTask{{Name: "Go", Dur: "1h 30m"}},
 		Width: 34,
 	}
 	v := stripANSIForTest(card.View())
-	if !strings.Contains(v, "Monday") {
+	if !strings.Contains(v, "MONDAY") {
 		t.Fatalf("card missing day:\n%s", v)
 	}
 	if !strings.Contains(v, "Go") {
@@ -118,9 +119,12 @@ func TestSWEReadOnlyCardContent(t *testing.T) {
 			t.Fatalf("read-only card must not contain %q:\n%s", bad, v)
 		}
 	}
-	// GOV visual language kept: bordered card + divider below title.
-	if !strings.Contains(v, "─") {
-		t.Fatalf("card must keep GOV-style dividers/borders:\n%s", v)
+	// Day-card language: bordered card with day header, divider, and the
+	// day total top-right.
+	for _, want := range []string{"┌", "─", "1h 30m"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("card must contain %q:\n%s", want, v)
+		}
 	}
 	// Compact: area and duration share one line.
 	found := false
@@ -138,18 +142,13 @@ func TestSWEReadOnlyCardContent(t *testing.T) {
 	}
 }
 
-func TestSWECardFollowsGOVConventions(t *testing.T) {
-	gov := stripANSIForTest(ExamCard{Name: "SBI Clerk", Done: 1, Total: 2, Width: 34}.View())
-	swe := stripANSIForTest(SWERoutineCard{Day: "Monday", Slots: []SWECardSlot{{ID: "s1", Position: 0, DurationSeconds: 3600, Area: "Go"}}, Width: 34}.View())
-	// Same visual language: bordered card (box drawing), divider.
-	for _, want := range []string{"─"} {
-		if !strings.Contains(gov, want) || !strings.Contains(swe, want) {
-			t.Fatalf("both cards must use ─ dividers/borders")
+func TestSWECardFollowsForgeConventions(t *testing.T) {
+	// SWE day cards keep the Forge card language: borders + divider.
+	swe := stripANSIForTest(SWERoutineCard{Day: "MONDAY", Total: "1h", Tasks: []SWECardTask{{Name: "Go", Dur: "1h"}}, Width: 34}.View())
+	for _, want := range []string{"┌", "─", "MONDAY"} {
+		if !strings.Contains(swe, want) {
+			t.Fatalf("day card must contain %q:\n%s", want, swe)
 		}
-	}
-	// SWE is compact (no GOV 8-line minimum): read-only day cards stay short.
-	if n := len(strings.Split(swe, "\n")); n >= 10 {
-		t.Fatalf("SWE read-only card height=%d must be compact (<10, not GOV minimum)", n)
 	}
 	// Read-only: no focus marker even though GOV keeps its own.
 	govF := stripANSIForTest(ExamCard{Name: "X", Done: 0, Total: 1, Focused: true, Width: 34}.View())
@@ -177,7 +176,7 @@ func TestSWECardReadOnlyNoCursor(t *testing.T) {
 	}
 	// Both same-day slots share one Monday card, rendered read-only.
 	view := stripANSIForTest(s.routineCardsView(120, 30))
-	if strings.Count(view, "Monday") != 1 {
+	if strings.Count(view, "MONDAY") != 1 {
 		t.Fatalf("day card must appear once:\n%s", view)
 	}
 	if !strings.Contains(view, "Go") {

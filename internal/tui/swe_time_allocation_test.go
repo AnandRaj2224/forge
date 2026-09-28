@@ -10,9 +10,8 @@ import (
 	"forge/internal/db/catalog"
 )
 
-// SWE TUI is a day-card grid (GOV dashboard IA): one card per weekday,
-// all slots for a day inside that card, no task lists, no completion
-// percentages, no outcomes.
+// SWE TUI is a day-card grid: one card per weekday, all slots for a day
+// inside that card, no task lists, no completion percentages, no outcomes.
 
 func seedSWETUI(t *testing.T, database *db.DB) {
 	t.Helper()
@@ -42,7 +41,7 @@ func TestSWEScreenShowsAreasAndSlots(t *testing.T) {
 		}
 	}
 	// One day = one card: Monday appears once with both slots.
-	if strings.Count(view, "Monday") != 1 {
+	if strings.Count(view, "MONDAY") != 1 {
 		t.Fatalf("Monday must appear once (one day = one card):\n%s", view)
 	}
 	// Old two-panel chrome must be gone.
