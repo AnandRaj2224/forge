@@ -450,20 +450,32 @@ func TestSWEAreaTargetValidation(t *testing.T) {
 	if closed.ElapsedSeconds() != 3600 {
 		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
 	}
-	// SWE time allocation: stopping with total >= planned completes the
-	// block (no evidence form; recorded time is sufficient).
+	// Explicit completion: stopping records time but stays TODO.
 	ev, err := engine.EvaluateTodayTask(ctx, d, "tswe")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.State != engine.StateCompleted {
-		t.Fatalf("SWE block must be COMPLETED after exact target, got %s", ev.State)
+	if ev.State != engine.StateTodo {
+		t.Fatalf("SWE block must stay TODO without YES, got %s", ev.State)
 	}
-	// Completed SWE blocks cannot restart (read-only).
-	if _, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(2*time.Hour)); !errors.Is(err, engine.ErrTaskCompleted) {
+	// Restartable while TODO.
+	if _, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("TODO SWE must stay restartable, got %v", err)
+	}
+	second, _ := engine.StopActiveSession(ctx, d, now.Add(2*time.Hour).Add(10*time.Minute))
+	// YES completes and blocks restart (read-only).
+	if _, err := engine.CompleteSWETask(ctx, d, "tswe", second.ID, now.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	ev2, _ := engine.EvaluateTodayTask(ctx, d, "tswe")
+	if ev2.State != engine.StateCompleted {
+		t.Fatalf("YES must mark COMPLETED, got %s", ev2.State)
+	}
+	if _, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(4*time.Hour)); !errors.Is(err, engine.ErrTaskCompleted) {
 		t.Fatalf("completed SWE restart must return ErrTaskCompleted, got %v", err)
 	}
 	_ = sess
+	_ = closed
 }
 
 func TestTodayGeneration(t *testing.T) {

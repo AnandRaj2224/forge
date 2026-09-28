@@ -50,6 +50,19 @@ type TodayScreen struct {
 	// plus live active elapsed) so the completed SWE detail can show
 	// persisted time without DB access in View.
 	sweActual map[db.ID]int
+	// taskSessions caches stopped+active session counts per task for the
+	// SELECTED TASK metrics (all tracks, render-pure).
+	taskSessions map[db.ID]int
+	// taskActual caches total seconds per task (all tracks) for metrics.
+	taskActual map[db.ID]int
+	// taskCompletedAt caches the completion timestamp per completed task
+	// (lecture completion, latest practice/DSA evidence, SWE explicit).
+	taskCompletedAt map[db.ID]time.Time
+	// SWE explicit completion prompt after STOP: "Did you complete?"
+	swePromptTask   db.ID
+	swePromptSess   db.ID
+	swePromptFocus  int // 0 YES, 1 NO
+	swePromptActive bool
 }
 
 // todayEvidence holds preloaded read-only evidence for one task.
@@ -57,6 +70,7 @@ type todayEvidence struct {
 	lectureComp     *db.GovLectureCompletion
 	practiceByTopic map[string]db.GovPracticeRecord
 	dsaLatest       map[string]db.DSAAttempt
+	sweComp         *runtime.SWECompletion
 }
 
 func NewTodayScreen(a *App) *TodayScreen {
@@ -170,6 +184,9 @@ func (s *TodayScreen) Reload() {
 func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 	s.evidence = make(map[db.ID]*todayEvidence, len(s.tasks))
 	s.sweActual = make(map[db.ID]int, len(s.tasks))
+	s.taskSessions = make(map[db.ID]int, len(s.tasks))
+	s.taskActual = make(map[db.ID]int, len(s.tasks))
+	s.taskCompletedAt = make(map[db.ID]time.Time, len(s.tasks))
 	if len(s.tasks) == 0 {
 		return
 	}
@@ -177,21 +194,25 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	// SWE actual: total time spent per task (stopped durations + live
-	// active elapsed) so COMPLETED SWE detail reflects persisted DB data.
+	// Per-task session counts + actual time (all tracks) for SELECTED TASK
+	// metrics. Stopped durations plus live active elapsed.
 	nowUnix := s.now().Unix()
 	for _, sess := range sessList {
-		if sess.Domain != db.DomainSWE {
-			continue
-		}
+		s.taskSessions[sess.TodayTaskID]++
 		switch {
 		case sess.Status == db.SessionStatusStopped && sess.StoppedAt != nil:
 			if d := sess.StoppedAt.Unix() - sess.StartedAt.Unix(); d > 0 {
-				s.sweActual[sess.TodayTaskID] += int(d)
+				s.taskActual[sess.TodayTaskID] += int(d)
+				if sess.Domain == db.DomainSWE {
+					s.sweActual[sess.TodayTaskID] += int(d)
+				}
 			}
 		case sess.Status == db.SessionStatusActive:
 			if d := nowUnix - sess.StartedAt.Unix(); d > 0 {
-				s.sweActual[sess.TodayTaskID] += int(d)
+				s.taskActual[sess.TodayTaskID] += int(d)
+				if sess.Domain == db.DomainSWE {
+					s.sweActual[sess.TodayTaskID] += int(d)
+				}
 			}
 		}
 	}
@@ -231,6 +252,14 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 			if comp, err := runtime.GetLectureCompletion(ctx, s.app.DB, b.Lecture.LectureID); err == nil {
 				c := comp
 				ev.lectureComp = &c
+				s.taskCompletedAt[t.ID] = c.CompletedAt
+			}
+		}
+		if t.Domain == db.DomainSWE {
+			if comp, err := runtime.GetSWECompletion(ctx, s.app.DB, t.ID); err == nil {
+				c := comp
+				ev.sweComp = &c
+				s.taskCompletedAt[t.ID] = c.CompletedAt
 			}
 		}
 		s.evidence[t.ID] = ev
@@ -242,6 +271,9 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 		if taskID, ok := sessToTask[r.SessionID]; ok {
 			if ev, ok := s.evidence[taskID]; ok {
 				ev.practiceByTopic[string(r.TopicID)] = r
+				if cur, exists := s.taskCompletedAt[taskID]; !exists || r.RecordedAt.After(cur) {
+					s.taskCompletedAt[taskID] = r.RecordedAt
+				}
 			}
 		}
 	}
@@ -251,6 +283,16 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 				k := string(a.ProblemID)
 				if cur, exists := ev.dsaLatest[k]; !exists || !a.AttemptedAt.Before(cur.AttemptedAt) {
 					ev.dsaLatest[k] = a
+				}
+				if cur, exists := s.taskCompletedAt[taskID]; !exists || a.AttemptedAt.After(cur) {
+					// Only count toward completion date when the task is
+					// actually completed; still track latest for metrics.
+					_ = cur
+					if s.status != nil {
+						// Defer: set latest attempt; completed filter happens
+						// in View via status check.
+					}
+					s.taskCompletedAt[taskID] = a.AttemptedAt
 				}
 			}
 		}
@@ -272,7 +314,7 @@ func (s *TodayScreen) syncButtons() {
 	s.stopBtn.Disabled = !hasActive
 	s.stopBtn.Focused = s.zone == tzActive && hasActive
 	_, st, _, ok := s.selected()
-	s.startBtn.Disabled = hasActive || !ok || st == TaskCompleted || s.right != "detail"
+	s.startBtn.Disabled = hasActive || !ok || st == TaskCompleted || s.right != "detail" || s.swePromptActive
 	s.startBtn.Focused = s.zone == tzRight && s.right == "detail" && !s.startBtn.Disabled
 }
 
@@ -339,20 +381,39 @@ func containsDone(msg string) bool {
 }
 
 // stopActive stops the global session via the engine. GOV/DSA swap the
-// right-bottom panel to the evidence form; SWE has no result form —
-// stopping records actual time and stays on detail.
+// right-bottom panel to the evidence form; SWE stops normally then asks
+// "Did you complete this task?" (YES/NO) instead of auto-completing from
+// planned time.
 func (s *TodayScreen) stopActive() {
 	ctx := context.Background()
 	sess, err := engine.StopActiveSession(ctx, s.app.DB, s.now())
 	if err != nil {
 		return
 	}
-	// SWE: no follow-up form. Recorded time is sufficient.
+	// SWE: stop normally, then prompt for explicit completion.
 	if sess.Domain == db.DomainSWE {
 		s.right = "detail"
 		s.zone = tzTasks
 		s.Reload()
 		s.app.refreshActiveIndicator()
+		// Offer YES/NO only when the task is still TODO (not already
+		// COMPLETE). The stopped session is preserved either way.
+		if ev, err := engine.EvaluateTodayTask(ctx, s.app.DB, sess.TodayTaskID); err == nil && ev.State != engine.StateCompleted {
+			s.swePromptActive = true
+			s.swePromptTask = sess.TodayTaskID
+			s.swePromptSess = sess.ID
+			s.swePromptFocus = 0
+			// Move cursor to the stopped task so the prompt shows in
+			// context.
+			for i, t := range s.tasks {
+				if t.ID == sess.TodayTaskID {
+					s.tbl.SetCursor(i)
+					break
+				}
+			}
+			s.detailScroll.Reset()
+			s.syncButtons()
+		}
 		return
 	}
 	task, terr := runtime.GetTodayTask(ctx, s.app.DB, sess.TodayTaskID)
@@ -369,8 +430,61 @@ func (s *TodayScreen) stopActive() {
 	s.app.refreshActiveIndicator()
 }
 
+// confirmSWEPrompt handles the YES/NO answer: YES marks COMPLETE
+// (read-only, session data preserved), NO keeps TODO (session preserved,
+// restartable).
+func (s *TodayScreen) confirmSWEPrompt(yes bool) {
+	if !s.swePromptActive {
+		return
+	}
+	taskID, sessID := s.swePromptTask, s.swePromptSess
+	s.swePromptActive = false
+	if !yes {
+		s.notice = "Kept as TODO · session saved"
+		s.syncButtons()
+		return
+	}
+	ctx := context.Background()
+	if _, err := engine.CompleteSWETask(ctx, s.app.DB, taskID, sessID, s.now()); err != nil {
+		s.err = "data error: " + err.Error()
+		s.Reload()
+		return
+	}
+	s.notice = ""
+	s.Reload()
+	s.app.refreshActiveIndicator()
+}
+
 func (s *TodayScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
+		// SWE explicit prompt owns keys while active: j/k/h/l moves
+		// between YES/NO, Enter confirms, Esc backs out (keeps TODO).
+		// The viewport follows focus; global s/x never fire here.
+		if s.swePromptActive {
+			switch k.String() {
+			case "j", "down", "l", "right":
+				s.swePromptFocus = 1
+				s.detailScroll.EnsureVisible(s.swePromptLine(), len(strings.Split(s.detailViewWH(36, 999), "\n")), s.detailViewportH())
+				return nil
+			case "k", "up", "h", "left":
+				s.swePromptFocus = 0
+				s.detailScroll.EnsureVisible(s.swePromptLine(), len(strings.Split(s.detailViewWH(36, 999), "\n")), s.detailViewportH())
+				return nil
+			case "enter", " ":
+				s.confirmSWEPrompt(s.swePromptFocus == 0)
+				return nil
+			case "y", "Y":
+				s.confirmSWEPrompt(true)
+				return nil
+			case "n", "N":
+				s.confirmSWEPrompt(false)
+				return nil
+			case "esc", "q":
+				s.confirmSWEPrompt(false)
+				return nil
+			}
+			return nil
+		}
 		// While the in-place result form owns the right panel, the form owns
 		// the keys: text fields take every keystroke (j/k/q/s/x type there);
 		// j/k on non-text widgets moves between fields like ↓/↑; Enter
@@ -473,10 +587,7 @@ func (s *TodayScreen) resultViewportH() int {
 	if bodyH < 10 {
 		bodyH = 10
 	}
-	activeH := bodyH/2 - 1
-	if activeH < 6 {
-		activeH = bodyH / 2
-	}
+	activeH, _ := s.todayHeights(bodyH)
 	bottomH := bodyH - activeH
 	innerH := bottomH - 4
 	if innerH < 3 {
@@ -488,7 +599,34 @@ func (s *TodayScreen) resultViewportH() int {
 // detailViewportH mirrors rightPanelFixed geometry for scrolling.
 func (s *TodayScreen) detailViewportH() int { return s.resultViewportH() }
 
+// todayHeights splits the body into ACTIVE (top) and detail (larger,
+// bottom). ACTIVE is ~44% (capped 7-12) so SELECTED TASK keeps the larger
+// share. Tiny screens fall back to the old 50/50 to avoid crushing either
+// pane.
+func (s *TodayScreen) todayHeights(bodyH int) (activeH, bottomH int) {
+	if bodyH < 16 {
+		activeH = bodyH/2 - 1
+		if activeH < 6 {
+			activeH = bodyH / 2
+		}
+		return activeH, bodyH - activeH
+	}
+	activeH = bodyH * 44 / 100
+	if activeH < 7 {
+		activeH = 7
+	}
+	if activeH > 12 {
+		activeH = 12
+	}
+	return activeH, bodyH - activeH
+}
+
 func (s *TodayScreen) pressEnter() tea.Cmd {
+	// SWE prompt confirms via Enter regardless of zone.
+	if s.swePromptActive {
+		s.confirmSWEPrompt(s.swePromptFocus == 0)
+		return nil
+	}
 	switch s.zone {
 	case tzActive:
 		s.stopActive()
@@ -514,8 +652,9 @@ func (s *TodayScreen) pressEnter() tea.Cmd {
 }
 
 // View is the explicit three-part bento: LEFT tasks | RIGHT active/detail.
-// Bounds come from the shell main viewport: LEFT ~58%, RIGHT ~42%, right
-// split ~50/50 vertically. Panels are height-clipped to the viewport.
+// Bounds come from the shell main viewport: LEFT ~58%, RIGHT ~42%. The
+// right column is an open-book split: compact ACTIVE SESSION on top,
+// larger SELECTED TASK below. Panels are height-clipped to the viewport.
 // No metadata/shortcut text lives in main content; that belongs in footer.
 func (s *TodayScreen) View() string {
 	w, h := s.app.contentViewport()
@@ -531,14 +670,9 @@ func (s *TodayScreen) View() string {
 	s.tbl.SetSize(leftW-4, bodyH-4)
 	s.tbl.Focus = s.zone == tzTasks
 
-	// Right column: TOP active session, BOTTOM detail/result, ~50/50.
-	// Bottom gets one extra line so bundled START buttons stay visible.
-	activeH := bodyH/2 - 1
-	if activeH < 6 {
-		activeH = bodyH / 2
-	}
-	bottomH := bodyH - activeH
-	left := PanelFixed("TODAY TASKS", s.tbl.View(), leftW, bodyH, s.zone == tzTasks)
+	// Right column: compact ACTIVE on top, larger detail below.
+	activeH, bottomH := s.todayHeights(bodyH)
+	left := PanelFixed("TODAY'S TASKS", s.tbl.View(), leftW, bodyH, s.zone == tzTasks)
 	activePanel := PanelFixed("ACTIVE SESSION", s.activeViewFor(rightW, activeH-4), rightW, activeH, s.zone == tzActive)
 	rightBottom := s.rightPanelFixed(rightW, bottomH)
 	rightCol := lipgloss.JoinVertical(lipgloss.Left, activePanel, rightBottom)
@@ -604,25 +738,33 @@ func (s *TodayScreen) activeViewWH(w, maxLines int) string {
 	frame := int(el.Seconds())
 	var sb strings.Builder
 	// Compact mode for short viewports: timer + progress + STOP only.
-	if maxLines < 8 {
+	if maxLines < 6 {
 		sb.WriteString(thScreenTitle.Render(FormatHMS(el)) + "  " + thMeta.Render(TruncateToWidth(s.active.TitleSnapshot, inner-10)) + "\n")
 		sb.WriteString(SessionProgressBar{Ratio: ratio, Width: barW, Frame: frame, ShowPct: true}.View() + "\n")
 		sb.WriteString(s.stopBtn.CompactView())
 		return sb.String()
 	}
-	sb.WriteString(DomainBadge(string(s.active.Domain)) + "  " + thMeta.Render(string(s.active.Kind)) + "\n")
+	// Compact hierarchy: TRACK · TYPE, title, timer, progress, planned, STOP.
+	// No internal dividers: breathing room comes from the panel, not empty rows.
+	sb.WriteString(DomainBadge(string(s.active.Domain)) + "  " + thMeta.Render(activeWorkType(s.active)) + "\n")
 	sb.WriteString(thPrimary.Render(TruncateToWidth(s.active.TitleSnapshot, inner)) + "\n")
-	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(thScreenTitle.Render(FormatHMS(el)) + "\n")
 	sb.WriteString(SessionProgressBar{Ratio: ratio, Width: barW, Frame: frame, ShowPct: true}.View() + "\n")
-	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(MetaRow("Planned", FormatDurationLong(s.active.PlannedSeconds), 8) + "\n")
-	if maxLines < 10 {
-		sb.WriteString(s.stopBtn.CompactView())
-	} else {
-		sb.WriteString(s.stopBtn.View())
-	}
+	sb.WriteString(s.stopBtn.CompactView())
 	return sb.String()
+}
+
+// activeWorkType maps a session kind to LECTURE/PRACTICE for the compact
+// header. Legacy DSA/SWE kinds are practice-like work.
+func activeWorkType(sess *db.Session) string {
+	if sess == nil {
+		return "PRACTICE"
+	}
+	if sess.Kind == db.SessionKindLecture {
+		return "LECTURE"
+	}
+	return "PRACTICE"
 }
 
 func (s *TodayScreen) detailViewForTest() string { return s.detailViewW(36) }
@@ -639,56 +781,92 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 		return thMeta.Render("No tasks.")
 	}
 	t := s.tasks[s.tbl.CursorPos()]
-	// Completed tasks are viewable but never startable: read-only evidence,
-	// no Start action of any kind.
+	_, workType, _ := TaskColumns(t, b)
+	if workType == "—" || workType == "" {
+		workType = workTypeForTask(t)
+	}
+	header := DomainBadge(string(t.Domain)) + "  " + thMeta.Render(workType) + "  " + StatusPill(st)
+	// Completed tasks are viewable but never startable: single COMPLETE
+	// header, metrics, READ-ONLY note. No Start action of any kind.
 	if st == TaskCompleted {
 		var sb strings.Builder
-		sb.WriteString(DomainBadge(string(t.Domain)) + "  " + thMeta.Render(string(t.Kind)) + "  " + StatusPill(st) + "\n")
-		sb.WriteString(thSuccess.Render("✓ DONE — READ-ONLY") + "\n")
-		sb.WriteString(div + "\n")
+		sb.WriteString(header + "\n")
 		sb.WriteString(s.completedEvidenceView(inner, t, b) + "\n")
 		sb.WriteString(div + "\n")
+		sb.WriteString(thHelp.Render("READ-ONLY · Completed tasks cannot be started again."))
 		if s.notice != "" {
-			sb.WriteString(thMeta.Render(s.notice) + "\n")
-		} else {
-			sb.WriteString(thHelp.Render("Enter views · Completed tasks cannot be started again.") + "\n")
+			sb.WriteString("\n" + thMeta.Render(s.notice))
 		}
+		return strings.TrimRight(sb.String(), "\n")
+	}
+	// SWE explicit prompt takes over the action row when active.
+	if s.swePromptActive && s.swePromptTask == t.ID {
+		var sb strings.Builder
+		sb.WriteString(header + "\n")
+		sb.WriteString(s.taskBodyView(inner, t, b) + "\n")
+		sb.WriteString(div + "\n")
+		sb.WriteString(s.taskMetricsView(inner, t, b) + "\n")
+		sb.WriteString(div + "\n")
+		sb.WriteString(thPrimary.Render("Did you complete this task?") + "\n")
+		sb.WriteString(s.swePromptView())
 		return strings.TrimRight(sb.String(), "\n")
 	}
 	var sb strings.Builder
 	// Compact mode for short viewports: preserve title + planned + action.
 	if maxLines < 8 {
-		sb.WriteString(DomainBadge(string(t.Domain)) + "  " + StatusPill(st) + "\n")
+		sb.WriteString(header + "\n")
 		sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
 		sb.WriteString(div + "\n")
 		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
 		sb.WriteString(s.startBtn.CompactView())
 		return strings.TrimRight(sb.String(), "\n")
 	}
-	sb.WriteString(DomainBadge(string(t.Domain)) + "  " + thMeta.Render(string(t.Kind)) + "  " + StatusPill(st) + "\n")
+	sb.WriteString(header + "\n")
+	sb.WriteString(s.taskBodyView(inner, t, b) + "\n")
+	sb.WriteString(div + "\n")
+	sb.WriteString(s.taskMetricsView(inner, t, b) + "\n")
+	sb.WriteString(div + "\n")
+	if maxLines < 13 {
+		sb.WriteString(s.startBtn.CompactView())
+	} else {
+		sb.WriteString(s.startBtn.View())
+		if s.startBtn.Disabled {
+			if s.active != nil {
+				sb.WriteString("\n" + thHelp.Render("Stop active session first."))
+			} else {
+				sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
+			}
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// taskBodyView renders the subject/topic/problem context for the selected
+// task (no status, no metrics, no actions). Used by both TODO/ACTIVE and
+// the SWE prompt so the prompt shows in context.
+func (s *TodayScreen) taskBodyView(inner int, t db.TodayTask, b Bundle) string {
+	var sb strings.Builder
 	switch {
 	case b.Lecture != nil:
 		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Lecture.Subject, inner))) + "\n")
 		sb.WriteString(SectionHeader("LECTURE") + "\n")
 		sb.WriteString(thPrimary.Render(TruncateToWidth(b.Lecture.Topic, inner)) + "\n")
 		if b.Lecture.Lecture != "" {
-			sb.WriteString(thMeta.Render(TruncateToWidth(b.Lecture.Lecture, inner)) + "\n")
+			sb.WriteString(thMeta.Render(TruncateToWidth(b.Lecture.Lecture, inner)))
+		} else {
+			sb.WriteString(thMeta.Render("—"))
 		}
 	case len(b.Practice) > 0:
-		subj := ""
-		if len(b.Practice) > 0 {
-			subj = b.Practice[0].Subject
-		}
+		subj := b.Practice[0].Subject
 		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(subj, inner))) + "\n")
 		sb.WriteString(SectionHeader(fmt.Sprintf("TOPICS (%d)", len(b.Practice))) + "\n")
 		for i, p := range b.Practice {
-			sb.WriteString(bundleRow(i+1, p.Topic, inner) + "\n")
-			if i < len(b.Practice)-1 {
-				sb.WriteString(RowDivider(inner) + "\n")
+			if i > 0 {
+				sb.WriteString("\n" + RowDivider(inner) + "\n")
 			}
+			sb.WriteString(bundleRow(i+1, p.Topic, inner))
 		}
 	case len(b.DSA) > 0:
-		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
 		var repeats, news []DSAItem
 		for _, d := range b.DSA {
 			if d.Mode == db.DSAModeNew {
@@ -698,74 +876,122 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 			}
 		}
 		n := 0
+		first := true
 		if len(repeats) > 0 {
 			sb.WriteString(SectionHeader("REPEAT") + "\n")
 			for i, d := range repeats {
 				n++
-				sb.WriteString(bundleRow(n, d.Title, inner) + "\n")
+				if !first {
+					sb.WriteString("\n")
+				}
+				first = false
+				sb.WriteString(bundleRow(n, d.Title, inner))
 				if i < len(repeats)-1 || len(news) > 0 {
-					sb.WriteString(RowDivider(inner) + "\n")
+					sb.WriteString("\n" + RowDivider(inner))
 				}
 			}
 		}
 		if len(news) > 0 {
+			if !first {
+				sb.WriteString("\n")
+			}
 			sb.WriteString(SectionHeader("NEW") + "\n")
 			for i, d := range news {
 				n++
-				sb.WriteString(bundleRow(n, d.Title, inner) + "\n")
+				sb.WriteString(bundleRow(n, d.Title, inner))
 				if i < len(news)-1 {
-					sb.WriteString(RowDivider(inner) + "\n")
+					sb.WriteString("\n" + RowDivider(inner))
 				}
 			}
 		}
-		sb.WriteString(div + "\n")
-		if maxLines < 13 {
-			sb.WriteString(s.startBtn.CompactView())
-		} else {
-			sb.WriteString(s.startBtn.View())
-			if s.startBtn.Disabled {
-				sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
-			}
+		if n == 0 {
+			sb.WriteString(thMeta.Render("—"))
 		}
-		return strings.TrimRight(sb.String(), "\n")
 	case len(b.SWE) > 0:
-		sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
 		sb.WriteString(SectionHeader(TruncateToWidth(SWEDisplayName(b.SWE[0].Area), inner-2)) + "\n")
-		sb.WriteString(thPrimary.Render(TruncateToWidth(SWEDisplayName(b.SWE[0].Area)+" · "+FormatDurationLong(t.PlannedSeconds), inner)) + "\n")
-		sb.WriteString(div + "\n")
-		if maxLines < 13 {
-			sb.WriteString(s.startBtn.CompactView())
-		} else {
-			sb.WriteString(s.startBtn.View())
-			if s.startBtn.Disabled {
-				sb.WriteString("\n" + thHelp.Render("Start unavailable while a session runs."))
-			}
-		}
-		return strings.TrimRight(sb.String(), "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(SWEDisplayName(b.SWE[0].Area)+" · "+FormatDurationLong(t.PlannedSeconds), inner)))
 	default:
-		sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)) + "\n")
+		sb.WriteString(thPrimary.Render(TruncateToWidth(t.Title, inner)))
 	}
-	sb.WriteString(div + "\n")
-	sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
-	if maxLines < 13 {
-		sb.WriteString(s.startBtn.CompactView())
-	} else {
-		sb.WriteString(s.startBtn.View())
-		if s.startBtn.Disabled {
-			sb.WriteString("\n" + thHelp.Render("Stop active session first."))
-		}
-	}
-	return strings.TrimRight(sb.String(), "\n")
+	return sb.String()
 }
 
-// completedEvidenceView renders persisted evidence for a DONE task as
-// human-readable read-only rows (no inputs, no SAVE, no Start). Durations
-// always carry units; raw storage integers are never exposed.
-// Render-pure: it reads only the preloaded s.evidence cache (populated in
-// Reload) and never performs database/runtime/catalog/engine queries.
+// taskMetricsView renders Planned/Sessions/Actual plus type-specific
+// evidence-derived metrics from the preloaded cache (no DB access).
+func (s *TodayScreen) taskMetricsView(inner int, t db.TodayTask, b Bundle) string {
+	var sb strings.Builder
+	sessions := s.taskSessions[t.ID]
+	actual := s.taskActual[t.ID]
+	actualStr := "—"
+	if actual > 0 {
+		actualStr = FormatDurationLong(actual)
+	} else if sessions > 0 {
+		actualStr = FormatDurationLong(0)
+	}
+	sb.WriteString(MetaRow("Planned", FormatDurationLong(t.PlannedSeconds), 8) + "\n")
+	sb.WriteString(MetaRow("Sessions", fmt.Sprint(sessions), 8) + "\n")
+	sb.WriteString(MetaRow("Actual", actualStr, 8))
+	// Practice adds attempted/correct/accuracy from recorded evidence.
+	if len(b.Practice) > 0 {
+		ev := s.evidence[t.ID]
+		att, corr := 0, 0
+		if ev != nil {
+			for _, r := range ev.practiceByTopic {
+				att += r.Attempted
+				corr += r.Correct
+			}
+		}
+		if att > 0 || len(ev.practiceByTopic) > 0 {
+			sb.WriteString("\n" + MetaRow("Attempted", fmt.Sprint(att), 8))
+			sb.WriteString("\n" + MetaRow("Correct", fmt.Sprint(corr), 8))
+			sb.WriteString("\n" + MetaRow("Accuracy", FormatPracticeAccuracy(att, corr), 8))
+		}
+	}
+	return sb.String()
+}
+
+// swePromptView renders the YES/NO selector for explicit SWE completion.
+func (s *TodayScreen) swePromptView() string {
+	yes := Button{Label: "YES", Focused: s.swePromptFocus == 0}
+	no := Button{Label: "NO", Focused: s.swePromptFocus == 1}
+	// Compact single-line selector keeps the prompt readable in the
+	// recovered detail space.
+	return yes.CompactView() + "  " + no.CompactView() + "  " + thHelp.Render("j/k move · Enter confirm")
+}
+
+// completedEvidenceView renders persisted evidence for a COMPLETE task as
+// human-readable read-only rows (no inputs, no SAVE, no Start) plus compact
+// metrics. Durations always carry units; raw storage integers are never
+// exposed. Completion is communicated once in the header (✓ COMPLETE);
+// this body never repeats DONE. Render-pure: it reads only the preloaded
+// caches (populated in Reload) and never performs DB queries.
 func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bundle) string {
 	var sb strings.Builder
 	ev := s.evidence[task.ID]
+	sessions := s.taskSessions[task.ID]
+	actual := s.taskActual[task.ID]
+	actualStr := FormatDurationLong(actual)
+	if actual <= 0 {
+		actualStr = FormatDurationLong(task.PlannedSeconds)
+		if _, ok := s.sweActual[task.ID]; ok {
+			// SWE with no time still shows planned as fallback (persisted).
+		}
+	}
+	completedStr := "—"
+	if ts, ok := s.taskCompletedAt[task.ID]; ok {
+		completedStr = FormatDate(ts)
+	}
+	metrics := func(extra ...string) string {
+		var mb strings.Builder
+		mb.WriteString(MetaRow("Planned", FormatDurationLong(task.PlannedSeconds), 10) + "\n")
+		mb.WriteString(MetaRow("Actual", actualStr, 10) + "\n")
+		mb.WriteString(MetaRow("Sessions", fmt.Sprint(sessions), 10))
+		for _, e := range extra {
+			mb.WriteString("\n" + e)
+		}
+		mb.WriteString("\n" + MetaRow("Completed", completedStr, 10))
+		return mb.String()
+	}
 	switch {
 	case b.Lecture != nil:
 		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Lecture.Subject, inner))) + "\n")
@@ -774,17 +1000,19 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 		if b.Lecture.Lecture != "" {
 			sb.WriteString(thMeta.Render(TruncateToWidth(b.Lecture.Lecture, inner)) + "\n")
 		}
-		if ev != nil && ev.lectureComp != nil {
-			sb.WriteString(MetaRow("Completed", FormatDate(ev.lectureComp.CompletedAt), 10))
-		} else {
-			sb.WriteString(thSuccess.Render("✓ Completed"))
-		}
+		sb.WriteString(RowDivider(inner) + "\n")
+		sb.WriteString(metrics())
 	case len(b.Practice) > 0:
 		sb.WriteString(thScreenTitle.Render(strings.ToUpper(TruncateToWidth(b.Practice[0].Subject, inner))) + "\n")
 		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d TOPICS", len(b.Practice))) + "\n")
 		byTopic := map[string]db.GovPracticeRecord{}
 		if ev != nil {
 			byTopic = ev.practiceByTopic
+		}
+		att, corr := 0, 0
+		for _, r := range byTopic {
+			att += r.Attempted
+			corr += r.Correct
 		}
 		for i, p := range b.Practice {
 			if i > 0 {
@@ -809,6 +1037,13 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 				sb.WriteString(thMeta.Render("—"))
 			}
 		}
+		sb.WriteString("\n" + RowDivider(inner) + "\n")
+		acc := FormatPracticeAccuracy(att, corr)
+		sb.WriteString(metrics(
+			MetaRow("Attempted", fmt.Sprint(att), 10),
+			MetaRow("Correct", fmt.Sprint(corr), 10),
+			MetaRow("Accuracy", acc, 10),
+		))
 	case len(b.DSA) > 0:
 		sb.WriteString(SectionHeader(fmt.Sprintf("EVIDENCE · %d PROBLEMS", len(b.DSA))) + "\n")
 		latest := map[string]db.DSAAttempt{}
@@ -833,17 +1068,17 @@ func (s *TodayScreen) completedEvidenceView(inner int, task db.TodayTask, b Bund
 				sb.WriteString(thMeta.Render("—"))
 			}
 		}
+		sb.WriteString("\n" + RowDivider(inner) + "\n")
+		sb.WriteString(metrics())
 	case len(b.SWE) > 0:
-		sb.WriteString(SectionHeader("SWE BLOCK") + "\n")
+		sb.WriteString(SectionHeader(TruncateToWidth(SWEDisplayName(b.SWE[0].Area), inner)) + "\n")
 		sb.WriteString(thPrimary.Render(TruncateToWidth(SWEDisplayName(b.SWE[0].Area), inner-2)) + "\n")
-		sb.WriteString(MetaRow("Planned", FormatDurationLong(task.PlannedSeconds), 12) + "\n")
-		if actual, ok := s.sweActual[task.ID]; ok && actual > 0 {
-			sb.WriteString(MetaRow("Actual", FormatDurationLong(actual), 12))
-		} else {
-			sb.WriteString(MetaRow("Actual", FormatDurationLong(task.PlannedSeconds), 12))
-		}
+		sb.WriteString(RowDivider(inner) + "\n")
+		sb.WriteString(metrics())
 	default:
-		sb.WriteString(thPrimary.Render(TruncateToWidth(task.Title, inner)))
+		sb.WriteString(thPrimary.Render(TruncateToWidth(task.Title, inner)) + "\n")
+		sb.WriteString(RowDivider(inner) + "\n")
+		sb.WriteString(metrics())
 	}
 	return sb.String()
 }
@@ -893,6 +1128,10 @@ func bundleRow(n int, title string, width int) string {
 
 // onBack steps the right-bottom panel from result back to detail.
 func (s *TodayScreen) onBack() bool {
+	if s.swePromptActive {
+		s.confirmSWEPrompt(false)
+		return true
+	}
 	if s.right == "result" {
 		s.right = "detail"
 		s.zone = tzTasks
@@ -906,4 +1145,14 @@ func (s *TodayScreen) onBack() bool {
 		return true
 	}
 	return false
+}
+
+// swePromptLine returns the content line of the YES/NO row for viewport
+// follow (bottom of the detail body, so the prompt stays visible).
+func (s *TodayScreen) swePromptLine() int {
+	total := len(strings.Split(s.detailViewWH(36, 999), "\n"))
+	if total < 1 {
+		return 0
+	}
+	return total - 1
 }

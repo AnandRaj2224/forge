@@ -218,6 +218,28 @@ func (s *MocksScreen) detailViewportH() int {
 	return innerH
 }
 
+// mockInnerW returns the actual mock detail inner width (same geometry as View).
+func (s *MocksScreen) mockInnerW() int {
+	w, _ := s.app.contentViewport()
+	_, rw := TwoPaneLayout(w, mockBrowseLeftPct, 26, 40)
+	inner := rw - 6
+	if inner < 24 {
+		inner = 24
+	}
+	return inner
+}
+
+// createInnerW returns the actual create-form inner width.
+func (s *MocksScreen) createInnerW() int {
+	w, _ := s.app.contentViewport()
+	_, rw := TwoPaneLayout(w, 32, 24, 40)
+	inner := rw - 6
+	if inner < 18 {
+		inner = 18
+	}
+	return inner
+}
+
 // followSection keeps the selected weak-topic section visible: top on the
 // first section, bottom on the last, proportional in between.
 func (s *MocksScreen) followSection() {
@@ -225,7 +247,7 @@ func (s *MocksScreen) followSection() {
 	if n <= 1 {
 		return
 	}
-	total := len(strings.Split(s.mockBody(40), "\n"))
+	total := len(strings.Split(s.mockBody(s.mockInnerW()), "\n"))
 	height := s.detailViewportH()
 	maxOff := total - height
 	if maxOff <= 0 {
@@ -454,7 +476,7 @@ func (s *MocksScreen) createFocusLine() int {
 // followCreateFocus keeps the focused create field visible: exam on top,
 // SAVE on bottom, exact structured line otherwise.
 func (s *MocksScreen) followCreateFocus() {
-	total := len(strings.Split(s.createRightBody(40), "\n"))
+	total := len(strings.Split(s.createRightBody(s.createInnerW()), "\n"))
 	_, h := s.app.contentViewport()
 	bodyH := h
 	if bodyH < 8 {

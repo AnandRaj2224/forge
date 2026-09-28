@@ -116,43 +116,43 @@ func TestCompletedTaskCannotStart(t *testing.T) {
 	if ok, _ := runtime.CanStartTodayTask(app.ctx(), app.DB, "task1"); ok {
 		t.Fatal("CanStart must be false for completed tasks")
 	}
-	// UI: cursor on DONE, no Start action, read-only result.
+	// UI: cursor on COMPLETE, no Start action, read-only result.
 	app.today.tbl.SetCursor(0)
 	app.today.syncButtons()
 	if !app.today.startBtn.Disabled {
-		t.Fatal("Start must be disabled for DONE")
+		t.Fatal("Start must be disabled for COMPLETE")
 	}
 	detail := stripANSIForTest(app.today.detailView())
-	if !strings.Contains(detail, "READ-ONLY") || !strings.Contains(detail, "DONE") {
-		t.Fatalf("DONE detail must be read-only:\n%s", detail)
+	if !strings.Contains(detail, "READ-ONLY") || !strings.Contains(detail, "COMPLETE") {
+		t.Fatalf("COMPLETE detail must be read-only:\n%s", detail)
 	}
 	if strings.Contains(detail, "START SESSION") {
-		t.Fatalf("DONE detail must not show Start:\n%s", detail)
+		t.Fatalf("COMPLETE detail must not show Start:\n%s", detail)
 	}
 	foot := stripANSIForTest(app.footerView(app.width))
-	// Static legend always carries the full command set, even for DONE.
+	// Static legend always carries the full command set, even for COMPLETE.
 	for _, want := range []string{"N", "NEW", "S", "START", "X", "STOP", "VIEW"} {
 		if !strings.Contains(foot, want) {
 			t.Fatalf("static footer must carry legend %q: %q", want, foot)
 		}
 	}
-	// s is rejected safely: no new session, task stays DONE, no red error —
+	// s is rejected safely: no new session, task stays COMPLETE, no red error —
 	// just a small neutral contextual note.
 	app.today.zone = tzTasks
 	app.today.right = "detail"
 	testSend(app, "s")
 	if _, err := runtime.GetActiveSession(app.ctx(), app.DB); err == nil {
-		t.Fatal("s on DONE must not create a session")
+		t.Fatal("s on COMPLETE must not create a session")
 	}
 	if app.err != "" {
-		t.Fatalf("DONE start must not raise a red error banner, got %q", app.err)
+		t.Fatalf("COMPLETE start must not raise a red error banner, got %q", app.err)
 	}
 	after := stripANSIForTest(app.today.detailView())
 	if !strings.Contains(after, "Completed · read-only") {
-		t.Fatalf("DONE start must show a neutral note, got:\n%s", after)
+		t.Fatalf("COMPLETE start must show a neutral note, got:\n%s", after)
 	}
 	if st := ComputeTaskStatus(app.ctx(), app.DB, "task1"); st != TaskCompleted {
-		t.Fatalf("task must stay DONE, got %s", st)
+		t.Fatalf("task must stay COMPLETE, got %s", st)
 	}
 	// Duplicate lecture completion is blocked below the UI as well.
 	if err := runtime.RecordLectureCompletion(app.ctx(), app.DB, db.GovLectureCompletion{LectureID: "lec-a", SessionID: "sess-x"}); err == nil {
@@ -160,7 +160,7 @@ func TestCompletedTaskCannotStart(t *testing.T) {
 	}
 }
 
-// Practice bundle: explicit Save, all-or-nothing, then read-only DONE.
+// Practice bundle: explicit Save, all-or-nothing, then read-only COMPLETE.
 func TestPracticeSaveBecomesReadOnlyDone(t *testing.T) {
 	app := newFlowApp(t)
 	app.width, app.height = 120, 36
@@ -195,17 +195,17 @@ func TestPracticeSaveBecomesReadOnlyDone(t *testing.T) {
 		t.Fatalf("valid Save failed: %s", app.today.result.err)
 	}
 	if st := ComputeTaskStatus(app.ctx(), app.DB, "task2"); st != TaskCompleted {
-		t.Fatalf("practice task must be DONE, got %s", st)
+		t.Fatalf("practice task must be COMPLETE, got %s", st)
 	}
 	n, _ = countRows(app, `SELECT COUNT(*) FROM gov_practice_records`)
 	if n != 2 {
 		t.Fatalf("expected atomic 2 rows, got %d", n)
 	}
-	// DONE result is read-only with human durations.
+	// COMPLETE result is read-only with human durations.
 	app.today.tbl.SetCursor(1)
 	detail := stripANSIForTest(app.today.detailView())
 	if !strings.Contains(detail, "READ-ONLY") {
-		t.Fatalf("practice DONE must be read-only:\n%s", detail)
+		t.Fatalf("practice COMPLETE must be read-only:\n%s", detail)
 	}
 	if strings.Contains(detail, "1380") || strings.Contains(detail, "SAVE") {
 		t.Fatalf("read-only must not expose raw seconds or Save:\n%s", detail)

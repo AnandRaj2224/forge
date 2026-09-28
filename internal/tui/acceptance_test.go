@@ -72,7 +72,7 @@ func acceptApp(t *testing.T) *App {
 	return app
 }
 
-// A. COMPLETED TASK: select DONE, view result, press s: nothing starts,
+// A. COMPLETED TASK: select COMPLETE, view result, press s: nothing starts,
 // no red error, task stays read-only.
 func TestAcceptCompletedTask(t *testing.T) {
 	app := acceptApp(t)
@@ -87,18 +87,18 @@ func TestAcceptCompletedTask(t *testing.T) {
 	app.today.tbl.SetCursor(0)
 	app.today.syncButtons()
 	if !app.today.startBtn.Disabled {
-		t.Fatal("Start must be disabled for DONE")
+		t.Fatal("Start must be disabled for COMPLETE")
 	}
 	testSend(app, "s")
 	if _, err := runtime.GetActiveSession(app.ctx(), app.DB); err == nil {
-		t.Fatal("s on DONE must not create a session")
+		t.Fatal("s on COMPLETE must not create a session")
 	}
 	if app.err != "" {
 		t.Fatalf("no red error allowed, got %q", app.err)
 	}
 	detail := stripANSIForTest(app.today.detailView())
 	if !strings.Contains(detail, "READ-ONLY") {
-		t.Fatalf("DONE must be read-only:\n%s", detail)
+		t.Fatalf("COMPLETE must be read-only:\n%s", detail)
 	}
 	foot := stripANSIForTest(app.footerView(app.width))
 	if strings.Contains(foot, "Start") {
@@ -258,8 +258,8 @@ func TestAcceptDSAEvidence(t *testing.T) {
 	app.reloadCurrent()
 	app.today.tbl.SetCursor(2)
 	detail := stripANSIForTest(app.today.detailView())
-	if !strings.Contains(detail, "DONE") || !strings.Contains(detail, "READ-ONLY") {
-		t.Fatalf("DSA must be DONE read-only:\n%s", detail)
+	if !strings.Contains(detail, "COMPLETE") || !strings.Contains(detail, "READ-ONLY") {
+		t.Fatalf("DSA must be COMPLETE read-only:\n%s", detail)
 	}
 	for _, want := range []string{"5m", "2m 30s", "9m"} {
 		if !strings.Contains(detail, want) {

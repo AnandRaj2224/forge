@@ -341,23 +341,41 @@ func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 			return ev, nil
 		}
 	}
-	// Time-allocation semantics: total SWE time spent >= PlannedSeconds
-	// means COMPLETED. Actual time comes from generic sessions (stopped
-	// durations plus live active elapsed); no SWE execution rows exist.
-	// Stopping is sufficient: no evidence form, no result form.
+	// Explicit completion semantics: planned time is NOT completion. The
+	// session continues beyond planned duration; only an explicit YES (a
+	// swe_task_completions row) marks COMPLETE. Time is tracked for
+	// metrics but never auto-completes. Historical evaluation respects the
+	// completion timestamp (strictly before cutoff).
 	ev.Total = 1
-	total := sweTotalSeconds(sessions, cutoff)
-	planned := int64(task.PlannedSeconds)
-	if planned > 0 && total >= planned {
-		ev.Done = 1
-		ev.Completed = []string{string(st.AreaID)}
-		ev.State = StateCompleted
+	comp, err := runtime.GetSWECompletion(ctx, q, task.ID)
+	if err != nil {
+		if isNotFoundErr(err) {
+			ev.Missing = []string{string(st.AreaID)}
+			if ev.Active == nil {
+				ev.State = StateTodo
+			} else {
+				ev.State = StateActive
+			}
+			return ev, nil
+		}
+		return TaskEvaluation{}, fmt.Errorf("engine: swe completion lookup: %w", err)
+	}
+	if !beforeCutoff(comp.CompletedAt.Unix(), cutoff) {
+		ev.Missing = []string{string(st.AreaID)}
+		if ev.Active == nil {
+			ev.State = StateTodo
+		} else {
+			ev.State = StateActive
+		}
 		return ev, nil
 	}
-	ev.Missing = []string{string(st.AreaID)}
+	ev.Done = 1
+	ev.Completed = []string{string(st.AreaID)}
 	if ev.Active == nil {
-		ev.State = StateTodo
+		ev.State = StateCompleted
 	} else {
+		// Active session on an explicitly completed task still reports
+		// ACTIVE while running (completion wins once stopped).
 		ev.State = StateActive
 	}
 	return ev, nil

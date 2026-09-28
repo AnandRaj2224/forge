@@ -346,18 +346,14 @@ func (s *ResultForm) focusLine() int {
 
 // ensureFocusVisible scrolls vp just enough to keep the focused field
 // visible. The focused item/field is never hidden below the viewport.
+// Uses the shared ScrollViewport contract so all forms follow focus at the
+// edge (application-level fix).
 func (s *ResultForm) ensureFocusVisible(vp *ScrollViewport, height int) {
 	if vp == nil {
 		return
 	}
 	total := len(strings.Split(s.ViewFor(30), "\n"))
-	fl := s.focusLine()
-	if fl < vp.Offset {
-		vp.Offset = fl
-	} else if fl > vp.Offset+height-1 {
-		vp.Offset = fl - height + 1
-	}
-	vp.Clamp(total, height)
+	vp.EnsureVisible(s.focusLine(), total, height)
 }
 
 // HandleKey processes a key when the result panel owns focus.

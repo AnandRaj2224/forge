@@ -435,7 +435,11 @@ func (n *Navigator) CursorUp() { n.rows.CursorUp() }
 func (n Navigator) SelectedID() string { return n.rows.SelectedID() }
 
 // View renders rows with dividers.
-func (n Navigator) View() string { return n.rows.View() }
+func (n *Navigator) View() string { return n.rows.View() }
+
+// EnsureVisible keeps the focused row inside the viewport (shared
+// application-level scrolling fix).
+func (n *Navigator) EnsureVisible() { n.rows.EnsureVisible() }
 
 // SetFocused toggles focus treatment.
 func (n *Navigator) SetFocused(f bool) { n.rows.Focused = f }

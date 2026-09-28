@@ -200,7 +200,7 @@ func (s *DSAScreen) Update(msg tea.Msg) tea.Cmd {
 					if innerH < 4 {
 						innerH = 4
 					}
-					total := len(strings.Split(s.problemBody(40), "\n"))
+					total := len(strings.Split(s.problemBody(s.problemInnerW()), "\n"))
 					if down {
 						s.detailScroll.ScrollDown(total, innerH)
 					} else {
@@ -338,4 +338,15 @@ func (s *DSAScreen) problemBody(inner int) string {
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(thHelp.Render("Work starts from Today only."))
 	return sb.String()
+}
+
+// problemInnerW returns the actual problem inner width (same geometry as View).
+func (s *DSAScreen) problemInnerW() int {
+	w, _ := s.app.contentViewport()
+	_, rw := TwoPaneLayout(w, 32, 24, 40)
+	inner := rw - 6
+	if inner < 24 {
+		inner = 24
+	}
+	return inner
 }

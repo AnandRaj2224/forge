@@ -294,7 +294,7 @@ func TestGlobalFooterAndColumns(t *testing.T) {
 	app.width, app.height = 170, 44
 	app.goTab(TabToday)
 	v := stripANSIForTest(app.View().Content)
-	for _, want := range []string{"DOMAIN", "AREA", "TYPE", "TASK", "DUR", "STATUS", "Lecture", "Practice", "Quant", "Number System"} {
+	for _, want := range []string{"TRACK", "AREA", "TYPE", "TASK", "DURATION", "STATUS", "LECTURE", "PRACTICE", "Quant", "Number System"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("today missing %q", want)
 		}

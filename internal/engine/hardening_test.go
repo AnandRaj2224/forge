@@ -470,6 +470,7 @@ func TestSWEStaysTodoWithoutEvidenceForm(t *testing.T) {
 		t.Fatalf("partial SWE must stay TODO, got %s", ev.State)
 	}
 	// Second session reaches the target cumulatively: 1800 + 1800 = 3600.
+	// Explicit completion: time never completes, so still TODO.
 	sess2, err := engine.StartTodayTask(ctx, d, "swep", now.Add(2*time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -479,8 +480,8 @@ func TestSWEStaysTodoWithoutEvidenceForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.State != engine.StateCompleted {
-		t.Fatalf("cumulative SWE reaching target must be COMPLETED, got %s", ev.State)
+	if ev.State != engine.StateTodo {
+		t.Fatalf("cumulative SWE without YES must stay TODO, got %s", ev.State)
 	}
 	_ = sess2
 }

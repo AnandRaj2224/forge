@@ -64,6 +64,7 @@ func (r *RowList) SetWidth(w int) {
 		w = 10
 	}
 	r.Width = w
+	r.ensureVisible()
 }
 
 // SetHeight sets the viewport line budget (physical lines).
@@ -92,9 +93,11 @@ func (r *RowList) FitHeight(maxLines int) {
 	}
 	if total < maxLines {
 		r.Height = total
+		r.ensureVisible()
 		return
 	}
 	r.Height = maxLines
+	r.ensureVisible()
 }
 
 // Select moves the cursor to i.
@@ -183,6 +186,12 @@ func (r *RowList) ensureVisible() {
 	}
 }
 
+// EnsureVisible is the shared scrolling contract: after any size change or
+// cursor move, the focused row stays inside the visible viewport. Screens
+// call it after FitHeight/SetWidth and before View so focus never sits
+// outside the viewport (application-level fix, not per-panel).
+func (r *RowList) EnsureVisible() { r.ensureVisible() }
+
 // RowHeight returns the physical line count of logical row i (wrapped
 // title/meta lines, dividers excluded). Narrow widths never panic and never
 // truncate: heights grow as content wraps.
@@ -229,10 +238,13 @@ func (r RowList) TotalHeight() int {
 // while the budget allows, tall rows expand, and the cursor row is always
 // included even when oversize. Selection highlight covers every physical
 // line of the selected row.
-func (r RowList) View() string {
+func (r *RowList) View() string {
 	if len(r.Items) == 0 {
 		return EmptyState("Nothing here yet.")
 	}
+	// Shared scrolling fix: re-sync before rendering so a resize or width
+	// change cannot leave focus outside the viewport.
+	r.ensureVisible()
 	h := r.Height
 	if h < 1 {
 		h = 1
@@ -361,6 +373,25 @@ func (t rowTheme) domain(domain, text string) rowCell {
 	s := lipgloss.NewStyle().Bold(true).Foreground(DomainFg(domain))
 	if t.bg != nil {
 		s = s.Background(t.bg)
+	}
+	return rowCell{text: text, style: s}
+}
+
+// statusCellFor styles the STATUS cell with restrained semantic color over
+// the row background: TODO muted, ACTIVE accent, COMPLETE green. Selection
+// background is preserved; only the status text carries semantics.
+func statusCellFor(th rowTheme, st TaskStatus, text string) rowCell {
+	var s lipgloss.Style
+	switch st {
+	case TaskActive:
+		s = lipgloss.NewStyle().Bold(true).Foreground(cActive)
+	case TaskCompleted:
+		s = lipgloss.NewStyle().Bold(true).Foreground(cSuccess)
+	default:
+		s = lipgloss.NewStyle().Foreground(cFgTertiary)
+	}
+	if th.bg != nil {
+		s = s.Background(th.bg)
 	}
 	return rowCell{text: text, style: s}
 }
@@ -658,7 +689,7 @@ func Footer(line string, w int) string {
 }
 
 // TodayTaskRow is one Today task table row as a reusable component:
-// # | DOMAIN | AREA | TYPE | TASK | DUR | STATUS with the global row
+// # | TRACK | AREA | TYPE | TASK | DURATION | STATUS with the global row
 // treatment. Single component, full-width tint in every state.
 type TodayTaskRow struct {
 	Num      int
@@ -697,7 +728,7 @@ func (r TodayTaskRow) View() string {
 	case TaskActive:
 		stTxt = "ACTIVE"
 	case TaskCompleted:
-		stTxt = "DONE"
+		stTxt = "COMPLETE"
 	}
 	// Wrap every potentially-long cell; height is the tallest.
 	numLines := wrapCell(numBase, numW)
@@ -740,6 +771,7 @@ func (r TodayTaskRow) View() string {
 		if r.Domain == "GOV" || r.Domain == "DSA" || r.Domain == "SWE" {
 			domCell = th.domain(r.Domain, dl)
 		}
+		statusCell := statusCellFor(th, r.Status, sl)
 		out := paintCells(
 			rowCell{lead, th.edge},
 			rowCell{nl, th.main},
@@ -754,7 +786,7 @@ func (r TodayTaskRow) View() string {
 			rowCell{"  ", th.gap},
 			rowCell{du, th.main},
 			rowCell{"  ", th.gap},
-			rowCell{sl, th.main},
+			statusCell,
 		)
 		lines = append(lines, out)
 	}
@@ -793,7 +825,7 @@ func (r TodayTaskRow) LineCount() int {
 	case TaskActive:
 		stTxt = "ACTIVE"
 	case TaskCompleted:
-		stTxt = "DONE"
+		stTxt = "COMPLETE"
 	}
 	if m := len(wrapCell(stTxt, stW)); m > n {
 		n = m
@@ -857,7 +889,7 @@ func wrapCell(s string, w int) []string {
 // ---- Today task table: real aligned columns + thin dividers ----
 
 // TodayRowView renders one Today task as aligned columns:
-// # | DOMAIN | TASK | DUR | STATUS with badges.
+// # | TRACK | TASK | DURATION | STATUS with badges.
 type TodayTaskTable struct {
 	Tasks   []db.TodayTask
 	Status  []TaskStatus
@@ -898,6 +930,7 @@ func (t *TodayTaskTable) SetSize(w, lines int) {
 	}
 	t.Width = w
 	t.Lines = lines
+	t.ensureVisible()
 }
 
 // SetCursor moves selection.
@@ -954,7 +987,7 @@ func (t *TodayTaskTable) lineCost(i int) int {
 	if m := len(wrapCell(label, taskW)); m > n {
 		n = m
 	}
-	// Short fixed columns (NUM/DOMAIN/DUR/STATUS) stay single-line in
+	// Short fixed columns (NUM/TRACK/DURATION/STATUS) stay single-line in
 	// practice; include them for narrow-width safety (no panic, no clip).
 	if m := len(wrapCell(fmt.Sprint(i+1), numW)); m > n {
 		n = m
@@ -1008,8 +1041,20 @@ func (t *TodayTaskTable) ensureVisible() {
 	}
 }
 
+// EnsureVisible is the shared scrolling contract for the Today task list:
+// focus never sits outside the visible viewport.
+func (t *TodayTaskTable) EnsureVisible() { t.ensureVisible() }
+
 // View renders header + rows with dividers, forced to Width.
-func (t TodayTaskTable) View() string {
+func (t *TodayTaskTable) View() string {
+	return t.viewWithEnsure()
+}
+
+// viewWithEnsure re-syncs the viewport before rendering so the cursor is
+// always visible even after a resize or width change (shared scrolling fix:
+// focus never sits outside the visible viewport).
+func (t *TodayTaskTable) viewWithEnsure() string {
+	t.ensureVisible()
 	w := t.Width
 	if w < 30 {
 		w = 30
@@ -1017,8 +1062,8 @@ func (t TodayTaskTable) View() string {
 	if len(t.Tasks) == 0 {
 		return EmptyState("No tasks.")
 	}
-	// Structured columns: # 3, DOMAIN 6, AREA 10, TYPE 8, TASK flex,
-	// DUR 6, STATUS 7; six 2-space gaps plus the 1-cell lead.
+	// Structured columns: # 3, TRACK 6, AREA 10, TYPE 8, TASK flex,
+	// DURATION 8, STATUS 8; six 2-space gaps plus the 1-cell lead.
 	numW, domW, areaW, typW, durW, stW := measureTodayCols(w)
 	taskW := w - 1 - (numW + domW + areaW + typW + durW + stW) - 6*2
 	if taskW < 4 {
@@ -1026,11 +1071,11 @@ func (t TodayTaskTable) View() string {
 	}
 	header := FitLine(fmt.Sprintf(" %s  %s  %s  %s  %s  %s  %s",
 		PadToWidth("#", numW),
-		PadToWidth("DOMAIN", domW),
+		PadToWidth("TRACK", domW),
 		PadToWidth("AREA", areaW),
 		PadToWidth("TYPE", typW),
 		PadToWidth("TASK", taskW),
-		PadToWidth("DUR", durW),
+		PadToWidth("DURATION", durW),
 		PadToWidth("STATUS", stW),
 	), w)
 	var sb strings.Builder
@@ -1067,9 +1112,11 @@ func (t TodayTaskTable) View() string {
 }
 
 // measureTodayCols splits inner width w into the structured Today
-// columns: # 3, DOMAIN 6, AREA 10, TYPE 8, DUR 6, STATUS 7, TASK flexes.
+// columns: # 3, TRACK 6, AREA 10, TYPE 8, DURATION 8, STATUS 8, TASK flexes.
+// Fixed columns keep DURATION/STATUS vertically aligned; TASK takes the
+// remaining width and wraps without pushing later columns.
 func measureTodayCols(w int) (numW, domW, areaW, typW, durW, stW int) {
-	return 3, 6, 10, 8, 6, 7
+	return 3, 6, 10, 8, 8, 8
 }
 
 // joinPlus joins bundle item names the product way: A + B.
@@ -1078,44 +1125,39 @@ func joinPlus(xs []string) string { return strings.Join(xs, " + ") }
 // TaskColumns derives AREA/TYPE/TASK display strings from a Today task and
 // its resolved bundle. Pure UI formatting over existing structured fields
 // (TodayTask domain/kind plus domain target metadata); no storage change.
+//
+// TYPE has exactly two values: LECTURE or PRACTICE. AREA is the subject/
+// pattern/area, TASK is the description. DSA/SWE bundles map their legacy
+// kinds to PRACTICE but display LECTURE when the task kind is LECTURE, so
+// all tracks support both work types.
 func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 	switch {
 	case b.Lecture != nil:
-		return b.Lecture.Subject, "Lecture", b.Lecture.Topic
+		return b.Lecture.Subject, "LECTURE", b.Lecture.Topic
 	case len(b.Practice) > 0:
 		topics := make([]string, 0, len(b.Practice))
 		for _, pr := range b.Practice {
 			topics = append(topics, pr.Topic)
 		}
-		return b.Practice[0].Subject, "Practice", joinPlus(topics)
+		return b.Practice[0].Subject, "PRACTICE", joinPlus(topics)
 	case len(b.DSA) > 0:
 		seen := map[string]bool{}
 		var patterns, titles []string
-		allNew, allRepeat := true, true
 		for _, d := range b.DSA {
 			if !seen[d.Pattern] {
 				seen[d.Pattern] = true
 				patterns = append(patterns, d.Pattern)
 			}
 			titles = append(titles, d.Title)
-			if d.Mode != db.DSAModeNew {
-				allNew = false
-			}
-			if d.Mode != db.DSAModeRepeat {
-				allRepeat = false
-			}
 		}
-		area = patterns[0]
+		area = ""
+		if len(patterns) > 0 {
+			area = patterns[0]
+		}
 		if len(patterns) > 1 {
 			area = "Mixed"
 		}
-		typ = "Mixed"
-		if allNew {
-			typ = "New"
-		} else if allRepeat {
-			typ = "Repeat"
-		}
-		return area, typ, joinPlus(titles)
+		return area, workTypeForTask(task), joinPlus(titles)
 	case len(b.SWE) > 0:
 		area := SWEDisplayName(b.SWE[0].Area)
 		names := make([]string, 0, len(b.SWE))
@@ -1136,16 +1178,31 @@ func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 				area = "Mixed"
 			}
 		}
-		return area, "Area", joinPlus(names)
+		return area, workTypeForTask(task), joinPlus(names)
 	default:
-		return "—", "—", task.Title
+		return "—", workTypeForTask(task), task.Title
 	}
+}
+
+// workTypeForTask maps a task to its LECTURE/PRACTICE work type. GOV is
+// decided by the bundle above; DSA/SWE legacy kinds (DSA/SWE) map to
+// PRACTICE while explicit LECTURE/PRACTICE kinds display as-is, so every
+// track supports both types without new TYPE values.
+func workTypeForTask(task db.TodayTask) string {
+	if task.Kind == db.SessionKindLecture {
+		return "LECTURE"
+	}
+	if task.Kind == db.SessionKindPractice {
+		return "PRACTICE"
+	}
+	// Legacy DSA/SWE kinds are practice-like work.
+	return "PRACTICE"
 }
 
 // rowBlock renders logical row i as one or more physical lines. AREA, TYPE
 // and TASK wrap independently; row height equals the tallest wrapped cell.
-// DUR and STATUS stay on the first line with blanks on continuation lines;
-// fixed short columns (NUM/DOMAIN) behave the same. A selected row paints
+// DURATION and STATUS stay on the first line with blanks on continuation lines;
+// fixed short columns (NUM/TRACK) behave the same. A selected row paints
 // every line of the block, so the highlight covers the full expanded width
 // and height as ONE component. j/k move between logical rows. No ellipsis.
 func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w int) []string {
@@ -1172,7 +1229,7 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 	case TaskActive:
 		stTxt = "ACTIVE"
 	case TaskCompleted:
-		stTxt = "DONE"
+		stTxt = "COMPLETE"
 	}
 	stCellLines := wrapCell(stTxt, stW)
 	height := len(numLines)
@@ -1202,6 +1259,8 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 	if string(task.Domain) == "GOV" || string(task.Domain) == "DSA" || string(task.Domain) == "SWE" {
 		domCellFirst = th.domain(string(task.Domain), firstDom)
 	}
+	firstStatus := at(stCellLines, 0, stW)
+	statusFirst := statusCellFor(th, st, firstStatus)
 	gap := rowCell{"  ", th.gap}
 	blank := func(n int) rowCell {
 		if n < 0 {
@@ -1227,11 +1286,11 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 				{"  ", th.gap},
 				{at(durLines, 0, durW), th.main},
 				{"  ", th.gap},
-				{at(stCellLines, 0, stW), th.main},
+				statusFirst,
 			}
 		} else {
 			// Continuation: wrapped AREA/TYPE/TASK text in place;
-			// NUM/DOMAIN/DUR/STATUS stay on the first line, aligned right.
+			// NUM/TRACK/DURATION/STATUS stay on the first line, aligned right.
 			segs = []rowCell{
 				{lead, th.edge},
 				blank(numW),

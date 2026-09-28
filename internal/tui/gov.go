@@ -397,7 +397,7 @@ func (s *GovScreen) move(key string) tea.Cmd {
 			if innerH < 4 {
 				innerH = 4
 			}
-			total := len(strings.Split(s.topicBody(40), "\n"))
+			total := len(strings.Split(s.topicBody(s.topicInnerW()), "\n"))
 			if down {
 				s.detailScroll.ScrollDown(total, innerH)
 			} else {
@@ -736,6 +736,17 @@ func (s *GovScreen) topicInWorkspace(w, h int, fromSubjects bool) string {
 		left = PanelFixed(strings.ToUpper(TruncateToWidth(name, 20)), SectionHeader("SUBJECTS")+"\n"+s.subjMenu.View(), lw, bodyH, false)
 	}
 	return lipglossJoin(left, PanelFixed("TOPIC", ViewportView(s.topicBody(rw-6), &s.detailScroll, innerH), rw, bodyH, true))
+}
+
+// topicInnerW returns the actual topic inner width (same geometry as View).
+func (s *GovScreen) topicInnerW() int {
+	w, _ := s.app.contentViewport()
+	_, rw := TwoPaneLayout(w, 32, 24, 40)
+	inner := rw - 6
+	if inner < 24 {
+		inner = 24
+	}
+	return inner
 }
 
 func (s *GovScreen) topicBody(inner int) string {

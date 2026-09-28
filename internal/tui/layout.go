@@ -264,6 +264,34 @@ func (v *ScrollViewport) ScrollUp(total, height int) {
 // Reset returns to the top.
 func (v *ScrollViewport) Reset() { v.Offset = 0 }
 
+// EnsureVisible scrolls just enough to keep a focused content line visible.
+// It is the shared application-level scrolling contract: whenever keyboard
+// focus moves, the viewport follows immediately at the edge instead of
+// letting focus sit outside the visible region. All scrollable/focusable
+// panes (Today task list via RowList/TodayTaskTable, Results/Evidence
+// forms, Weekly Review, DSA lists, History, Mocks, GOV) use this path.
+func (v *ScrollViewport) EnsureVisible(focusLine, total, height int) {
+	if height < 1 {
+		height = 1
+	}
+	if total <= height {
+		v.Offset = 0
+		return
+	}
+	if focusLine < 0 {
+		focusLine = 0
+	}
+	if focusLine >= total {
+		focusLine = total - 1
+	}
+	if focusLine < v.Offset {
+		v.Offset = focusLine
+	} else if focusLine > v.Offset+height-1 {
+		v.Offset = focusLine - height + 1
+	}
+	v.Clamp(total, height)
+}
+
 // ViewportLines slices content lines to a visible window of height lines,
 // reserving hint rows (↑ more above / ↓ more below) when overflow exists.
 // It always returns exactly height lines (padded with blanks).
@@ -412,6 +440,7 @@ func Clamp(v, lo, hi int) int {
 	}
 	return v
 }
+
 // ---- Global app shell header: independent layers, one composition ----
 //
 // ShellHeader is ONE horizontal header composed from three independently

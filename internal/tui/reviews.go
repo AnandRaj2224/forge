@@ -373,7 +373,7 @@ func (s *ReviewsScreen) Update(msg tea.Msg) tea.Cmd {
 		if s.focusR {
 			// NON-SELECTABLE detail/report content: ↑/↓ and j/k scroll
 			// the pane directly. No fake cursor.
-			inner, total := s.reportViewportH(), len(strings.Split(s.reportView(40), "\n"))
+			inner, total := s.reportViewportH(), len(strings.Split(s.reportView(s.reportInnerW()), "\n"))
 			if down {
 				s.bodyScroll.ScrollDown(total, inner)
 			} else {
@@ -443,6 +443,17 @@ func (s *ReviewsScreen) reportViewportH() int {
 		innerH = 4
 	}
 	return innerH
+}
+
+// reportInnerW returns the actual report inner width (same geometry as View).
+func (s *ReviewsScreen) reportInnerW() int {
+	w, _ := s.app.contentViewport()
+	_, rw := TwoPaneLayout(w, 32, 24, 40)
+	inner := rw - 6
+	if inner < 24 {
+		inner = 24
+	}
+	return inner
 }
 
 func (s *ReviewsScreen) reportView(inner int) string {

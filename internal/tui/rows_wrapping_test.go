@@ -73,8 +73,8 @@ func TestRowMultipleWrappedCellsMaxHeight(t *testing.T) {
 		},
 	}}
 	cost := tbl.lineCost(0)
-	numW, _, areaW, typW, _, _ := measureTodayCols(tbl.Width)
-	taskW := tbl.Width - 1 - (numW + 6 + areaW + typW + 6 + 7) - 6*2
+	numW, domW, areaW, typW, durW, stW := measureTodayCols(tbl.Width)
+	taskW := tbl.Width - 1 - (numW + domW + areaW + typW + durW + stW) - 6*2
 	if taskW < 4 {
 		taskW = 4
 	}
@@ -85,7 +85,7 @@ func TestRowMultipleWrappedCellsMaxHeight(t *testing.T) {
 	if cost < 2 {
 		t.Fatalf("expected tall row, cost=%d", cost)
 	}
-	block := tbl.rowBlock(0, numW, 6, areaW, typW, taskW, 6, 7, tbl.Width)
+	block := tbl.rowBlock(0, numW, domW, areaW, typW, taskW, durW, stW, tbl.Width)
 	if len(block) != cost {
 		t.Fatalf("block=%d cost=%d", len(block), cost)
 	}

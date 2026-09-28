@@ -99,6 +99,18 @@ func (s *HistoryScreen) bodyViewportH() int {
 	return innerH
 }
 
+// bodyInnerW returns the actual detail inner width (same geometry as View)
+// so scroll totals match rendering and focus never drifts out of view.
+func (s *HistoryScreen) bodyInnerW() int {
+	w, _ := s.app.contentViewport()
+	_, rw := TwoPaneLayout(w, 32, 24, 40)
+	inner := rw - 6
+	if inner < 24 {
+		inner = 24
+	}
+	return inner
+}
+
 func (s *HistoryScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
@@ -106,7 +118,7 @@ func (s *HistoryScreen) Update(msg tea.Msg) tea.Cmd {
 			if s.focusR {
 				// Scroll the daily body independently.
 				inner := s.bodyViewportH()
-				total := len(strings.Split(s.dayBody(40), "\n"))
+				total := len(strings.Split(s.dayBody(s.bodyInnerW()), "\n"))
 				if k.String() == "j" || k.String() == "down" {
 					s.bodyScroll.ScrollDown(total, inner)
 				} else {
@@ -250,7 +262,7 @@ func (s *HistoryScreen) dailyWorkView(inner int, rep engine.DailyReport) string 
 		st := "TODO"
 		switch a.State {
 		case engine.StateCompleted:
-			st = "DONE"
+			st = "COMPLETE"
 		case engine.StateActive:
 			st = "ACTIVE"
 		}

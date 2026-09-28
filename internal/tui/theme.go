@@ -119,15 +119,15 @@ func DomainBadge(domain string) string {
 	}
 }
 
-// StatusPill renders TODO / ACTIVE / DONE with semantic color.
+// StatusPill renders TODO / ACTIVE / COMPLETE with semantic color.
 func StatusPill(st TaskStatus) string {
 	switch st {
 	case TaskActive:
 		return thRunning.Render("▶ ACTIVE")
 	case TaskCompleted:
-		return thSuccess.Render("✓ DONE")
+		return thSuccess.Render("✓ COMPLETE")
 	default:
-		return thTodo.Render("○ TODO")
+		return thTodo.Render("TODO")
 	}
 }
 
