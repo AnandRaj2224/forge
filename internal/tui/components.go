@@ -189,9 +189,9 @@ func (p SessionProgressBar) View() string {
 }
 
 // gradStops is the continuous logo/session gradient treatment.
-// Palette only, flowing dark → accent → warm → light:
-// ocean night → neon purple → sunset pink → miami peach → vice cyan.
-var gradStops = []string{"#0B0F2B", "#BC6CFF", "#FF5CA8", "#FFB86B", "#00F0FF"}
+// Palette only, flowing accent → warm → light:
+// neon purple → sunset pink → miami peach → vice cyan.
+var gradStops = []string{"#BC6CFF", "#FF5CA8", "#FFB86B", "#00F0FF"}
 
 func gradientAt(t float64) color.Color {
 	if t < 0 {

@@ -453,10 +453,10 @@ func (a *App) View() tea.View {
 var forgeLogoLines = []string{
 	"███████╗ ██████╗ ██████╗  ██████╗ ███████╗",
 	"██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝",
-	"█████╗  ██║   ██║██████╔╝██║  ███╗█████╗",
-	"██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝",
+	"█████╗  ██║   ██║██████╔╝██║  ███╗█████╗  ",
+	"██╔══╝  ██║   ██║██╔══██╗██║   ██║██╔══╝  ",
 	"██║     ╚██████╔╝██║  ██║╚██████╔╝███████╗",
-	"╚═╝     ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
+	"╚═╝      ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
 }
 
 // headerView is the Forge shell header: LEFT 6-line gradient ASCII
@@ -504,16 +504,10 @@ func (a *App) headerView(w int) string {
 }
 
 // gradientLogoLine renders one wordmark line with one continuous smooth
-// gradient flowing across the warm retro palette. Controlled; the logo is
+// gradient flowing across the bright palette: neon purple → sunset pink
+// → miami peach → vice cyan. The gradient starts at purple so the F's
+// first stroke is immediately visible. Controlled; the logo is
 // the one place where expressive color is allowed.
-// logoGradientMinT floors the gradient parameter so the leading glyph
-// never samples the near-background darkest extreme of the gradient.
-// Without this, the F's left strokes render in near-black ocean night and
-// smear into the dark terminal background while O/R/G/E stay vivid.
-// Clamping only affects t values below the floor (the F's left columns);
-// every other rune keeps its exact existing color.
-const logoGradientMinT = 0.12
-
 func gradientLogoLine(line string) string {
 	runes := []rune(line)
 	n := len(runes)
@@ -525,9 +519,6 @@ func gradientLogoLine(line string) string {
 		t := 0.0
 		if n > 1 {
 			t = float64(i) / float64(n-1)
-		}
-		if t < logoGradientMinT {
-			t = logoGradientMinT
 		}
 		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(gradientAt(t)).Render(string(r)))
 	}
