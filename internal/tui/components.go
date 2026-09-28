@@ -486,6 +486,58 @@ func (c ExamCard) Percent() float64 {
 	return float64(c.Done) / float64(c.Total)
 }
 
+// centerLineToWidth centers one styled line within w visible cells
+// (ANSI-aware via lipgloss.Width). Empty lines stay empty; lines already
+// filling w are returned unchanged. Generic: no per-card coordinates.
+func centerLineToWidth(s string, w int) string {
+	if w <= 0 || s == "" {
+		return s
+	}
+	vis := lipgloss.Width(s)
+	if vis >= w {
+		return s
+	}
+	left := (w - vis) / 2
+	right := w - vis - left
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+}
+
+// centerCardBody horizontally centers each content line to width and
+// vertically centers the block inside height lines (extra blank goes
+// below, matching lipgloss Place center). Generic for any card size.
+func centerCardBody(body []string, height, width int) []string {
+	centered := make([]string, 0, len(body))
+	for _, ln := range body {
+		centered = append(centered, centerLineToWidth(ln, width))
+	}
+	if len(centered) >= height {
+		return centered[:height]
+	}
+	top := (height - len(centered)) / 2
+	bottom := height - len(centered) - top
+	out := make([]string, 0, height)
+	for i := 0; i < top; i++ {
+		out = append(out, "")
+	}
+	out = append(out, centered...)
+	for i := 0; i < bottom; i++ {
+		out = append(out, "")
+	}
+	return out
+}
+
+// examCurrentTitle renders "Name · CURRENT" with the CURRENT
+// suffix in the existing primary accent (thFocusDot). Base is truncated so
+// base+suffix fits inner; geometry unchanged. Caller centers the result.
+func examCurrentTitle(name string, inner int) string {
+	const suffix = " · CURRENT"
+	maxBase := inner - lipgloss.Width(suffix)
+	if maxBase < 1 {
+		maxBase = 1
+	}
+	return thPanelTitle.Render(TruncateToWidth(name, maxBase)) + thFocusDot.Render(suffix)
+}
+
 // View renders the card with structured sections. Fixed 8 content lines so
 // grid rows stay uniform; see examCardHeight. Shows SYLLABUS COVERAGE only;
 // PRACTICE READINESS is intentionally absent.
@@ -505,29 +557,53 @@ func (c ExamCard) View() string {
 	if barW > 26 {
 		barW = 26
 	}
-	var sb strings.Builder
 	title := c.Name
 	if c.Selected {
 		title += " · CURRENT"
 	}
-	sb.WriteString(thScreenTitle.Render(TruncateToWidth(title, inner)) + "\n")
-	sb.WriteString(RowDivider(inner) + "\n")
-	sb.WriteString(SectionHeader("SYLLABUS COVERAGE") + "\n")
-	sb.WriteString(ProgressBar{Ratio: c.Percent(), Width: barW, ShowPct: true, Accent: cGov}.View() + "\n")
-	sb.WriteString(thMeta.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)) + "\n")
-	sb.WriteString("" + "\n")
-	sb.WriteString("" + "\n")
-	sb.WriteString("" + "\n")
-	lines := strings.Split(strings.TrimRight(sb.String(), "\n"), "\n")
+	// Title and body are centered (horizontally) in the card; the body
+	// block is additionally centered vertically in the remaining 6-line
+	// body area below the divider. The focused card renders its body text
+	// white (existing white styles); unfocused cards stay muted gray.
+	// Bar glyphs are unchanged.
+	r := c.Percent()
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	header := SectionHeader("SYLLABUS COVERAGE")
+	pctStyle := thMeta
+	countStyle := thMeta
+	if c.Focused {
+		header = thPanelTitle.Render("SYLLABUS COVERAGE")
+		pctStyle = lipgloss.NewStyle().Foreground(cWhite)
+		countStyle = lipgloss.NewStyle().Foreground(cWhite)
+	}
+	barLine := ProgressBar{Ratio: r, Width: barW, Accent: cGov}.View() + " " + pctStyle.Render(fmt.Sprintf("%3.0f%%", r*100))
+	body := centerCardBody([]string{
+		header,
+		barLine,
+		countStyle.Render(fmt.Sprintf("%d / %d topics", c.Done, c.Total)),
+	}, 6, inner)
+	lines := make([]string, 0, 8)
+	lines = append(lines, centerLineToWidth(thScreenTitle.Render(TruncateToWidth(title, inner)), inner))
+	lines = append(lines, RowDivider(inner))
+	lines = append(lines, body...)
 	for len(lines) < 8 {
 		lines = append(lines, "")
 	}
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cBorder).Padding(0, 1).Width(w)
 	if c.Focused {
 		style = style.BorderForeground(cPrimary)
-		lines[0] = thPanelTitle.Render(TruncateToWidth(title, inner)) + thFocusDot.Render("  ●")
+		if c.Selected {
+			lines[0] = centerLineToWidth(examCurrentTitle(c.Name, inner)+thFocusDot.Render("  ●"), inner)
+		} else {
+			lines[0] = centerLineToWidth(thPanelTitle.Render(TruncateToWidth(title, inner))+thFocusDot.Render("  ●"), inner)
+		}
 	} else if c.Selected {
-		lines[0] = thPanelTitle.Render(TruncateToWidth(title, inner))
+		lines[0] = centerLineToWidth(examCurrentTitle(c.Name, inner), inner)
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }

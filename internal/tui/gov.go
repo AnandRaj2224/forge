@@ -589,23 +589,32 @@ func (s *GovScreen) subjectsCell(w int, focused bool) string {
 	if inner < 20 {
 		inner = 20
 	}
-	lines := []string{
-		thScreenTitle.Render(TruncateToWidth("ALL SUBJECTS", inner)),
-		RowDivider(inner),
-		SectionHeader("GLOBAL BROWSER"),
-		thMeta.Render("Every subject, every topic."),
-		thMeta.Render("Lecture + practice progress."),
-		"",
-		"",
-		"",
+	// Title is centered; body below the divider is centered (horizontally
+	// + vertically) in the remaining 6-line body area. The focused card
+	// renders its body text white (existing white styles); unfocused stays
+	// muted gray.
+	header := SectionHeader("GLOBAL BROWSER")
+	lineStyle := thMeta
+	if focused {
+		header = thPanelTitle.Render("GLOBAL BROWSER")
+		lineStyle = lipgloss.NewStyle().Foreground(cWhite)
 	}
+	body := centerCardBody([]string{
+		header,
+		lineStyle.Render("Every subject, every topic."),
+		lineStyle.Render("Lecture + practice progress."),
+	}, 6, inner)
+	lines := make([]string, 0, 8)
+	lines = append(lines, centerLineToWidth(thScreenTitle.Render(TruncateToWidth("ALL SUBJECTS", inner)), inner))
+	lines = append(lines, RowDivider(inner))
+	lines = append(lines, body...)
 	for len(lines) < 8 {
 		lines = append(lines, "")
 	}
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(cDimLine).Padding(0, 1).Width(w)
 	if focused {
 		style = style.BorderForeground(cPrimary)
-		lines[0] = thPanelTitle.Render("ALL SUBJECTS") + thFocusDot.Render("  ●")
+		lines[0] = centerLineToWidth(thPanelTitle.Render("ALL SUBJECTS")+thFocusDot.Render("  ●"), inner)
 	}
 	return style.Render(strings.Join(lines, "\n"))
 }
