@@ -186,12 +186,32 @@ func DomainBadge(domain string) string {
 }
 
 // StatusPill renders TODO / ACTIVE / COMPLETE with semantic color.
+// COMPLETE defaults to cyan (legacy); use StatusPillForDomain for
+// track-tinted COMPLETE in the Today workspace.
 func StatusPill(st TaskStatus) string {
+	return StatusPillForDomain(st, "")
+}
+
+// StatusPillForDomain renders TODO / ACTIVE / COMPLETE where COMPLETE
+// takes the track color (GOV peach, DSA cyan, SWE pink) so the detail
+// header matches the Today table STATUS cell. ACTIVE stays peach (global
+// active signal), TODO stays neutral. Unknown/empty domain falls back to
+// cyan to preserve legacy behavior.
+func StatusPillForDomain(st TaskStatus, domain string) string {
 	switch st {
 	case TaskActive:
 		return thRunning.Render("▶ ACTIVE")
 	case TaskCompleted:
-		return thSuccess.Render("✓ COMPLETE")
+		switch domain {
+		case "GOV":
+			return lipgloss.NewStyle().Bold(true).Foreground(cGov).Render("✓ COMPLETE")
+		case "DSA":
+			return lipgloss.NewStyle().Bold(true).Foreground(cDSA).Render("✓ COMPLETE")
+		case "SWE":
+			return lipgloss.NewStyle().Bold(true).Foreground(cSWE).Render("✓ COMPLETE")
+		default:
+			return thSuccess.Render("✓ COMPLETE")
+		}
 	default:
 		return thTodo.Render("TODO")
 	}

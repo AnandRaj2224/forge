@@ -785,7 +785,7 @@ func (s *TodayScreen) detailViewWH(inner, maxLines int) string {
 	if workType == "—" || workType == "" {
 		workType = workTypeForTask(t)
 	}
-	header := DomainBadge(string(t.Domain)) + "  " + thMeta.Render(workType) + "  " + StatusPill(st)
+	header := DomainBadge(string(t.Domain)) + "  " + thMeta.Render(workType) + "  " + StatusPillForDomain(st, string(t.Domain))
 	// Completed tasks are viewable but never startable: single COMPLETE
 	// header, metrics, READ-ONLY note. No Start action of any kind.
 	if st == TaskCompleted {
