@@ -27,6 +27,7 @@ func TestRepeatStateFailurePropagates(t *testing.T) {
 	now := time.Now()
 	raw, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
 		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
 	}})
@@ -44,6 +45,7 @@ func TestRepeatStateFailurePropagates(t *testing.T) {
 	}
 	_, err = engine.SaveDSAEvidence(ctx, d, "rs-fail", sess.ID, []engine.DSAAttemptInput{
 		{ProblemID: "dsa-1", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
+		{ProblemID: "dsa-4", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 		{ProblemID: "dsa-2", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 		{ProblemID: "dsa-3", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 	}, now)
@@ -294,6 +296,7 @@ func TestDSABootstrapSaveSucceeds(t *testing.T) {
 		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
 		{ProblemID: "dsa-2", Mode: db.DSAModeNew},
 		{ProblemID: "dsa-3", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 	}})
 	mkTaskDate(t, ctx, d, "boot", "2026-09-20", db.DomainDSA, db.SessionKindDSA, raw)
 	sess, err := engine.StartTodayTask(ctx, d, "boot", now)
@@ -307,9 +310,10 @@ func TestDSABootstrapSaveSucceeds(t *testing.T) {
 		{ProblemID: "dsa-1", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 		{ProblemID: "dsa-2", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 		{ProblemID: "dsa-3", Independent: false, Optimal: true, HintUsed: false, SolveSecs: 100},
+		{ProblemID: "dsa-4", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 120},
 	}, now)
 	if err != nil {
-		t.Fatalf("truthful 3xNEW bootstrap save must succeed: %v", err)
+		t.Fatalf("truthful 4xNEW bootstrap save must succeed: %v", err)
 	}
 	if ev.State != engine.StateCompleted {
 		t.Fatalf("bootstrap bundle must complete, got %s", ev.State)
@@ -327,6 +331,7 @@ func TestDSAStaleNewRepeatStateOnlyAtSave(t *testing.T) {
 	}
 	raw, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
 		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
 	}})
@@ -340,6 +345,7 @@ func TestDSAStaleNewRepeatStateOnlyAtSave(t *testing.T) {
 	}
 	_, err = engine.SaveDSAEvidence(ctx, d, "stale-rs", sess.ID, []engine.DSAAttemptInput{
 		{ProblemID: "dsa-1", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
+		{ProblemID: "dsa-4", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 		{ProblemID: "dsa-2", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 		{ProblemID: "dsa-3", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 100},
 	}, now)

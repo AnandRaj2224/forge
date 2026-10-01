@@ -66,6 +66,7 @@ func seedLifecycle(t *testing.T, ctx context.Context, d *db.DB) {
 		{ID: "dsa-1", Title: "One", Pattern: "Hash", Difficulty: "EASY"},
 		{ID: "dsa-2", Title: "Two", Pattern: "Hash", Difficulty: "EASY"},
 		{ID: "dsa-3", Title: "Three", Pattern: "Stack", Difficulty: "MEDIUM"},
+		{ID: "dsa-4", Title: "Four", Pattern: "Queue", Difficulty: "MEDIUM"},
 	} {
 		p.SortOrder = i + 1
 		if err := catalog.InsertDSAProblem(ctx, d, p); err != nil {

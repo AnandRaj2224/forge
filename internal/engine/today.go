@@ -44,7 +44,7 @@ var todayGenMu sync.Mutex
 //   - GOV practice: 3 x 1h, slot1 Quant, slot2 Reasoning, slot3 round-robin
 //     among other active subjects with practice-eligible topics — all
 //     restricted to the current exam's subject set.
-//   - DSA: one 2h30 block, 2 repeat + 1 new, due/review state, catalogue order.
+//   - DSA: one 2h30 block, 2 repeat + 2 new, due/review state, catalogue order.
 //   - SWE: one block per routine slot for the weekday (area + duration from
 //     the slot). Each block identifies its SWE area, never a task.
 func GenerateToday(ctx context.Context, database *db.DB, localDate string, now time.Time) (db.TodaySnapshot, []db.TodayTask, error) {
@@ -663,10 +663,11 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 			used[rs.ProblemID] = true
 		}
 	}
-	// One new: first catalogue problem with no NEW attempt and no repeat
+	// Two new: first catalogue problems with no NEW attempt and no repeat
 	// state (genuinely new), not in bundle.
+	newsAdded := 0
 	for _, p := range probs {
-		if len(bundle) >= 3 {
+		if len(bundle) >= 4 || newsAdded >= 2 {
 			break
 		}
 		if used[p.ID] {
@@ -681,13 +682,13 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 		}
 		bundle = append(bundle, db.DSAProblemTarget{ProblemID: p.ID, Mode: db.DSAModeNew})
 		used[p.ID] = true
-		break
+		newsAdded++
 	}
 	// Bootstrap/fill: remaining slots take genuinely-new problems labeled
 	// NEW (truthful: never label an introduced problem NEW). If no valid
 	// bundle can be formed, emit no DSA block rather than a fake one.
 	for _, p := range probs {
-		if len(bundle) >= 3 {
+		if len(bundle) >= 4 {
 			break
 		}
 		if used[p.ID] {
@@ -703,7 +704,7 @@ func planDSABlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayT
 		bundle = append(bundle, db.DSAProblemTarget{ProblemID: p.ID, Mode: db.DSAModeNew})
 		used[p.ID] = true
 	}
-	if len(bundle) != 3 {
+	if len(bundle) != 4 {
 		return nil, nil
 	}
 	dt := db.DSATarget{Problems: bundle}

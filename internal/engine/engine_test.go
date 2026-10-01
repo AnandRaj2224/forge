@@ -385,12 +385,13 @@ func TestDSABundleAndRepeat(t *testing.T) {
 		{ProblemID: "dsa-1", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 	}})
 	mkTask(t, ctx, d, "tdsa", "2026-09-20", db.DomainDSA, db.SessionKindDSA, raw)
 	now := time.Now()
 	sess, _ := engine.StartTodayTask(ctx, d, "tdsa", now)
 	_, _ = engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	// Partial: 1 of 3 -> TODO.
+	// Partial: 1 of 4 -> TODO.
 	_, err := engine.SaveDSAEvidence(ctx, d, "tdsa", sess.ID, []engine.DSAAttemptInput{
 		{ProblemID: "dsa-1", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 200},
 	}, now)
@@ -407,6 +408,7 @@ func TestDSABundleAndRepeat(t *testing.T) {
 	ev, err = engine.SaveDSAEvidence(ctx, d, "tdsa", sess2.ID, []engine.DSAAttemptInput{
 		{ProblemID: "dsa-2", Independent: false, Optimal: false, HintUsed: true, SolveSecs: 300},
 		{ProblemID: "dsa-3", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 400},
+		{ProblemID: "dsa-4", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 500},
 	}, now)
 	if err != nil {
 		t.Fatal(err)
@@ -426,9 +428,12 @@ func TestDSABundleAndRepeat(t *testing.T) {
 	if rs2.RepeatStage != 0 {
 		t.Fatalf("fail must reset, stage=%d", rs2.RepeatStage)
 	}
-	// New attempt entered scheduling.
+	// New attempts entered scheduling.
 	if _, err := runtime.GetDSARepeatState(ctx, d, "dsa-3"); err != nil {
 		t.Fatalf("new must init repeat state: %v", err)
+	}
+	if _, err := runtime.GetDSARepeatState(ctx, d, "dsa-4"); err != nil {
+		t.Fatalf("second new must init repeat state: %v", err)
 	}
 }
 
@@ -531,11 +536,11 @@ func TestTodayGeneration(t *testing.T) {
 				}
 			}
 		}
-	} // DSA bundle: 3 distinct problems.
+	} // DSA bundle: 4 distinct problems (2 repeat + 2 new).
 	for _, tk := range tasks {
 		if tk.Domain == db.DomainDSA {
 			dt, _ := db.UnmarshalDSATarget(*tk.TargetJSON)
-			if len(dt.Items()) != 3 {
+			if len(dt.Items()) != 4 {
 				t.Fatalf("dsa items=%d", len(dt.Items()))
 			}
 			seen := map[db.ID]bool{}

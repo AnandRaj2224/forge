@@ -122,11 +122,11 @@ func ValidateDSATarget(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
 }
 
 // ValidateDSACurrentBundle strictly validates a newly generated DSA block
-// target: exactly 3 problems, all distinct, valid modes, every problem
+// target: exactly 4 problems, all distinct, valid modes, every problem
 // exists, truthful labeling (a NEW-labeled problem must be genuinely new:
 // no prior NEW attempt and no repeat state), and the steady-state shape of
-// exactly 2 REPEAT + 1 NEW. An all-NEW triple is accepted only as the
-// truthful bootstrap when all three problems are genuinely new (fresh DB).
+// exactly 2 REPEAT + 2 NEW. An all-NEW quad is accepted only as the
+// truthful bootstrap when all four problems are genuinely new (fresh DB).
 // Historical singular/legacy shapes stay readable via ValidateDSATarget;
 // this strict rule governs NEW/current targets. DB failures propagate.
 func ValidateDSACurrentBundle(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
@@ -134,8 +134,8 @@ func ValidateDSACurrentBundle(ctx context.Context, q db.DBTX, dt db.DSATarget) e
 		return err
 	}
 	items := dt.Items()
-	if len(items) != 3 {
-		return wrapErr("dsa target", ErrInvalidTarget, "current DSA bundle must be exactly 3 problems")
+	if len(items) != 4 {
+		return wrapErr("dsa target", ErrInvalidTarget, "current DSA bundle must be exactly 4 problems")
 	}
 	var repeats, news int
 	for _, it := range items {
@@ -149,14 +149,14 @@ func ValidateDSACurrentBundle(ctx context.Context, q db.DBTX, dt db.DSATarget) e
 			}
 		}
 	}
-	if repeats == 2 && news == 1 {
+	if repeats == 2 && news == 2 {
 		return nil
 	}
-	if news == 3 {
-		// Truthful bootstrap: all three genuinely new (checked above).
+	if news == 4 {
+		// Truthful bootstrap: all four genuinely new (checked above).
 		return nil
 	}
-	return wrapErr("dsa target", ErrInvalidTarget, "current DSA bundle must be 2 repeat + 1 new")
+	return wrapErr("dsa target", ErrInvalidTarget, "current DSA bundle must be 2 repeat + 2 new")
 }
 
 // requireGenuinelyNew rejects a NEW label for an already-introduced

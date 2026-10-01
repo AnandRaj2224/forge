@@ -40,6 +40,7 @@ func seedAcceptanceDB(t *testing.T) *db.DB {
 		{ID: "dsa-1", Title: "One", Pattern: "Hash", Difficulty: "EASY"},
 		{ID: "dsa-2", Title: "Two", Pattern: "Hash", Difficulty: "EASY"},
 		{ID: "dsa-3", Title: "Three", Pattern: "Stack", Difficulty: "MEDIUM"},
+		{ID: "dsa-4", Title: "Four", Pattern: "Queue", Difficulty: "MEDIUM"},
 	} {
 		p.SortOrder = i + 1
 		_ = catalog.InsertDSAProblem(ctx, database, p)
@@ -52,6 +53,7 @@ func seedAcceptanceDB(t *testing.T) *db.DB {
 		{ProblemID: "dsa-1", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 	}})
 	_ = runtime.InsertTodayTask(ctx, database, db.TodayTask{ID: "acc-lec", SnapshotID: "snap-today", Position: 1, Domain: db.DomainGOV, Kind: db.SessionKindLecture, Title: "Lecture", PlannedSeconds: 3600, TargetJSON: &lec})
 	_ = runtime.InsertTodayTask(ctx, database, db.TodayTask{ID: "acc-prac", SnapshotID: "snap-today", Position: 2, Domain: db.DomainGOV, Kind: db.SessionKindPractice, Title: "Practice", PlannedSeconds: 3600, TargetJSON: &prac})
@@ -252,6 +254,7 @@ func TestAcceptDSAEvidence(t *testing.T) {
 		{ProblemID: "dsa-1", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 300},
 		{ProblemID: "dsa-2", Independent: false, Optimal: true, HintUsed: false, SolveSecs: 150},
 		{ProblemID: "dsa-3", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 540},
+		{ProblemID: "dsa-4", Independent: true, Optimal: true, HintUsed: false, SolveSecs: 600},
 	}, now); err != nil {
 		t.Fatal(err)
 	}

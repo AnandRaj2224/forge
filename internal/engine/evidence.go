@@ -256,7 +256,7 @@ func SaveGovPracticeEvidence(ctx context.Context, database *db.DB, taskID, sessi
 	return EvaluateTodayTask(ctx, database, taskID)
 }
 
-// SaveDSAEvidence validates the exact 2-repeat+1-new bundle target, writes all
+// SaveDSAEvidence validates the exact 2-repeat+2-new bundle target, writes all
 // attempts plus repeat-state updates in ONE transaction, and re-evaluates.
 // All target problems require a recorded attempt (solve>0); pass/fail affects
 // progression but any recorded result satisfies bundle completion.
@@ -273,8 +273,8 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 		return TaskEvaluation{}, wrapErr("dsa save", ErrInvalidTarget, err.Error())
 	}
 	// Current Today tasks save under strict current-target semantics
-	// (exactly 3 distinct problems: 2 REPEAT + 1 NEW, or the truthful
-	// 3×NEW bootstrap) — never the generic legacy validator alone.
+	// (exactly 4 distinct problems: 2 REPEAT + 2 NEW, or the truthful
+	// 4×NEW bootstrap) — never the generic legacy validator alone.
 	if err := ValidateDSACurrentBundle(ctx, database, dt); err != nil {
 		return TaskEvaluation{}, err
 	}

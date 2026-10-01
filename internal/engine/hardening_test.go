@@ -519,7 +519,7 @@ func TestDSAExactBundleGeneration(t *testing.T) {
 	seedDSA(t, ctx, d)
 	seedSWE(t, ctx, d)
 	now := time.Now()
-	// Two due repeats + one genuinely new problem.
+	// Two due repeats + two genuinely new problems.
 	for _, pid := range []db.ID{"dsa-1", "dsa-2"} {
 		if err := runtime.UpsertDSARepeatState(ctx, d, db.DSARepeatState{
 			ProblemID: pid, RepeatStage: 1, CurrentIntervalDays: 3,
@@ -540,7 +540,7 @@ func TestDSAExactBundleGeneration(t *testing.T) {
 		found = true
 		dt, _ := db.UnmarshalDSATarget(*tk.TargetJSON)
 		items := dt.Items()
-		if len(items) != 3 {
+		if len(items) != 4 {
 			t.Fatalf("DSA bundle=%d", len(items))
 		}
 		var repeats, news int
@@ -557,8 +557,8 @@ func TestDSAExactBundleGeneration(t *testing.T) {
 				news++
 			}
 		}
-		if repeats != 2 || news != 1 {
-			t.Fatalf("want 2 repeat + 1 new, got %d/%d", repeats, news)
+		if repeats != 2 || news != 2 {
+			t.Fatalf("want 2 repeat + 2 new, got %d/%d", repeats, news)
 		}
 		if err := engine.ValidateDSACurrentBundle(ctx, d, dt); err != nil {
 			t.Fatalf("generated bundle must validate: %v", err)
@@ -582,23 +582,25 @@ func TestDSAStrictValidation(t *testing.T) {
 	if err := engine.ValidateDSACurrentBundle(ctx, d, dt2); err == nil {
 		t.Fatal("2-item bundle must fail strict validation")
 	}
-	// Three repeats: rejected.
+	// Four repeats: rejected (right length, wrong shape).
 	bad3, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
 		{ProblemID: "dsa-1", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
+		{ProblemID: "dsa-4", Mode: db.DSAModeRepeat},
 	}})
 	dt3, _ := db.UnmarshalDSATarget(bad3)
 	if err := engine.ValidateDSACurrentBundle(ctx, d, dt3); err == nil {
-		t.Fatal("3-repeat bundle must fail strict validation")
+		t.Fatal("4-repeat bundle must fail strict validation")
 	}
-	// Fake NEW (problem already introduced) rejected, even in 2R+1N shape.
+	// Fake NEW (problem already introduced) rejected, even in 2R+2N shape.
 	// dsa-1 starts genuinely new here (no attempts, no repeat state).
 	now := time.Now()
-	// Introduce dsa-1 through a strict 2R+1N bundle (partial save of the
+	// Introduce dsa-1 through a strict 2R+2N bundle (partial save of the
 	// NEW item only: current saves require strict targets).
 	intro3, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
 		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
 	}})
@@ -614,6 +616,7 @@ func TestDSAStrictValidation(t *testing.T) {
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 	}})
 	dtf, _ := db.UnmarshalDSATarget(fake)
 	if err := engine.ValidateDSACurrentBundle(ctx, d, dtf); err == nil {
@@ -625,6 +628,7 @@ func TestDSAStrictValidation(t *testing.T) {
 		{ProblemID: "dsa-1", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 	}})
 	dto, _ := db.UnmarshalDSATarget(okb)
 	if err := engine.ValidateDSACurrentBundle(ctx, d, dto); err != nil {
@@ -637,10 +641,11 @@ func TestDSAStaleNewRejectedOnSave(t *testing.T) {
 	ctx := context.Background()
 	seedDSA(t, ctx, d)
 	now := time.Now()
-	// Introduce dsa-1 as NEW through a strict 2R+1N bundle (partial save
+	// Introduce dsa-1 as NEW through a strict 2R+2N bundle (partial save
 	// of the NEW item only: current saves require strict targets).
 	new3, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
 		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
 	}})
@@ -655,6 +660,7 @@ func TestDSAStaleNewRejectedOnSave(t *testing.T) {
 	// A stale persisted target still saying NEW must surface, never convert.
 	stale3, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{
 		{ProblemID: "dsa-1", Mode: db.DSAModeNew},
+		{ProblemID: "dsa-4", Mode: db.DSAModeNew},
 		{ProblemID: "dsa-2", Mode: db.DSAModeRepeat},
 		{ProblemID: "dsa-3", Mode: db.DSAModeRepeat},
 	}})

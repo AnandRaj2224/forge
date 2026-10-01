@@ -352,7 +352,7 @@ type DSATarget struct {
 	// Legacy singular block assignment.
 	ProblemID ID      `json:"problem_id,omitempty"`
 	Mode      DSAMode `json:"mode,omitempty"`
-	// Bundle block assignment: 2 repeat + 1 new problems.
+	// Bundle block assignment: 2 repeat + 2 new problems.
 	Problems []DSAProblemTarget `json:"problems,omitempty"`
 }
 
