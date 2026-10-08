@@ -22,10 +22,11 @@ import (
 //	    -> CURRENT EXAM (derived, never stored)
 //
 // Within the current exam, its own subject order (gov_exam_subjects)
-// determines the active subjects: the first three incomplete subjects feed
-// the three 1-hour GOV lecture slots. A subject is incomplete while any of
-// the exam's mapped topics under it is not lecture-complete; topics mapped
-// only to other (later) exams never affect the current exam.
+// determines the active subjects: incomplete subjects in exam order feed
+// the 1-hour GOV lecture slots (one lecture candidate per subject, up to
+// the number of slots in gov_lecture_routine). A subject is incomplete
+// while any of the exam's mapped topics under it is not lecture-complete;
+// topics mapped only to other (later) exams never affect the current exam.
 //
 // There is no separate mutable "current exam" state and no exam-specific
 // copies of subjects, topics, or lectures.
@@ -40,9 +41,44 @@ type GovExamSubjectProgress struct {
 	Complete bool
 }
 
-// maxGovLectureSubjects is the number of current/incomplete subjects the
-// Today GOV lecture routine serves: 3 slots x 1 hour.
-const maxGovLectureSubjects = 3
+// govLectureSlotCapacity returns the number of GOV lecture slots from
+// gov_lecture_routine. The routine is authoritative; no hardcoded slot
+// count lives here. An empty routine defaults to 4 x 1h.
+func govLectureSlotCapacity(ctx context.Context, q db.DBTX) (int, error) {
+	routine, err := catalog.GetGovLectureRoutine(ctx, q)
+	if err != nil {
+		return 0, fmt.Errorf("engine: gov lecture routine: %w", err)
+	}
+	if len(routine) == 0 {
+		return 4, nil
+	}
+	return len(routine), nil
+}
+
+// govSubjectExamCounts returns how many exams each subject belongs to,
+// counted across ALL rows in gov_exam_subjects. A subject is globally
+// unique when its count is exactly one.
+func govSubjectExamCounts(ctx context.Context, q db.DBTX) (map[db.ID]int, error) {
+	rows, err := q.QueryContext(ctx, `SELECT subject_id, COUNT(*) FROM gov_exam_subjects GROUP BY subject_id`)
+	if err != nil {
+		return nil, fmt.Errorf("engine: subject exam counts: %w", err)
+	}
+	counts := map[db.ID]int{}
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var sid string
+			var n int
+			if err := rows.Scan(&sid, &n); err == nil {
+				counts[db.ID(sid)] = n
+			}
+		}
+	}()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("engine: subject exam counts rows: %w", err)
+	}
+	return counts, nil
+}
 
 // IsGovTopicLectureComplete reports whether every lecture under a topic is
 // complete. A topic with zero lectures counts as complete. DB failures
@@ -238,10 +274,11 @@ func ExamSubjectProgress(ctx context.Context, q db.DBTX, examID db.ID) ([]GovExa
 	return out, nil
 }
 
-// CurrentGovSubjects derives the current exam plus its first up-to-three
-// incomplete subjects in exam subject order. Completing a subject replaces
-// it with the next incomplete subject; no slot state is stored. Returns
-// (nil, nil, nil) when no exam is current. DB failures propagate.
+// CurrentGovSubjects derives the current exam plus its incomplete subjects
+// in exam subject order, up to the number of slots in gov_lecture_routine.
+// Completing a subject replaces it with the next incomplete subject; no
+// slot state is stored. Returns (nil, nil, nil) when no exam is current.
+// DB failures propagate.
 func CurrentGovSubjects(ctx context.Context, q db.DBTX) (*db.GovExam, []GovExamSubjectProgress, error) {
 	cur, err := CurrentGovExam(ctx, q)
 	if err != nil {
@@ -254,13 +291,17 @@ func CurrentGovSubjects(ctx context.Context, q db.DBTX) (*db.GovExam, []GovExamS
 	if err != nil {
 		return nil, nil, err
 	}
+	capacity, err := govLectureSlotCapacity(ctx, q)
+	if err != nil {
+		return nil, nil, err
+	}
 	var out []GovExamSubjectProgress
 	for _, p := range progress {
 		if p.Complete {
 			continue
 		}
 		out = append(out, p)
-		if len(out) >= maxGovLectureSubjects {
+		if len(out) >= capacity {
 			break
 		}
 	}

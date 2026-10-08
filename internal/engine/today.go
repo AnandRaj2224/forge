@@ -38,9 +38,12 @@ var todayGenMu sync.Mutex
 //	snapshot or tasks.
 //
 // Rules:
-//   - GOV lecture: 3 x 1h slots, current exam (first incomplete in
-//     sort_order), first incomplete subjects in exam subject order, first
-//     incomplete exam-mapped topic per subject; activate if inactive.
+//   - GOV lecture: lecture slots from gov_lecture_routine (1h each),
+//     current exam (first incomplete in sort_order) contributes its
+//     incomplete subjects in exam subject order first, then globally
+//     unique future-exam subjects fill remaining slots; each slot serves
+//     the first incomplete lecture of the first incomplete exam-mapped
+//     topic in that subject; activate if inactive.
 //   - GOV practice: 3 x 1h, slot1 Quant, slot2 Reasoning, slot3 round-robin
 //     among other active subjects with practice-eligible topics — all
 //     restricted to the current exam's subject set.
@@ -198,58 +201,145 @@ func planDay(ctx context.Context, database *db.DB, localDate string, now time.Ti
 // ---- lecture ----
 
 // planLectureSlots plans the GOV lecture block exam-wise: the current exam
-// (first incomplete exam in sort_order) contributes its first up-to-three
-// incomplete subjects in exam subject order, and each slot serves the first
-// incomplete lecture of the first incomplete exam-mapped topic in that
-// subject. Subjects already picked are never repeated the same day (each
-// incomplete subject yields at most one slot). Picked subjects are
-// collected for activation in the atomic commit. With no current exam (or
-// no incomplete subjects) no lecture work is produced.
+// (first incomplete exam in sort_order) contributes its incomplete subjects
+// in exam subject order first, then globally unique future-exam subjects
+// fill any remaining slots, up to the number of slots in
+// gov_lecture_routine. Each candidate serves the first incomplete lecture
+// of the first incomplete exam-mapped topic in that subject, using the
+// existing topic/lecture ordering and completion logic. Subjects already
+// picked are never repeated the same day (each subject yields at most one
+// slot). Picked subjects are collected for activation in the atomic commit.
+// A future subject never becomes the current exam; it only fills an
+// otherwise-unused lecture slot. With no current exam no lecture work is
+// produced. All slots share identical semantics.
 func planLectureSlots(ctx context.Context, database *db.DB) ([]db.TodayTask, []db.ID, error) {
 	routine, err := catalog.GetGovLectureRoutine(ctx, database)
 	if err != nil {
 		return nil, nil, fmt.Errorf("engine: gov lecture routine: %w", err)
 	}
 	if len(routine) == 0 {
-		// Default 3 x 1h when routine missing.
-		routine = []db.GovLectureRoutineSlot{{SlotOrder: 1, DurationSeconds: 3600}, {SlotOrder: 2, DurationSeconds: 3600}, {SlotOrder: 3, DurationSeconds: 3600}}
+		// Default 4 x 1h when routine missing.
+		routine = []db.GovLectureRoutineSlot{{SlotOrder: 1, DurationSeconds: 3600}, {SlotOrder: 2, DurationSeconds: 3600}, {SlotOrder: 3, DurationSeconds: 3600}, {SlotOrder: 4, DurationSeconds: 3600}}
 	}
-	cur, incompletes, err := CurrentGovSubjects(ctx, database)
+	sort.Slice(routine, func(i, j int) bool { return routine[i].SlotOrder < routine[j].SlotOrder })
+	capacity := len(routine)
+	cur, err := CurrentGovExam(ctx, database)
 	if err != nil {
 		return nil, nil, err
 	}
-	if cur == nil || len(incompletes) == 0 {
+	if cur == nil {
 		return nil, nil, nil
 	}
-	var out []db.TodayTask
-	var activate []db.ID
-	for i, slot := range routine {
-		if i >= len(incompletes) {
+	type lectureCandidate struct {
+		subject db.GovSubject
+		topic   db.GovTopic
+		lecture db.GovLecture
+	}
+	var cands []lectureCandidate
+	seen := map[db.ID]bool{}
+	// STEP 1 — current exam, in gov_exam_subjects.sort_order.
+	progress, err := ExamSubjectProgress(ctx, database, cur.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, p := range progress {
+		if len(cands) >= capacity {
 			break
 		}
-		sp := incompletes[i]
-		topic, lec, err := firstIncompleteExamLecture(ctx, database, cur.ID, sp.Subject.ID)
+		if p.Complete {
+			continue
+		}
+		if seen[p.Subject.ID] {
+			continue
+		}
+		topic, lec, err := firstIncompleteExamLecture(ctx, database, cur.ID, p.Subject.ID)
 		if err != nil {
 			return nil, nil, err
 		}
 		if topic == nil || lec == nil {
-			continue // nothing servable in this subject; try the next one
+			continue
 		}
+		seen[p.Subject.ID] = true
+		cands = append(cands, lectureCandidate{subject: p.Subject, topic: *topic, lecture: *lec})
+	}
+	// STEP 2 — future exams fallback, only when slots remain.
+	if len(cands) < capacity {
+		exams, err := catalog.GetGovExams(ctx, database)
+		if err != nil {
+			return nil, nil, fmt.Errorf("engine: gov exams: %w", err)
+		}
+		curIdx := -1
+		for i, e := range exams {
+			if e.ID == cur.ID {
+				curIdx = i
+				break
+			}
+		}
+		if curIdx >= 0 {
+			counts, err := govSubjectExamCounts(ctx, database)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, fe := range exams[curIdx+1:] {
+				if len(cands) >= capacity {
+					break
+				}
+				members, err := catalog.GetGovExamSubjects(ctx, database, fe.ID)
+				if err != nil {
+					return nil, nil, fmt.Errorf("engine: exam subjects: %w", err)
+				}
+				for _, m := range members {
+					if len(cands) >= capacity {
+						break
+					}
+					if seen[m.SubjectID] {
+						continue
+					}
+					if counts[m.SubjectID] != 1 {
+						continue
+					}
+					topic, lec, err := firstIncompleteExamLecture(ctx, database, fe.ID, m.SubjectID)
+					if err != nil {
+						return nil, nil, err
+					}
+					if topic == nil || lec == nil {
+						continue
+					}
+					subj, err := catalog.GetGovSubject(ctx, database, m.SubjectID)
+					if err != nil {
+						return nil, nil, fmt.Errorf("engine: gov subject: %w", err)
+					}
+					seen[m.SubjectID] = true
+					cands = append(cands, lectureCandidate{subject: subj, topic: *topic, lecture: *lec})
+				}
+			}
+		}
+	}
+	if len(cands) == 0 {
+		return nil, nil, nil
+	}
+	if len(cands) > capacity {
+		cands = cands[:capacity]
+	}
+	var out []db.TodayTask
+	var activate []db.ID
+	for i, c := range cands {
+		slot := routine[i]
 		// Collect the activation for the atomic commit instead of
 		// writing it here: a later planning failure must not leave an
 		// orphan activation behind.
-		active, err := runtime.IsGovSubjectActive(ctx, database, sp.Subject.ID)
+		active, err := runtime.IsGovSubjectActive(ctx, database, c.subject.ID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("engine: subject active check: %w", err)
 		}
 		if !active {
-			activate = append(activate, sp.Subject.ID)
+			activate = append(activate, c.subject.ID)
 		}
-		target, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: sp.Subject.ID, TopicID: topic.ID, LectureID: lec.ID})
+		target, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: c.subject.ID, TopicID: c.topic.ID, LectureID: c.lecture.ID})
 		tj := target
 		out = append(out, db.TodayTask{
 			Domain: db.DomainGOV, Kind: db.SessionKindLecture,
-			Title:          fmt.Sprintf("%s • %s • %s", sp.Subject.Name, topic.Name, lec.Title),
+			Title:          fmt.Sprintf("%s • %s • %s", c.subject.Name, c.topic.Name, c.lecture.Title),
 			PlannedSeconds: slot.DurationSeconds, TargetJSON: &tj,
 		})
 	}

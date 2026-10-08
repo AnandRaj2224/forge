@@ -1,7 +1,7 @@
 package engine_test
 
 // Exam-wise GOV progression: the current exam is derived as the first
-// incomplete exam in sort_order, its own subject order drives the three
+// incomplete exam in sort_order, its own subject order drives the four
 // lecture slots and gates practice selection, completion is global, and a
 // later exam's new topics never resurrect an earlier exam's subjects.
 
@@ -225,15 +225,15 @@ func TestExamWiseCompletionAdvances(t *testing.T) {
 	}
 }
 
-// 3+4. Exam subject order determines the three slots; completing a subject
+// 3+4. Exam subject order determines the four slots; completing a subject
 // replaces it with the next incomplete subject in exam order.
 func TestExamWiseThreeSubjectsRotate(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedExamWise(t, ctx, d)
 	now := time.Now()
-	if got := currentSubjectNames(t, ctx, d); !eqNames(got, []string{"Quant", "Reasoning", "English"}) {
-		t.Fatalf("slots=%v want [Quant Reasoning English]", got)
+	if got := currentSubjectNames(t, ctx, d); !eqNames(got, []string{"Quant", "Reasoning", "English", "Banking/Financial Awareness"}) {
+		t.Fatalf("slots=%v want [Quant Reasoning English Banking/Financial Awareness]", got)
 	}
 	// Complete Reasoning (Series): English slides up, Banking enters.
 	completeExamLecture(t, ctx, d, "lec-series", now)
@@ -549,8 +549,8 @@ func TestExamWiseTodayServesCurrentExam(t *testing.T) {
 		}
 		lecSubjects = append(lecSubjects, subj.Name)
 	}
-	if !eqNames(lecSubjects, []string{"Quant", "Reasoning", "English"}) {
-		t.Fatalf("lecture subjects=%v want [Quant Reasoning English]", lecSubjects)
+	if !eqNames(lecSubjects, []string{"Quant", "Reasoning", "English", "Banking/Financial Awareness"}) {
+		t.Fatalf("lecture subjects=%v want [Quant Reasoning English Banking/Financial Awareness]", lecSubjects)
 	}
 	// No duplicate historical topics: exactly one Number System topic row.
 	var n int
