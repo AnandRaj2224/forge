@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -121,21 +122,16 @@ func GetGovLecturesByTopics(ctx context.Context, q db.DBTX, topicIDs []db.ID) (m
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list gov lectures by topics: %w", err)
 	}
-	var all []db.GovLecture
-	func() {
-		defer rows.Close()
-		for rows.Next() {
-			var l db.GovLecture
-			if err := rows.Scan(&l.ID, &l.TopicID, &l.Title, &l.SortOrder); err == nil {
-				all = append(all, l)
-			}
+	defer rows.Close()
+	for rows.Next() {
+		var l db.GovLecture
+		if err := rows.Scan(&l.ID, &l.TopicID, &l.Title, &l.SortOrder); err != nil {
+			return nil, fmt.Errorf("catalog: scan gov lectures by topics: %w", err)
 		}
-	}()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("catalog: scan gov lectures by topics: %w", err)
-	}
-	for _, l := range all {
 		out[l.TopicID] = append(out[l.TopicID], l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("catalog: gov lectures by topics rows: %w", err)
 	}
 	return out, nil
 }
@@ -212,8 +208,11 @@ func InsertGovExamSubject(ctx context.Context, q db.DBTX, s db.GovExamSubject) e
 
 // ---- Gov exam syllabus ----
 
+// GetGovExamSyllabus returns the authoritative (exam, subject, topic) rows
+// in syllabus order. Rows seeded without subject_id resolve it from the
+// canonical topic.
 func GetGovExamSyllabus(ctx context.Context, q db.DBTX, examID db.ID) ([]db.GovExamSyllabus, error) {
-	rows, err := q.QueryContext(ctx, `SELECT exam_id, topic_id, sort_order FROM gov_exam_syllabus WHERE exam_id = ? ORDER BY sort_order`, examID)
+	rows, err := q.QueryContext(ctx, `SELECT exam_id, subject_id, topic_id, sort_order FROM gov_exam_syllabus WHERE exam_id = ? ORDER BY sort_order`, examID)
 	if err != nil {
 		return nil, fmt.Errorf("catalog: list exam syllabus: %w", err)
 	}
@@ -221,16 +220,55 @@ func GetGovExamSyllabus(ctx context.Context, q db.DBTX, examID db.ID) ([]db.GovE
 	var out []db.GovExamSyllabus
 	for rows.Next() {
 		var s db.GovExamSyllabus
-		if err := rows.Scan(&s.ExamID, &s.TopicID, &s.SortOrder); err != nil {
+		var subj sql.NullString
+		if err := rows.Scan(&s.ExamID, &subj, &s.TopicID, &s.SortOrder); err != nil {
 			return nil, fmt.Errorf("catalog: scan exam syllabus: %w", err)
+		}
+		if subj.Valid {
+			s.SubjectID = db.ID(subj.String)
+		} else {
+			// Row seeded without subject: resolve from canonical topic.
+			tp, err := GetGovTopic(ctx, q, s.TopicID)
+			if err != nil {
+				return nil, fmt.Errorf("catalog: syllabus topic subject: %w", err)
+			}
+			s.SubjectID = tp.SubjectID
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("catalog: exam syllabus rows: %w", err)
+	}
+	return out, nil
+}
+
+// GetGovExamSyllabusForSubject returns topics for one (exam, subject) in order.
+// This is the single authoritative answer to "which topics belong to this
+// subject in this exam".
+func GetGovExamSyllabusForSubject(ctx context.Context, q db.DBTX, examID, subjectID db.ID) ([]db.GovExamSyllabus, error) {
+	syll, err := GetGovExamSyllabus(ctx, q, examID)
+	if err != nil {
+		return nil, err
+	}
+	var out []db.GovExamSyllabus
+	for _, s := range syll {
+		if s.SubjectID == subjectID {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 func InsertGovExamSyllabus(ctx context.Context, q db.DBTX, s db.GovExamSyllabus) error {
-	if _, err := q.ExecContext(ctx, `INSERT INTO gov_exam_syllabus (exam_id, topic_id, sort_order) VALUES (?, ?, ?)`, s.ExamID, s.TopicID, s.SortOrder); err != nil {
+	if s.SubjectID == "" {
+		// Resolve from canonical topic for callers that only set exam+topic.
+		tp, err := GetGovTopic(ctx, q, s.TopicID)
+		if err != nil {
+			return fmt.Errorf("catalog: insert syllabus topic lookup: %w", err)
+		}
+		s.SubjectID = tp.SubjectID
+	}
+	if _, err := q.ExecContext(ctx, `INSERT INTO gov_exam_syllabus (exam_id, subject_id, topic_id, sort_order) VALUES (?, ?, ?, ?)`, s.ExamID, s.SubjectID, s.TopicID, s.SortOrder); err != nil {
 		return fmt.Errorf("catalog: insert exam syllabus: %w", err)
 	}
 	return nil
@@ -256,7 +294,7 @@ func GetGovLectureRoutine(ctx context.Context, q db.DBTX) ([]db.GovLectureRoutin
 }
 
 func InsertGovLectureRoutineSlot(ctx context.Context, q db.DBTX, s db.GovLectureRoutineSlot) error {
-	if _, err := q.ExecContext(ctx, `INSERT INTO gov_lecture_routine (slot_order, duration_seconds) VALUES (?, ?)`, s.SlotOrder, s.DurationSeconds); err != nil {
+	if _, err := q.ExecContext(ctx, `INSERT OR IGNORE INTO gov_lecture_routine (slot_order, duration_seconds) VALUES (?, ?)`, s.SlotOrder, s.DurationSeconds); err != nil {
 		return fmt.Errorf("catalog: insert lecture routine slot: %w", err)
 	}
 	return nil

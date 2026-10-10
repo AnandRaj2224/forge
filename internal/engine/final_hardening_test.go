@@ -486,7 +486,7 @@ func sabotageSetup(t *testing.T, ctx context.Context, d *db.DB, now time.Time) {
 	}
 }
 
-func assertNoPartialToday(t *testing.T, ctx context.Context, d *db.DB, date string, actBefore int) {
+func assertNoPartialToday(t *testing.T, ctx context.Context, d *db.DB, date string, actBefore, rotBefore int) {
 	t.Helper()
 	if _, err := runtime.GetLatestTodaySnapshot(ctx, d, date); err == nil {
 		t.Fatal("partial snapshot must roll back")
@@ -505,8 +505,12 @@ func assertNoPartialToday(t *testing.T, ctx context.Context, d *db.DB, date stri
 	if actAfter != actBefore {
 		t.Fatalf("orphan activation: before=%d after=%d", actBefore, actAfter)
 	}
-	if _, err := runtime.GetGovPracticeRotationState(ctx, d); err == nil {
-		t.Fatal("consumed rotation state must roll back")
+	var rotAfter int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_practice_rotation`).Scan(&rotAfter); err != nil {
+		t.Fatal(err)
+	}
+	if rotAfter != rotBefore {
+		t.Fatalf("consumed rotation state must roll back: before=%d after=%d", rotBefore, rotAfter)
 	}
 }
 
@@ -523,13 +527,17 @@ func TestGenerationSabotageMatrix(t *testing.T) {
 		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation`).Scan(&actBefore); err != nil {
 			t.Fatal(err)
 		}
+		var rotBefore int
+		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_practice_rotation`).Scan(&rotBefore); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := d.ExecContext(ctx, `CREATE TRIGGER sab_snap BEFORE INSERT ON today_snapshots BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, err := engine.GenerateToday(ctx, d, "2026-09-22", now); err == nil {
 			t.Fatal("sabotaged snapshot insert must fail")
 		}
-		assertNoPartialToday(t, ctx, d, "2026-09-22", actBefore)
+		assertNoPartialToday(t, ctx, d, "2026-09-22", actBefore, rotBefore)
 	})
 	t.Run("activation failure", func(t *testing.T) {
 		d := openEngineDB(t)
@@ -541,6 +549,10 @@ func TestGenerationSabotageMatrix(t *testing.T) {
 		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation`).Scan(&actBefore); err != nil {
 			t.Fatal(err)
 		}
+		var rotBefore int
+		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_practice_rotation`).Scan(&rotBefore); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := d.ExecContext(ctx, `CREATE TRIGGER sab_act BEFORE INSERT ON gov_subject_activation BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
 			t.Fatal(err)
 		}
@@ -549,7 +561,7 @@ func TestGenerationSabotageMatrix(t *testing.T) {
 		if _, _, err := engine.GenerateToday(ctx, d, "2026-09-22", now); err == nil {
 			t.Fatal("sabotaged activation must fail")
 		}
-		assertNoPartialToday(t, ctx, d, "2026-09-22", actBefore)
+		assertNoPartialToday(t, ctx, d, "2026-09-22", actBefore, rotBefore)
 	})
 	t.Run("rotation failure", func(t *testing.T) {
 		d := openEngineDB(t)
@@ -561,13 +573,17 @@ func TestGenerationSabotageMatrix(t *testing.T) {
 		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation`).Scan(&actBefore); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := d.ExecContext(ctx, `CREATE TRIGGER sab_rot BEFORE INSERT ON gov_practice_rotation_state BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+		var rotBefore int
+		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_practice_rotation`).Scan(&rotBefore); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.ExecContext(ctx, `CREATE TRIGGER sab_rot BEFORE INSERT ON gov_practice_rotation BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, err := engine.GenerateToday(ctx, d, "2026-09-22", now); err == nil {
 			t.Fatal("sabotaged rotation write must fail")
 		}
-		assertNoPartialToday(t, ctx, d, "2026-09-22", actBefore)
+		assertNoPartialToday(t, ctx, d, "2026-09-22", actBefore, rotBefore)
 	})
 }
 

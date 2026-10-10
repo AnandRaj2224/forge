@@ -92,6 +92,30 @@ func ValidateGovPracticeTarget(ctx context.Context, q db.DBTX, pt db.GovPractice
 	return nil
 }
 
+// ValidateGovPracticeTargetForExam additionally requires every topic to be
+// in the given exam's syllabus for the target subject. Used at plan time;
+// save paths keep structural validation so locked tasks from a previous
+// focus remain submittable.
+func ValidateGovPracticeTargetForExam(ctx context.Context, q db.DBTX, pt db.GovPracticeTarget, examID db.ID) error {
+	if err := ValidateGovPracticeTarget(ctx, q, pt); err != nil {
+		return err
+	}
+	syll, err := catalog.GetGovExamSyllabusForSubject(ctx, q, examID, pt.SubjectID)
+	if err != nil {
+		return err
+	}
+	inSyllabus := map[db.ID]bool{}
+	for _, s := range syll {
+		inSyllabus[s.TopicID] = true
+	}
+	for _, tid := range pt.TopicIDs {
+		if !inSyllabus[tid] {
+			return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("topic %q not in exam syllabus", string(tid)))
+		}
+	}
+	return nil
+}
+
 // ValidateDSATarget validates a DSA bundle: non-empty, no duplicate problems,
 // every problem exists, modes valid (NEW/REPEAT).
 func ValidateDSATarget(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
@@ -121,14 +145,9 @@ func ValidateDSATarget(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
 	return nil
 }
 
-// ValidateDSACurrentBundle strictly validates a newly generated DSA block
-// target: exactly 4 problems, all distinct, valid modes, every problem
-// exists, truthful labeling (a NEW-labeled problem must be genuinely new:
-// no prior NEW attempt and no repeat state), and the steady-state shape of
-// exactly 2 REPEAT + 2 NEW. An all-NEW quad is accepted only as the
-// truthful bootstrap when all four problems are genuinely new (fresh DB).
-// Historical singular/legacy shapes stay readable via ValidateDSATarget;
-// this strict rule governs NEW/current targets. DB failures propagate.
+// ValidateDSACurrentBundle strictly validates legacy newly generated DSA
+// block targets (exactly 4: 2 REPEAT + 2 NEW or 4xNEW bootstrap). Retained
+// for existing callers/tests; new planning uses ValidateDSABundleV2.
 func ValidateDSACurrentBundle(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
 	if err := ValidateDSATarget(ctx, q, dt); err != nil {
 		return err
@@ -157,6 +176,28 @@ func ValidateDSACurrentBundle(ctx context.Context, q db.DBTX, dt db.DSATarget) e
 		return nil
 	}
 	return wrapErr("dsa target", ErrInvalidTarget, "current DSA bundle must be 2 repeat + 2 new")
+}
+
+// ValidateDSABundleV2 validates V2 DSA bundles: 1-4 distinct problems,
+// valid modes, every problem exists, truthful NEW labels. Any mix of due
+// repeats and new problems is allowed; future-due fill is a planner concern,
+// not a validity concern. DB failures propagate.
+func ValidateDSABundleV2(ctx context.Context, q db.DBTX, dt db.DSATarget) error {
+	if err := ValidateDSATarget(ctx, q, dt); err != nil {
+		return err
+	}
+	items := dt.Items()
+	if len(items) < 1 || len(items) > 4 {
+		return wrapErr("dsa target", ErrInvalidTarget, "DSA bundle must be 1-4 problems")
+	}
+	for _, it := range items {
+		if it.Mode == db.DSAModeNew {
+			if err := requireGenuinelyNew(ctx, q, it.ProblemID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // requireGenuinelyNew rejects a NEW label for an already-introduced

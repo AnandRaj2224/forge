@@ -5,11 +5,22 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	db "forge/internal/db"
 	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
 )
+
+// joinInPlace builds "?, ?, ..." placeholders without importing strings at
+// call sites that already import it.
+func joinInPlace(n int) string {
+	place := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		place = append(place, "?")
+	}
+	return strings.Join(place, ",")
+}
 
 // TaskActivity is one actual Today task from the selected day.
 type TaskActivity struct {
@@ -569,10 +580,41 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 		wn        int
 	}
 	bySubject := map[string]*agg{}
+	// Batch topic->subject resolution in ONE query (no per-row lookups).
+	topicIDs := make([]string, 0, len(collected))
+	seenTopic := map[string]bool{}
+	for _, pr := range collected {
+		if !seenTopic[pr.topicID] {
+			seenTopic[pr.topicID] = true
+			topicIDs = append(topicIDs, pr.topicID)
+		}
+	}
 	subjectOf := map[string]db.ID{}
+	if len(topicIDs) > 0 {
+		args := make([]any, 0, len(topicIDs))
+		for _, id := range topicIDs {
+			args = append(args, id)
+		}
+		qry := `SELECT id, subject_id FROM gov_topics WHERE id IN (` + joinInPlace(len(topicIDs)) + `)`
+		srows, err := q.QueryContext(ctx, qry, args...)
+		if err != nil {
+			return fmt.Errorf("engine: topic subjects: %w", err)
+		}
+		func() {
+			defer srows.Close()
+			for srows.Next() {
+				var tid, sid string
+				if err := srows.Scan(&tid, &sid); err == nil {
+					subjectOf[tid] = db.ID(sid)
+				}
+			}
+		}()
+		if err := srows.Err(); err != nil {
+			return fmt.Errorf("engine: topic subject rows: %w", err)
+		}
+	}
 	var totalWsum float64
 	var totalWn int
-	_ = subjectOf
 	for _, pr := range collected {
 		a, c, av := pr.att, pr.corr, pr.avg
 		topicID := pr.topicID
@@ -582,11 +624,15 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 			totalWsum += av.Float64 * float64(a)
 			totalWn += a
 		}
-		sid, err := topicSubject(ctx, q, topicID)
-		if err != nil {
-			return fmt.Errorf("engine: topic subject: %w", err)
+		sid, ok := subjectOf[topicID]
+		if !ok {
+			var err error
+			sid, err = topicSubject(ctx, q, topicID)
+			if err != nil {
+				return fmt.Errorf("engine: topic subject: %w", err)
+			}
+			subjectOf[topicID] = sid
 		}
-		subjectOf[topicID] = sid
 		k := string(sid)
 		ag, ok := bySubject[k]
 		if !ok {

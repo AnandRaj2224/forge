@@ -52,5 +52,7 @@ func isUniqueConflict(err error) bool {
 		return false
 	}
 	msg := strings.ToUpper(err.Error())
-	return strings.Contains(msg, "UNIQUE CONSTRAINT FAILED")
+	return strings.Contains(msg, "UNIQUE CONSTRAINT FAILED") ||
+		strings.Contains(msg, "UNIQUE CONSTRAINT") ||
+		strings.Contains(msg, "PRIMARY KEY")
 }

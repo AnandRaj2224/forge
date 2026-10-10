@@ -79,7 +79,7 @@ func seedFlowDB(t *testing.T) *db.DB {
 	prac, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-a", "topic-b"}})
 	_ = runtime.InsertTodayTask(ctx, database, db.TodayTask{ID: "task1", SnapshotID: "snap1", Position: 1, Domain: db.DomainGOV, Kind: db.SessionKindLecture, Title: "Quant lecture", PlannedSeconds: 3600, TargetJSON: &lec})
 	_ = runtime.InsertTodayTask(ctx, database, db.TodayTask{ID: "task2", SnapshotID: "snap1", Position: 2, Domain: db.DomainGOV, Kind: db.SessionKindPractice, Title: "Quant practice", PlannedSeconds: 3600, TargetJSON: &prac})
-	_ = runtime.UpsertWeeklyReview(ctx, database, db.WeeklyReview{ID: "2026-W38", WeekStart: "2026-09-14", WeekEnd: "2026-09-20", GeneratedAt: now, UpdatedAt: now, PlannedSeconds: 3600, ElapsedSeconds: 3000, OverrunSeconds: -600, ReportJSON: "{}"})
+	_ = runtime.InsertWeeklyReviewOnce(ctx, database, db.WeeklyReview{ID: "2026-W38", WeekStart: "2026-09-14", WeekEnd: "2026-09-20", GeneratedAt: now, UpdatedAt: now, PlannedSeconds: 3600, ElapsedSeconds: 3000, OverrunSeconds: -600, ReportJSON: "{}"})
 	t.Cleanup(func() { database.Close() })
 	return database
 }

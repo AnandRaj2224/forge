@@ -52,19 +52,6 @@ func TestValidateSolveTime(t *testing.T) {
 	}
 }
 
-func TestDecideDSAAttemptMode(t *testing.T) {
-	if got := DecideDSAAttemptMode(nil, db.DSAModeNew); got != db.DSAModeNew {
-		t.Fatalf("first NEW should stay NEW, got %s", got)
-	}
-	existing := []db.DSAAttempt{{Mode: db.DSAModeNew}}
-	if got := DecideDSAAttemptMode(existing, db.DSAModeNew); got != db.DSAModeRepeat {
-		t.Fatalf("second NEW must become REPEAT, got %s", got)
-	}
-	if got := DecideDSAAttemptMode(nil, db.DSAModeRepeat); got != db.DSAModeRepeat {
-		t.Fatalf("REPEAT stays REPEAT, got %s", got)
-	}
-}
-
 func TestDSAPassUI(t *testing.T) {
 	pass := []db.DSAAttempt{{Independent: true, Optimal: true, HintUsed: false}}
 	if !DSAPassUI(pass) {

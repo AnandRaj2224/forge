@@ -1146,7 +1146,14 @@ func joinPlus(xs []string) string { return strings.Join(xs, " + ") }
 func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 	switch {
 	case b.Lecture != nil:
-		return b.Lecture.Subject, "LECTURE", b.Lecture.Topic
+		// Lectures sharing one topic must stay distinguishable in the
+		// list: the label carries the lecture title, not just the topic.
+		// Identity and completion semantics live in the target, not here.
+		label := b.Lecture.Topic
+		if b.Lecture.Lecture != "" {
+			label += " • " + b.Lecture.Lecture
+		}
+		return b.Lecture.Subject, "LECTURE", label
 	case len(b.Practice) > 0:
 		topics := make([]string, 0, len(b.Practice))
 		for _, pr := range b.Practice {

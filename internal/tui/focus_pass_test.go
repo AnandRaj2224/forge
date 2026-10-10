@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
+	"forge/internal/engine"
 )
 
 // q in normal navigation backs out (never quits); Esc backs out (never
@@ -112,9 +113,13 @@ func TestCompletedTaskCannotStart(t *testing.T) {
 	if st := ComputeTaskStatus(app.ctx(), app.DB, "task1"); st != TaskCompleted {
 		t.Fatalf("setup: want COMPLETED, got %s", st)
 	}
-	// Domain rule is authoritative.
-	if ok, _ := runtime.CanStartTodayTask(app.ctx(), app.DB, "task1"); ok {
-		t.Fatal("CanStart must be false for completed tasks")
+	// Domain rule is authoritative (exact bundle completion via the engine).
+	ev, err := engine.EvaluateTodayTask(app.ctx(), app.DB, "task1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev.State != engine.StateCompleted {
+		t.Fatalf("completed task must evaluate COMPLETED, got %s", ev.State)
 	}
 	// UI: cursor on COMPLETE, no Start action, read-only result.
 	app.today.tbl.SetCursor(0)

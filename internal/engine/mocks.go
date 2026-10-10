@@ -171,10 +171,9 @@ func CreateMockAtomic(ctx context.Context, database *db.DB, m db.Mock, sections 
 			}
 			seenNames[lower] = true
 			sid := db.ID(fmt.Sprintf("%s-sec-%d-%d", string(m.ID), i, now.UnixNano()%100000))
-			// Current schema contract: mock_sections.gov_subject_id is
-			// required (migration 003). No legacy fallback here: a
-			// schema/DB failure propagates and rolls the transaction
-			// back instead of persisting an unmapped section.
+			// Schema contract: mock_sections.gov_subject_id is required.
+			// No fallback here: a schema/DB failure propagates and rolls
+			// the transaction back instead of persisting an unmapped section.
 			if _, err := q.ExecContext(ctx, `INSERT INTO mock_sections (id, mock_id, name, sort_order, gov_subject_id) VALUES (?, ?, ?, ?, ?)`,
 				string(sid), string(m.ID), strings.TrimSpace(sec.Name), i+1, string(sec.GovSubjectID)); err != nil {
 				return fmt.Errorf("engine: create mock section: %w", err)
@@ -245,10 +244,9 @@ func ReplaceWeakTopicsAtomic(ctx context.Context, database *db.DB, mockID, secti
 				return fmt.Errorf("engine: insert weak topic: %w", err)
 			}
 		}
-		// Current schema contract: the explicit subject mapping is
-		// persisted unconditionally (migration 003). A schema/DB
-		// failure propagates and rolls back instead of leaving weak
-		// topics on an unmapped section.
+		// Schema contract: the explicit subject mapping is persisted
+		// unconditionally. A schema/DB failure propagates and rolls back
+		// instead of leaving weak topics on an unmapped section.
 		if _, err := q.ExecContext(ctx, `UPDATE mock_sections SET gov_subject_id = ? WHERE id = ?`, string(govSubjectID), string(sectionID)); err != nil {
 			return fmt.Errorf("engine: update section subject: %w", err)
 		}

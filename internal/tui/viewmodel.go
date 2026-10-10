@@ -52,98 +52,15 @@ func FormatHMS(d time.Duration) string {
 // FormatHM renders planned like 01:00:00 or 2h30 for headers.
 func FormatHM(secs int) string { return FormatDuration(secs) }
 
-// FormatDurationLong renders seconds as product metrics: 3600->"1h",
-// 9300->"1h 35m", 300->"5m", 90->"1m 30s", 42->"42s". Sub-hour values keep
-// second precision (1m 30s, not 1m); hour values truncate to minutes.
-// Actual and planned stay visually distinct.
+// FormatDurationLong is the single canonical product formatter, owned by
+// the engine. This wrapper preserves the TUI call sites/tests.
 func FormatDurationLong(secs int) string {
-	if secs <= 0 {
-		if secs < 0 {
-			secs = 0
-		}
-		if secs < 60 {
-			return fmt.Sprintf("%ds", secs)
-		}
-	}
-	if secs < 60 {
-		return fmt.Sprintf("%ds", secs)
-	}
-	h := secs / 3600
-	m := (secs % 3600) / 60
-	s := secs % 60
-	if h == 0 {
-		if s == 0 {
-			return fmt.Sprintf("%dm", m)
-		}
-		return fmt.Sprintf("%dm %ds", m, s)
-	}
-	if m == 0 {
-		return fmt.Sprintf("%dh", h)
-	}
-	return fmt.Sprintf("%dh %02dm", h, m)
+	return engine.FormatDurationLong(secs)
 }
 
-// ParseDurationSeconds parses human duration strings into seconds without
-// changing the stored meaning (seconds). Accepts:
-//   - plain integers as seconds: "300" -> 300 (back-compat)
-//   - duration strings: "30s", "5m", "1h", "1h 15m", "1h15m", "1m 30s"
-//
-// Units are h/m/s, case-insensitive, spaces optional. Returns seconds or
-// an error message fragment.
+// ParseDurationSeconds is owned by the engine; this preserves TUI call sites.
 func ParseDurationSeconds(s string) (int, string) {
-	t := strings.TrimSpace(s)
-	if t == "" {
-		return 0, "required"
-	}
-	low := strings.ToLower(t)
-	// Plain integer (optional surrounding spaces) = seconds for back-compat.
-	if v, err := strconv.Atoi(strings.TrimSpace(low)); err == nil {
-		if v < 0 {
-			return 0, "must be >= 0"
-		}
-		return v, ""
-	}
-	// Duration tokens: sequence of <number><unit>.
-	nospace := strings.ReplaceAll(low, " ", "")
-	if nospace == "" {
-		return 0, "required"
-	}
-	total := 0
-	i := 0
-	seen := false
-	for i < len(nospace) {
-		j := i
-		for j < len(nospace) && nospace[j] >= '0' && nospace[j] <= '9' {
-			j++
-		}
-		if j == i {
-			return 0, "use like 30s, 5m, 1h 15m or seconds"
-		}
-		num, err := strconv.Atoi(nospace[i:j])
-		if err != nil {
-			return 0, "use like 30s, 5m, 1h 15m or seconds"
-		}
-		if j >= len(nospace) {
-			return 0, "use like 30s, 5m, 1h 15m or seconds"
-		}
-		unit := nospace[j]
-		switch unit {
-		case 'h':
-			total += num * 3600
-		case 'm':
-			total += num * 60
-		case 's':
-			total += num
-		default:
-			return 0, "use like 30s, 5m, 1h 15m or seconds"
-		}
-		seen = true
-		i = j + 1
-	}
-	if !seen {
-		return 0, "use like 30s, 5m, 1h 15m or seconds"
-	}
-	return total, ""
+	return engine.ParseDurationSeconds(s)
 }
 
 // FormatDate renders UI dates as 21 Sep 2026 (numeric day, 3-letter
@@ -1002,25 +919,6 @@ func ValidateSolveTime(s string) (int, *int, string) {
 		return 0, nil, "solve time must be like 30s, 5m, 1h 15m or seconds"
 	}
 	return v, &v, ""
-}
-
-// DecideDSAAttemptMode is legacy.
-//
-// Deprecated: non-authoritative. It silently converts a NEW target into
-// REPEAT when a NEW attempt already exists. The engine never converts:
-// engine.SaveDSAEvidence surfaces a stale target (ErrInvalidTarget)
-// instead. Kept only for the existing unit test; product code must not
-// decide attempt modes outside the engine.
-func DecideDSAAttemptMode(existing []db.DSAAttempt, target db.DSAMode) db.DSAMode {
-	if target == db.DSAModeNew {
-		for _, a := range existing {
-			if a.Mode == db.DSAModeNew {
-				return db.DSAModeRepeat
-			}
-		}
-		return db.DSAModeNew
-	}
-	return db.DSAModeRepeat
 }
 
 // SortReviews sorts weekly reviews ascending by week id.

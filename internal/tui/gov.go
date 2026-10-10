@@ -34,9 +34,8 @@ type GovScreen struct {
 	level     string
 	exams     []db.GovExam
 	coverages map[db.ID]ExamCoverage
-	// currentExamID is the derived current GOV exam (first incomplete exam
-	// in sort_order). It only marks the dashboard card; exam progression
-	// itself is derived by the engine on every plan.
+	// currentExamID is the V2 explicit focus exam for the dashboard marker.
+	// New code must not derive focus from completion order.
 	currentExamID db.ID
 	cursor        int // dashboard grid cursor over exams + subjects card
 	gridCols      int
@@ -101,10 +100,14 @@ func (s *GovScreen) Reload() {
 		}
 		s.coverages[e.ID] = cov
 	}
-	// Derived current exam for the dashboard marker (presentation only;
-	// the engine derives it again on every Today plan).
+	// V2 explicit focus for the dashboard marker (never derived from
+	// completion). Falls back to legacy current exam when no focus yet.
 	s.currentExamID = ""
-	if cur, err := engine.CurrentGovExam(ctx, s.app.DB); err != nil {
+	if focus, err := engine.GetFocusExam(ctx, s.app.DB); err != nil {
+		s.err = "data error: " + err.Error()
+	} else if focus != nil {
+		s.currentExamID = focus.ID
+	} else if cur, err := engine.CurrentGovExam(ctx, s.app.DB); err != nil {
 		s.err = "data error: " + err.Error()
 	} else if cur != nil {
 		s.currentExamID = cur.ID
@@ -113,6 +116,24 @@ func (s *GovScreen) Reload() {
 		s.reloadExam()
 	} else if s.level == govSubjects {
 		s.reloadSubjectsBrowser()
+	}
+}
+
+// SetFocus selects the focused exam via the engine and replans today's
+// untouched work atomically, then refreshes GOV + TODAY views immediately.
+func (s *GovScreen) SetFocus(examID db.ID) {
+	ctx := context.Background()
+	now := time.Now()
+	cal := engine.DefaultCalendar()
+	localDate := cal.LocalDate(now)
+	if _, _, err := engine.SwitchFocusExam(ctx, s.app.DB, examID, localDate, now); err != nil {
+		s.err = "data error: " + err.Error()
+		return
+	}
+	s.Reload()
+	if s.app != nil && s.app.today != nil {
+		s.app.today.Reload()
+		s.app.refreshActiveIndicator()
 	}
 }
 
@@ -143,11 +164,17 @@ func (s *GovScreen) reloadExam() {
 	}
 	s.coverage = &cov
 	if s.examSubject == "" {
-		s.examSubject = "Quant"
+		// Default to the first subject in exam order (no display-name coupling).
+		if len(cov.Subjects) > 0 {
+			s.examSubject = cov.Subjects[0].Subject
+		}
+	} else {
+		// Retain selection when still present; otherwise fall back to first.
 		found := false
 		for _, sc := range cov.Subjects {
-			if sc.Subject == "Quant" {
+			if sc.Subject == s.examSubject {
 				found = true
+				break
 			}
 		}
 		if !found && len(cov.Subjects) > 0 {
@@ -257,7 +284,11 @@ func (s *GovScreen) reloadSubjectsBrowser() {
 	}
 	items := make([]RowItem, 0, len(subjs))
 	for _, g := range subjs {
-		topics, _ := catalog.GetGovTopics(ctx, s.app.DB, g.ID)
+		topics, terr := catalog.GetGovTopics(ctx, s.app.DB, g.ID)
+		if terr != nil {
+			s.err = terr.Error()
+			return
+		}
 		items = append(items, RowItem{ID: string(g.ID), Title: g.Name, Meta: fmt.Sprintf("%d topics", len(topics)), Mark: "•"})
 	}
 	s.subjNav.SetItems(items)
@@ -372,6 +403,14 @@ func (s *GovScreen) Update(msg tea.Msg) tea.Cmd {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.String() {
 		case "enter":
+			return s.pressEnter()
+		case "f", "F":
+			// Focus selection on the dashboard: focus the cursor exam,
+			// replan today's untouched work, refresh immediately.
+			if s.level == govDashboard && s.cursor < len(s.exams) {
+				s.SetFocus(s.exams[s.cursor].ID)
+				return nil
+			}
 			return s.pressEnter()
 		case "j", "down", "k", "up", "h", "left", "l", "right":
 			return s.move(k.String())

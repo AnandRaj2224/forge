@@ -138,15 +138,25 @@ func beforeCutoff(ts int64, cutoff int64) bool {
 }
 
 func sessionsForTask(ctx context.Context, q db.DBTX, taskID db.ID) ([]db.Session, error) {
-	all, err := runtime.ListSessions(ctx, q)
+	sessions, err := runtime.ListSessionsForTask(ctx, q, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("engine: list sessions: %w", err)
 	}
-	var out []db.Session
-	for _, s := range all {
-		if s.TodayTaskID == taskID {
-			out = append(out, s)
-		}
+	return sessions, nil
+}
+
+// sessionsForTasks batches session loading for a task set in ONE query.
+func sessionsForTasks(ctx context.Context, q db.DBTX, taskIDs []db.ID) (map[db.ID][]db.Session, error) {
+	sessions, err := runtime.ListSessionsForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("engine: list sessions: %w", err)
+	}
+	out := make(map[db.ID][]db.Session, len(taskIDs))
+	for _, id := range taskIDs {
+		out[id] = nil
+	}
+	for _, s := range sessions {
+		out[s.TodayTaskID] = append(out[s.TodayTaskID], s)
 	}
 	return out, nil
 }

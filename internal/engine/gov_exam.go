@@ -55,31 +55,6 @@ func govLectureSlotCapacity(ctx context.Context, q db.DBTX) (int, error) {
 	return len(routine), nil
 }
 
-// govSubjectExamCounts returns how many exams each subject belongs to,
-// counted across ALL rows in gov_exam_subjects. A subject is globally
-// unique when its count is exactly one.
-func govSubjectExamCounts(ctx context.Context, q db.DBTX) (map[db.ID]int, error) {
-	rows, err := q.QueryContext(ctx, `SELECT subject_id, COUNT(*) FROM gov_exam_subjects GROUP BY subject_id`)
-	if err != nil {
-		return nil, fmt.Errorf("engine: subject exam counts: %w", err)
-	}
-	counts := map[db.ID]int{}
-	func() {
-		defer rows.Close()
-		for rows.Next() {
-			var sid string
-			var n int
-			if err := rows.Scan(&sid, &n); err == nil {
-				counts[db.ID(sid)] = n
-			}
-		}
-	}()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("engine: subject exam counts rows: %w", err)
-	}
-	return counts, nil
-}
-
 // IsGovTopicLectureComplete reports whether every lecture under a topic is
 // complete. A topic with zero lectures counts as complete. DB failures
 // propagate, never default.
@@ -164,16 +139,18 @@ func examSyllabusTopicSet(ctx context.Context, q db.DBTX, examID db.ID) (map[db.
 }
 
 // IsGovExamComplete reports whether every global topic mapped to the exam
-// is lecture-complete (zero-lecture topics count as complete). GOV practice
-// completion is not required for exam progression. An exam with no mapped
-// topics is vacuously complete. DB failures propagate.
+// is lecture-complete (zero-lecture topics count as complete — intentional).
+// GOV practice completion is not required for exam progression.
+// An exam with no mapped topics is NOT complete: it is unconfigured and
+// must not masquerade as prepared. Use IsGovExamConfigured to distinguish.
+// DB failures propagate.
 func IsGovExamComplete(ctx context.Context, q db.DBTX, examID db.ID) (bool, error) {
 	_, ids, err := examSyllabusTopicSet(ctx, q, examID)
 	if err != nil {
 		return false, err
 	}
 	if len(ids) == 0 {
-		return true, nil
+		return false, nil
 	}
 	compMap, err := examTopicCompletionMap(ctx, q, ids)
 	if err != nil {
@@ -192,12 +169,23 @@ func IsGovExamComplete(ctx context.Context, q db.DBTX, examID db.ID) (bool, erro
 // (nil, nil): GOV lecture/practice planning must then produce no exam work
 // rather than inventing work. A later-added exam with incomplete topics
 // naturally becomes current. DB failures propagate.
+//
+// V1 compatibility: unconfigured exams (empty syllabus) are skipped, never
+// treated as current. New code should use explicit focus (GetFocusExam);
+// this remains for dashboard markers and legacy callers.
 func CurrentGovExam(ctx context.Context, q db.DBTX) (*db.GovExam, error) {
 	exams, err := catalog.GetGovExams(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("engine: gov exams: %w", err)
 	}
 	for _, e := range exams {
+		configured, err := IsGovExamConfigured(ctx, q, e.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !configured {
+			continue
+		}
 		done, err := IsGovExamComplete(ctx, q, e.ID)
 		if err != nil {
 			return nil, err

@@ -266,7 +266,9 @@ func TestDSASaveRejectsLegacySingular(t *testing.T) {
 	ctx := context.Background()
 	seedDSA(t, ctx, d)
 	now := time.Now()
-	mkTaskDate(t, ctx, d, "sing", "2026-09-20", db.DomainDSA, db.SessionKindDSA, mustDSATarget(t, "dsa-1", db.DSAModeNew))
+	// True legacy singular shape (no problems array): readable, never writable.
+	singRaw, _ := db.MarshalTarget(db.DSATarget{ProblemID: "dsa-1", Mode: db.DSAModeNew})
+	mkTaskDate(t, ctx, d, "sing", "2026-09-20", db.DomainDSA, db.SessionKindDSA, singRaw)
 	sess, err := engine.StartTodayTask(ctx, d, "sing", now)
 	if err != nil {
 		t.Fatal(err)

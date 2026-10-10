@@ -45,9 +45,6 @@ const (
 	DSAModeRepeat DSAMode = "REPEAT"
 )
 
-// PracticeMode is an alias kept for API symmetry with the spec.
-type PracticeMode = DSAMode
-
 // GovPracticeSelectionMode selects how a practice slot resolves subjects.
 type GovPracticeSelectionMode string
 
@@ -94,9 +91,14 @@ type GovExam struct {
 	SortOrder int
 }
 
-// GovExamSyllabus maps an exam to a global topic.
+// GovExamSyllabus maps an exam+subject to a canonical topic.
+// (exam_id, topic_id) is the primary membership; subject_id is the
+// authoritative exam-subject the topic belongs to in this exam and must
+// equal the topic's canonical subject. There is one answer to
+// "which topics belong to this subject in this exam".
 type GovExamSyllabus struct {
 	ExamID    ID
+	SubjectID ID
 	TopicID   ID
 	SortOrder int
 }
@@ -169,11 +171,15 @@ type GovLectureCompletion struct {
 	CompletedAt time.Time
 }
 
-// GovPracticeRecord is one global topic practiced during one session.
+// GovPracticeRecord is one topic practiced during one session.
+// ExamID attributes the result to the focused exam (exam-specific practice
+// history). NULL/empty preserves legacy rows, which remain readable as
+// global history and are never reinterpreted under a new focus.
 type GovPracticeRecord struct {
 	ID                      ID
 	SessionID               ID
 	TopicID                 ID
+	ExamID                  *ID
 	TimeSpentSeconds        int
 	Attempted               int
 	Correct                 int
@@ -181,11 +187,54 @@ type GovPracticeRecord struct {
 	RecordedAt              time.Time
 }
 
-// GovPracticeRotationState is singleton scheduler state (id = 1).
-type GovPracticeRotationState struct {
+// GovExamProfile holds lifecycle state for one exam, independent of
+// syllabus completion. Main-goal is separate from focus.
+type GovExamProfile struct {
+	ExamID     ID
+	Status     string // ACTIVE, PAUSED, ARCHIVED
+	IsMainGoal bool
+	Priority   int
+	TargetDate *string // YYYY-MM-DD, optional
+	UpdatedAt  time.Time
+}
+
+// Exam profile statuses.
+const (
+	ExamStatusActive   = "ACTIVE"
+	ExamStatusPaused   = "PAUSED"
+	ExamStatusArchived = "ARCHIVED"
+)
+
+// GovFocusState is the singleton explicit focus exam (id = 1).
+// Nil FocusedExamID means no focus selected yet.
+type GovFocusState struct {
 	ID            int
-	LastSubjectID *ID
+	FocusedExamID *ID
 	UpdatedAt     time.Time
+}
+
+// GovPracticeRotation is the deterministic per-exam+subject topic cursor.
+// NextIndex is the offset into the stable eligible order for the next plan.
+type GovPracticeRotation struct {
+	ExamID    ID
+	SubjectID ID
+	NextIndex int
+	UpdatedAt time.Time
+}
+
+// Stable canonical practice subject IDs for the V2 fixed routine.
+// Resolved by ID, never by display name.
+const (
+	PracticeSubjectQuant     ID = "subj-quant"
+	PracticeSubjectEnglish   ID = "subj-english"
+	PracticeSubjectReasoning ID = "subj-reasoning"
+)
+
+// V2FixedPracticeSubjects is the authoritative fixed practice order.
+var V2FixedPracticeSubjects = []ID{
+	PracticeSubjectQuant,
+	PracticeSubjectEnglish,
+	PracticeSubjectReasoning,
 }
 
 // DSAAttempt is historical evidence of one attempt.

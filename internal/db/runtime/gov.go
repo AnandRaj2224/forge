@@ -140,16 +140,15 @@ func GetLectureCompletionMap(ctx context.Context, q db.DBTX, lectureIDs []db.ID)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: lecture completion map: %w", err)
 	}
+	defer rows.Close()
 	var found []string
-	func() {
-		defer rows.Close()
-		for rows.Next() {
-			var lid string
-			if err := rows.Scan(&lid); err == nil {
-				found = append(found, lid)
-			}
+	for rows.Next() {
+		var lid string
+		if err := rows.Scan(&lid); err != nil {
+			return nil, fmt.Errorf("runtime: lecture completion map scan: %w", err)
 		}
-	}()
+		found = append(found, lid)
+	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("runtime: lecture completion map rows: %w", err)
 	}
@@ -162,15 +161,21 @@ func GetLectureCompletionMap(ctx context.Context, q db.DBTX, lectureIDs []db.ID)
 // ---- Gov practice records ----
 
 // InsertGovPracticeRecord inserts one topic-practiced row.
+// ExamID attributes the result to the focused exam; nil preserves legacy
+// global rows. Callers should pass the focused exam for new saves.
 func InsertGovPracticeRecord(ctx context.Context, q db.DBTX, r db.GovPracticeRecord) error {
 	var avg any
 	if r.AvgQuestionSpeedSeconds != nil {
 		avg = *r.AvgQuestionSpeedSeconds
 	}
+	var exam any
+	if r.ExamID != nil {
+		exam = string(*r.ExamID)
+	}
 	if _, err := q.ExecContext(ctx, `
-INSERT INTO gov_practice_records (id, session_id, topic_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.SessionID, r.TopicID, r.TimeSpentSeconds, r.Attempted, r.Correct, avg, r.RecordedAt.Unix(),
+INSERT INTO gov_practice_records (id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.SessionID, r.TopicID, exam, r.TimeSpentSeconds, r.Attempted, r.Correct, avg, r.RecordedAt.Unix(),
 	); err != nil {
 		return fmt.Errorf("runtime: insert practice record: %w", err)
 	}
@@ -180,7 +185,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 // GetGovPracticeHistory returns practice rows for a topic ordered by recorded_at.
 func GetGovPracticeHistory(ctx context.Context, q db.DBTX, topicID db.ID) ([]db.GovPracticeRecord, error) {
 	rows, err := q.QueryContext(ctx, `
-SELECT id, session_id, topic_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+SELECT id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
 FROM gov_practice_records WHERE topic_id = ? ORDER BY recorded_at`, topicID)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: practice history: %w", err)
@@ -192,7 +197,7 @@ FROM gov_practice_records WHERE topic_id = ? ORDER BY recorded_at`, topicID)
 // GetGovPracticeRecordsBySession returns practice rows for a session.
 func GetGovPracticeRecordsBySession(ctx context.Context, q db.DBTX, sessionID db.ID) ([]db.GovPracticeRecord, error) {
 	rows, err := q.QueryContext(ctx, `
-SELECT id, session_id, topic_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+SELECT id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
 FROM gov_practice_records WHERE session_id = ? ORDER BY topic_id`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: practice by session: %w", err)
@@ -206,13 +211,18 @@ func scanPracticeRecords(rows *sql.Rows) ([]db.GovPracticeRecord, error) {
 	for rows.Next() {
 		var r db.GovPracticeRecord
 		var avg sql.NullFloat64
+		var exam sql.NullString
 		var recorded int64
-		if err := rows.Scan(&r.ID, &r.SessionID, &r.TopicID, &r.TimeSpentSeconds, &r.Attempted, &r.Correct, &avg, &recorded); err != nil {
+		if err := rows.Scan(&r.ID, &r.SessionID, &r.TopicID, &exam, &r.TimeSpentSeconds, &r.Attempted, &r.Correct, &avg, &recorded); err != nil {
 			return nil, fmt.Errorf("runtime: scan practice record: %w", err)
 		}
 		if avg.Valid {
 			v := avg.Float64
 			r.AvgQuestionSpeedSeconds = &v
+		}
+		if exam.Valid {
+			v := db.ID(exam.String)
+			r.ExamID = &v
 		}
 		r.RecordedAt = unixToTime(recorded)
 		out = append(out, r)
@@ -235,72 +245,11 @@ func GetGovPracticeRecordsBySessions(ctx context.Context, q db.DBTX, sessionIDs 
 		args = append(args, string(id))
 	}
 	rows, err := q.QueryContext(ctx, `
-SELECT id, session_id, topic_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+SELECT id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
 FROM gov_practice_records WHERE session_id IN (`+strings.Join(place, ",")+`) ORDER BY topic_id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: practice by sessions: %w", err)
 	}
 	defer rows.Close()
 	return scanPracticeRecords(rows)
-}
-
-// GetGovPracticeRecordsForTopics returns practice rows for a bounded set of
-// topics in ONE query, ordered by recorded_at. Used to derive pure
-// round-robin topic rotation from existing history without new state.
-func GetGovPracticeRecordsForTopics(ctx context.Context, q db.DBTX, topicIDs []db.ID) ([]db.GovPracticeRecord, error) {
-	if len(topicIDs) == 0 {
-		return nil, nil
-	}
-	place := make([]string, 0, len(topicIDs))
-	args := make([]any, 0, len(topicIDs))
-	for _, id := range topicIDs {
-		place = append(place, "?")
-		args = append(args, string(id))
-	}
-	rows, err := q.QueryContext(ctx, `
-SELECT id, session_id, topic_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
-FROM gov_practice_records WHERE topic_id IN (`+strings.Join(place, ",")+`) ORDER BY recorded_at, id`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("runtime: practice for topics: %w", err)
-	}
-	defer rows.Close()
-	return scanPracticeRecords(rows)
-}
-
-// ---- Gov practice rotation state ----
-
-// GetGovPracticeRotationState returns the singleton rotation state.
-// Returns sql.ErrNoRows wrapped when the row does not exist yet.
-func GetGovPracticeRotationState(ctx context.Context, q db.DBTX) (db.GovPracticeRotationState, error) {
-	var s db.GovPracticeRotationState
-	var last *string
-	var updated int64
-	err := q.QueryRowContext(ctx, `SELECT id, last_subject_id, updated_at FROM gov_practice_rotation_state WHERE id = 1`).Scan(&s.ID, &last, &updated)
-	if err != nil {
-		return db.GovPracticeRotationState{}, fmt.Errorf("runtime: get rotation state: %w", err)
-	}
-	if last != nil {
-		id := db.ID(*last)
-		s.LastSubjectID = &id
-	}
-	s.UpdatedAt = unixToTime(updated)
-	return s, nil
-}
-
-// SetGovPracticeRotationState upserts the singleton rotation state.
-func SetGovPracticeRotationState(ctx context.Context, q db.DBTX, s db.GovPracticeRotationState) error {
-	if s.ID == 0 {
-		s.ID = 1
-	}
-	var last any
-	if s.LastSubjectID != nil {
-		last = string(*s.LastSubjectID)
-	}
-	if _, err := q.ExecContext(ctx, `INSERT INTO gov_practice_rotation_state (id, last_subject_id, updated_at) VALUES (?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET last_subject_id = excluded.last_subject_id, updated_at = excluded.updated_at`,
-		s.ID, last, s.UpdatedAt.Unix(),
-	); err != nil {
-		return fmt.Errorf("runtime: set rotation state: %w", err)
-	}
-	return nil
 }

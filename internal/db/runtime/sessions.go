@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	db "forge/internal/db"
@@ -69,6 +70,44 @@ FROM sessions ORDER BY started_at`)
 		return nil, fmt.Errorf("runtime: list sessions: %w", err)
 	}
 	defer rows.Close()
+	return scanSessionRows(rows)
+}
+
+// ListSessionsForTask returns sessions for one task ordered by started_at.
+// V2 batched path: single selective query instead of full-table scan.
+func ListSessionsForTask(ctx context.Context, q db.DBTX, taskID db.ID) ([]db.Session, error) {
+	rows, err := q.QueryContext(ctx, `
+SELECT id, today_task_id, domain, kind, title_snapshot, target_snapshot_json, planned_seconds, started_at, stopped_at, status
+FROM sessions WHERE today_task_id = ? ORDER BY started_at`, string(taskID))
+	if err != nil {
+		return nil, fmt.Errorf("runtime: list sessions for task: %w", err)
+	}
+	defer rows.Close()
+	return scanSessionRows(rows)
+}
+
+// ListSessionsForTasks returns sessions for a bounded task set in ONE query.
+func ListSessionsForTasks(ctx context.Context, q db.DBTX, taskIDs []db.ID) ([]db.Session, error) {
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+	place := make([]string, 0, len(taskIDs))
+	args := make([]any, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		place = append(place, "?")
+		args = append(args, string(id))
+	}
+	rows, err := q.QueryContext(ctx, `
+SELECT id, today_task_id, domain, kind, title_snapshot, target_snapshot_json, planned_seconds, started_at, stopped_at, status
+FROM sessions WHERE today_task_id IN (`+strings.Join(place, ",")+`) ORDER BY started_at`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("runtime: list sessions for tasks: %w", err)
+	}
+	defer rows.Close()
+	return scanSessionRows(rows)
+}
+
+func scanSessionRows(rows *sql.Rows) ([]db.Session, error) {
 	var out []db.Session
 	for rows.Next() {
 		var s db.Session
@@ -93,7 +132,10 @@ FROM sessions ORDER BY started_at`)
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("runtime: session rows: %w", err)
+	}
+	return out, nil
 }
 
 func scanSession(row *sql.Row) (db.Session, error) {

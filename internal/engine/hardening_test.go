@@ -147,7 +147,9 @@ func TestComputerAwarenessBlockedUntilActivation(t *testing.T) {
 			}
 		}
 	}
-	// After activation the zero-lecture topic is eligible for slot 3.
+	// After activation the zero-lecture topic is eligible, but V2 practice
+	// uses fixed Quant/English/Reasoning slots: a non-fixed subject never
+	// takes a practice slot.
 	if err := engine.EnsureGovSubjectActive(ctx, d, "subj-ca", now); err != nil {
 		t.Fatal(err)
 	}
@@ -155,21 +157,14 @@ func TestComputerAwarenessBlockedUntilActivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
 	for _, tk := range tasks2 {
 		if tk.Domain != db.DomainGOV || tk.Kind != db.SessionKindPractice {
 			continue
 		}
 		pt, _ := db.UnmarshalGovPracticeTarget(*tk.TargetJSON)
 		if pt.SubjectID == "subj-ca" {
-			found = true
-			if len(pt.TopicIDs) != 1 || pt.TopicIDs[0] != "topic-ca1" {
-				t.Fatalf("slot3 bundle=%v", pt.TopicIDs)
-			}
+			t.Fatal("fixed-slot practice must never include non-fixed subjects")
 		}
-	}
-	if !found {
-		t.Fatal("activated eligible subject must enter round-robin")
 	}
 }
 
@@ -203,6 +198,10 @@ func TestGenerationRollback(t *testing.T) {
 	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation`).Scan(&actBefore); err != nil {
 		t.Fatal(err)
 	}
+	var rotBefore int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_practice_rotation`).Scan(&rotBefore); err != nil {
+		t.Fatal(err)
+	}
 	// Sabotage the final transaction: plan reads still work, but the
 	// snapshot/task commit must fail and roll back everything. An abort
 	// trigger fails the write phase without disturbing any plan read.
@@ -223,8 +222,12 @@ func TestGenerationRollback(t *testing.T) {
 	if actAfter != actBefore {
 		t.Fatalf("orphan activation: before=%d after=%d", actBefore, actAfter)
 	}
-	if _, err := runtime.GetGovPracticeRotationState(ctx, d); err == nil {
-		t.Fatal("consumed rotation state must roll back")
+	var rotAfter int
+	if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_practice_rotation`).Scan(&rotAfter); err != nil {
+		t.Fatal(err)
+	}
+	if rotAfter != rotBefore {
+		t.Fatalf("consumed rotation state must roll back: before=%d after=%d", rotBefore, rotAfter)
 	}
 }
 
@@ -704,15 +707,6 @@ func TestDSARepeatDueRespectsDate(t *testing.T) {
 	if len(all) != 2 {
 		t.Fatalf("all due by 09-30, got %+v", all)
 	}
-}
-
-func mustDSATarget(t *testing.T, pid db.ID, mode db.DSAMode) string {
-	t.Helper()
-	raw, err := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{{ProblemID: pid, Mode: mode}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
 }
 
 // ---- calendar / history ----

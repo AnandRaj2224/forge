@@ -14,7 +14,7 @@ func TestDefaultDBPathUsesXDGLocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaultDBPath: %v", err)
 	}
-	want := filepath.Join(home, ".local", "share", "forge", "forge.db")
+	want := filepath.Join(home, ".local", "share", "forge", "forge-v2.db")
 	if got != want {
 		t.Fatalf("defaultDBPath = %q, want %q", got, want)
 	}

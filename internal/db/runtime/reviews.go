@@ -28,37 +28,6 @@ FROM weekly_reviews WHERE week = ?`, week).Scan(
 	return r, nil
 }
 
-// UpsertWeeklyReview inserts or replaces the row for a week.
-//
-// NOTE: this is a raw SQL primitive. Product code must not call it
-// directly: engine.SaveWeeklyReviewSnapshot (first-writer-wins metric
-// freeze) and engine.SaveReviewReflections (reflection-only edits) own
-// the snapshot semantics; they use InsertWeeklyReviewOnce and
-// UpdateWeeklyReflections below.
-func UpsertWeeklyReview(ctx context.Context, q db.DBTX, r db.WeeklyReview) error {
-	if _, err := q.ExecContext(ctx, `
-INSERT INTO weekly_reviews (week, week_start, week_end, generated_at, updated_at, planned_seconds, elapsed_seconds, overrun_seconds, report_json, reflection_worked, reflection_change)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(week) DO UPDATE SET
-  week_start = excluded.week_start,
-  week_end = excluded.week_end,
-  generated_at = excluded.generated_at,
-  updated_at = excluded.updated_at,
-  planned_seconds = excluded.planned_seconds,
-  elapsed_seconds = excluded.elapsed_seconds,
-  overrun_seconds = excluded.overrun_seconds,
-  report_json = excluded.report_json,
-  reflection_worked = excluded.reflection_worked,
-  reflection_change = excluded.reflection_change`,
-		r.ID, r.WeekStart, r.WeekEnd, r.GeneratedAt.Unix(), r.UpdatedAt.Unix(),
-		r.PlannedSeconds, r.ElapsedSeconds, r.OverrunSeconds,
-		r.ReportJSON, r.ReflectionWorked, r.ReflectionChange,
-	); err != nil {
-		return fmt.Errorf("runtime: upsert weekly review: %w", err)
-	}
-	return nil
-}
-
 // InsertWeeklyReviewOnce inserts the row for a week only when no row
 // exists. On a conflicting week it returns the uniqueness error without
 // touching the stored row, so competing snapshot saves are first-writer-

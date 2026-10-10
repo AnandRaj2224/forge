@@ -143,22 +143,15 @@ func parseNonNegInt(field, s string) (int, string) {
 	if s == "" {
 		return 0, field + " required"
 	}
+	// Strict: entire string must be a non-negative integer (no Sscanf prefix).
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, field + " must be integer >= 0"
+		}
+	}
 	var v int
 	if _, err := fmt.Sscanf(s, "%d", &v); err != nil || v < 0 {
-		// Fall back to strict atoi for trailing garbage detection.
 		return 0, field + " must be integer >= 0"
-	}
-	// Reject "12abc".
-	trimmed := strings.TrimSpace(s)
-	for _, r := range trimmed {
-		if (r < '0' || r > '9') && !(len(trimmed) > 0 && trimmed[0] == '0') {
-			if r == '+' || r == '-' {
-				return 0, field + " must be integer >= 0"
-			}
-			if r < '0' || r > '9' {
-				return 0, field + " must be integer >= 0"
-			}
-		}
 	}
 	return v, ""
 }
@@ -238,10 +231,20 @@ func SaveGovPracticeEvidence(ctx context.Context, database *db.DB, taskID, sessi
 		}
 	}
 	err = database.WithTx(ctx, func(q db.DBTX) error {
+		// Attribute to the focused exam when the bundle belongs to its
+		// syllabus; locked bundles from a previous focus (off-syllabus now)
+		// stay global (nil) rather than misattributed.
+		var examID *db.ID
+		if focus, ferr := GetFocusExam(ctx, q); ferr == nil && focus != nil {
+			if verr := ValidateGovPracticeTargetForExam(ctx, q, pt, focus.ID); verr == nil {
+				c := focus.ID
+				examID = &c
+			}
+		}
 		for _, in := range inputs {
 			id := db.ID(fmt.Sprintf("gpr-%d-%s", now.UnixNano(), string(in.TopicID)))
 			if err := runtime.InsertGovPracticeRecord(ctx, q, db.GovPracticeRecord{
-				ID: id, SessionID: sessionID, TopicID: in.TopicID,
+				ID: id, SessionID: sessionID, TopicID: in.TopicID, ExamID: examID,
 				TimeSpentSeconds: in.TimeSecs, Attempted: in.Attempted, Correct: in.Correct,
 				AvgQuestionSpeedSeconds: in.AvgSpeed, RecordedAt: now,
 			}); err != nil {
@@ -256,10 +259,12 @@ func SaveGovPracticeEvidence(ctx context.Context, database *db.DB, taskID, sessi
 	return EvaluateTodayTask(ctx, database, taskID)
 }
 
-// SaveDSAEvidence validates the exact 2-repeat+2-new bundle target, writes all
+// SaveDSAEvidence validates the DSA bundle target, writes all
 // attempts plus repeat-state updates in ONE transaction, and re-evaluates.
-// All target problems require a recorded attempt (solve>0); pass/fail affects
-// progression but any recorded result satisfies bundle completion.
+// V2 allows 1-4 problem bundles (up to daily capacity); any recorded attempt
+// (solve>0) satisfies the attempt task, while pass/fail governs repeat
+// advancement and stays visible in attempt rows. A failed attempt completes
+// the attempt task but never reads as solved.
 func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.ID, inputs []DSAAttemptInput, now time.Time) (TaskEvaluation, error) {
 	task, err := runtime.GetTodayTask(ctx, database, taskID)
 	if err != nil {
@@ -272,10 +277,14 @@ func SaveDSAEvidence(ctx context.Context, database *db.DB, taskID, sessionID db.
 	if err != nil {
 		return TaskEvaluation{}, wrapErr("dsa save", ErrInvalidTarget, err.Error())
 	}
-	// Current Today tasks save under strict current-target semantics
-	// (exactly 4 distinct problems: 2 REPEAT + 2 NEW, or the truthful
-	// 4×NEW bootstrap) — never the generic legacy validator alone.
-	if err := ValidateDSACurrentBundle(ctx, database, dt); err != nil {
+	// V2 bundles are 1-4 truthful problems in the problems[] shape; the
+	// legacy singular shape (problem_id/mode with no problems array) stays
+	// readable for history via Items() but is never writable for new
+	// evidence: saves to it are ErrInvalidTarget.
+	if len(dt.Problems) == 0 {
+		return TaskEvaluation{}, wrapErr("dsa save", ErrInvalidTarget, "legacy singular target is read-only")
+	}
+	if err := ValidateDSATarget(ctx, database, dt); err != nil {
 		return TaskEvaluation{}, err
 	}
 	sess, err := runtime.GetSession(ctx, database, sessionID)

@@ -190,9 +190,30 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 	if len(s.tasks) == 0 {
 		return
 	}
-	sessList, err := runtime.ListSessions(ctx, s.app.DB)
+	// V2 batched: one selective session query for today's tasks (not a
+	// full-table scan), then one batch per evidence domain.
+	var taskIDs []db.ID
+	for _, t := range s.tasks {
+		taskIDs = append(taskIDs, t.ID)
+	}
+	sessList, err := runtime.ListSessionsForTasks(ctx, s.app.DB, taskIDs)
 	if err != nil {
-		return
+		// Fallback to full list on selective-query failure (legacy DBs).
+		sessList, err = runtime.ListSessions(ctx, s.app.DB)
+		if err != nil {
+			return
+		}
+		var filtered []db.Session
+		want := map[db.ID]bool{}
+		for _, id := range taskIDs {
+			want[id] = true
+		}
+		for _, sess := range sessList {
+			if want[sess.TodayTaskID] {
+				filtered = append(filtered, sess)
+			}
+		}
+		sessList = filtered
 	}
 	// Per-task session counts + actual time (all tracks) for SELECTED TASK
 	// metrics. Stopped durations plus live active elapsed.
@@ -232,6 +253,28 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 	// One batch query per domain (bounded, task-count independent).
 	practiceRecs, _ := runtime.GetGovPracticeRecordsBySessions(ctx, s.app.DB, allSIDs)
 	dsaAtts, _ := runtime.GetDSAAttemptsBySessions(ctx, s.app.DB, allSIDs)
+	// Batch lecture completions in ONE map query (no per-task lookups).
+	var lectureIDs []db.ID
+	for idx := range s.tasks {
+		var b Bundle
+		if idx < len(s.bundles) {
+			b = s.bundles[idx]
+		}
+		if b.Lecture != nil {
+			lectureIDs = append(lectureIDs, b.Lecture.LectureID)
+		}
+	}
+	lectureCompMap, _ := runtime.GetLectureCompletionMap(ctx, s.app.DB, lectureIDs)
+	// Batch lecture completion rows for timestamps (one query per lecture
+	// is avoided: fetch only completed IDs present in the map).
+	lectureRows := map[db.ID]db.GovLectureCompletion{}
+	for _, lid := range lectureIDs {
+		if lectureCompMap != nil && lectureCompMap[lid] {
+			if comp, err := runtime.GetLectureCompletion(ctx, s.app.DB, lid); err == nil {
+				lectureRows[lid] = comp
+			}
+		}
+	}
 	for _, t := range s.tasks {
 		ev := &todayEvidence{
 			practiceByTopic: map[string]db.GovPracticeRecord{},
@@ -249,7 +292,7 @@ func (s *TodayScreen) preloadEvidence(ctx context.Context) {
 			b = s.bundles[idx]
 		}
 		if b.Lecture != nil {
-			if comp, err := runtime.GetLectureCompletion(ctx, s.app.DB, b.Lecture.LectureID); err == nil {
+			if comp, ok := lectureRows[b.Lecture.LectureID]; ok {
 				c := comp
 				ev.lectureComp = &c
 				s.taskCompletedAt[t.ID] = c.CompletedAt

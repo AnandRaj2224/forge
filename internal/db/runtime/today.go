@@ -54,7 +54,24 @@ func GetLatestTodaySnapshot(ctx context.Context, q db.DBTX, localDate string) (d
 }
 
 // GetTodayTasks returns tasks for a snapshot ordered by position.
+// V2 prefers the today_snapshot_tasks mapping (locked tasks keep IDs across
+// revisions); legacy rows written without mapping fall back to the
+// today_tasks.snapshot_id column.
 func GetTodayTasks(ctx context.Context, q db.DBTX, snapshotID db.ID) ([]db.TodayTask, error) {
+	if ids, err := GetSnapshotTaskIDs(ctx, q, snapshotID); err == nil && len(ids) > 0 {
+		var out []db.TodayTask
+		for _, id := range ids {
+			t, err := GetTodayTask(ctx, q, id)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, t)
+		}
+		for i := range out {
+			out[i].Position = i + 1
+		}
+		return out, nil
+	}
 	rows, err := q.QueryContext(ctx, `
 SELECT id, snapshot_id, position, scheduled_start_minute, domain, kind, title, planned_seconds, target_json
 FROM today_tasks WHERE snapshot_id = ? ORDER BY position`, snapshotID)
@@ -111,21 +128,4 @@ FROM today_tasks WHERE id = ?`, id).Scan(
 		t.TargetJSON = &v
 	}
 	return t, nil
-}
-
-// CanStartTodayTask is a legacy any-evidence approximation kept for the
-// existing UI test.
-//
-// Deprecated: non-authoritative. The authoritative rule is
-// engine.EvaluateTodayTask (exact bundle completion) enforced by
-// engine.StartTodayTask, which the TUI uses. New code must consult the
-// engine, not this helper.
-// It returns false with a reason when starting is forbidden. The UI must
-// reflect this (no Start action) but must never be the only enforcement:
-// callers creating sessions must consult this first.
-func CanStartTodayTask(ctx context.Context, q db.DBTX, taskID db.ID) (bool, string) {
-	if taskHasEvidence(ctx, q, taskID) {
-		return false, "task already complete — result is read-only"
-	}
-	return true, ""
 }

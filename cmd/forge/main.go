@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "", "path to forge sqlite db (default ~/.local/share/forge/forge.db)")
+	dbPath := flag.String("db", "", "path to forge sqlite db (default ~/.local/share/forge/forge-v2.db)")
 	flag.Parse()
 	path, err := resolveDBPath(*dbPath, os.Getenv("FORGE_DB"))
 	if err != nil {
@@ -52,7 +52,8 @@ func main() {
 	}
 }
 
-// defaultDBPath returns ~/.local/share/forge/forge.db.
+// defaultDBPath returns ~/.local/share/forge/forge-v2.db.
+// V2 uses a separate database so the V1 archive (forge.db) stays untouched.
 // $HOME is expanded safely via os.UserHomeDir so Forge works when
 // launched from any working directory (Rofi, desktop entry, etc.).
 func defaultDBPath() (string, error) {
@@ -63,7 +64,7 @@ func defaultDBPath() (string, error) {
 	if home == "" {
 		return "", fmt.Errorf("home dir: empty")
 	}
-	return filepath.Join(home, ".local", "share", "forge", "forge.db"), nil
+	return filepath.Join(home, ".local", "share", "forge", "forge-v2.db"), nil
 }
 
 // resolveDBPath applies the precedence: -db flag > FORGE_DB env > default.

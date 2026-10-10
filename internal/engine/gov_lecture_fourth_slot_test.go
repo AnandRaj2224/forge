@@ -107,7 +107,7 @@ func seedFallbackBase(t *testing.T, ctx context.Context, d *db.DB) {
 			}
 		}
 	}
-	// Lecture routine 1..3; slot 4 comes from migration 011.
+	// Lecture routine 1..4 seeded by 001_initial.sql.
 	for i := 1; i <= 3; i++ {
 		if err := catalog.InsertGovLectureRoutineSlot(ctx, d, db.GovLectureRoutineSlot{SlotOrder: i, DurationSeconds: 3600}); err != nil {
 			t.Fatal(err)
@@ -210,7 +210,8 @@ func TestGovLectureFourFromCurrent(t *testing.T) {
 	}
 }
 
-// 3. Current exactly 3 incompletes: 3 current + 1 globally unique future.
+// 3. Current exactly 3 incompletes: V2 plans only the focus exam (no
+// future filler). 3 current lectures, slots left empty rather than filled.
 func TestGovLectureThreePlusOne(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
@@ -222,13 +223,13 @@ func TestGovLectureThreePlusOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
-	want := []string{"Quant", "Reasoning", "English", "Banking Awareness"}
+	want := []string{"Quant", "Reasoning", "English"}
 	if !fbEq(got, want) {
-		t.Fatalf("lecture subjects=%v want %v", got, want)
+		t.Fatalf("lecture subjects=%v want %v (V2: focus only, no filler)", got, want)
 	}
 }
 
-// 4. Current exactly 2 incompletes: 2 current + 2 globally unique futures.
+// 4. Current exactly 2 incompletes: V2 plans 2 focus lectures (no filler).
 func TestGovLectureTwoPlusTwo(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
@@ -241,13 +242,13 @@ func TestGovLectureTwoPlusTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
-	want := []string{"Quant", "Reasoning", "Banking Awareness", "Professional Knowledge"}
+	want := []string{"Quant", "Reasoning"}
 	if !fbEq(got, want) {
-		t.Fatalf("lecture subjects=%v want %v", got, want)
+		t.Fatalf("lecture subjects=%v want %v (V2: focus only)", got, want)
 	}
 }
 
-// 5. Current exactly 1 incomplete: 1 current + 3 globally unique futures.
+// 5. Current exactly 1 incomplete: V2 plans 1 focus lecture (no filler).
 func TestGovLectureOnePlusThree(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
@@ -261,13 +262,13 @@ func TestGovLectureOnePlusThree(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
-	want := []string{"Quant", "Banking Awareness", "Professional Knowledge", "Extra Unique"}
+	want := []string{"Quant"}
 	if !fbEq(got, want) {
-		t.Fatalf("lecture subjects=%v want %v", got, want)
+		t.Fatalf("lecture subjects=%v want %v (V2: focus only)", got, want)
 	}
 }
 
-// 6. A future subject that appears in multiple exams is skipped.
+// 6. V2 never pulls future subjects: only focus incompletes appear.
 func TestGovLectureSkipsSharedFuture(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
@@ -281,34 +282,38 @@ func TestGovLectureSkipsSharedFuture(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
+	want := []string{"Quant"}
+	if !fbEq(got, want) {
+		t.Fatalf("V2 focus-only, got %v want %v", got, want)
+	}
 	for _, name := range got {
-		if name == "Computer" {
-			t.Fatalf("shared Computer (2 exams) must be skipped, got %v", got)
+		if name == "Computer" || name == "Banking Awareness" {
+			t.Fatalf("future subject must never appear in V2, got %v", got)
 		}
 	}
 }
 
-// 7. If the next exam has no usable globally unique subject, continue to the next future exam.
+// 7. V2: no future scan — exhausted future exams are irrelevant.
 func TestGovLectureSkipsExhaustedFutureExam(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedFallbackBase(t, ctx, d)
 	now := time.Now()
 	completeExamLecture(t, ctx, d, "fb-l-history", now)
-	// Exhaust Future2's only unique: Banking Awareness complete.
+	// Exhaust a future unique: V2 still plans only focus incompletes.
 	completeExamLecture(t, ctx, d, "fb-l-bank", now)
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
-	want := []string{"Quant", "Reasoning", "English", "Professional Knowledge"}
+	want := []string{"Quant", "Reasoning", "English"}
 	if !fbEq(got, want) {
-		t.Fatalf("lecture subjects=%v want %v (must skip exhausted Future2)", got, want)
+		t.Fatalf("lecture subjects=%v want %v (V2 focus only)", got, want)
 	}
 }
 
-// 8. A globally unique future subject with all lecture work already complete is skipped.
+// 8. V2: completed future work is irrelevant to focus planning.
 func TestGovLectureSkipsCompleteUnique(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
@@ -322,13 +327,13 @@ func TestGovLectureSkipsCompleteUnique(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
-	want := []string{"Quant", "Reasoning", "English", "Extra Unique"}
+	want := []string{"Quant", "Reasoning", "English"}
 	if !fbEq(got, want) {
-		t.Fatalf("lecture subjects=%v want %v", got, want)
+		t.Fatalf("lecture subjects=%v want %v (V2 focus only)", got, want)
 	}
 }
 
-// 9. Future exams are scanned in sort_order.
+// 9. V2: focus exam alone determines lectures; future order irrelevant.
 func TestGovLectureFutureExamOrder(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
@@ -342,14 +347,13 @@ func TestGovLectureFutureExamOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
-	// Order must follow exam sort_order: Future2 bank, Future3 pk, Future4 extra.
-	want := []string{"Quant", "Banking Awareness", "Professional Knowledge", "Extra Unique"}
+	want := []string{"Quant"}
 	if !fbEq(got, want) {
-		t.Fatalf("lecture subjects=%v want %v (exam sort_order)", got, want)
+		t.Fatalf("lecture subjects=%v want %v (V2 focus only)", got, want)
 	}
 }
 
-// 10. Subjects inside each exam are scanned in gov_exam_subjects.sort_order.
+// 10. V2: subjects come from the focus exam order only.
 func TestGovLectureFutureSubjectOrder(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
@@ -428,11 +432,10 @@ func TestGovLectureFutureSubjectOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := fbLectureSubjects(t, ctx, d, tasks)
-	// Current provides 3 (Quant, Reasoning, English); 4th must be UniqueA
-	// (sort_order 2 in future), not UniqueB.
-	want := []string{"Quant", "Reasoning", "English", "UniqueA"}
+	// V2 focus defaults to the first exam (Cur): 3 focus lectures, no filler.
+	want := []string{"Quant", "Reasoning", "English"}
 	if !fbEq(got, want) {
-		t.Fatalf("lecture subjects=%v want %v (subject sort_order)", got, want)
+		t.Fatalf("lecture subjects=%v want %v (V2 focus only)", got, want)
 	}
 }
 
@@ -516,10 +519,14 @@ func TestGovLectureActivationAtomic(t *testing.T) {
 	if _, _, err := engine.GenerateToday(ctx, d, "2026-09-21", now); err != nil {
 		t.Fatal(err)
 	}
-	for _, sid := range []db.ID{"fb-quant", "fb-reasoning", "fb-english", "fb-bank"} {
+	// V2 focus-only: only focus subjects activate; future filler never runs.
+	for _, sid := range []db.ID{"fb-quant", "fb-reasoning", "fb-english"} {
 		if active, err := runtime.IsGovSubjectActive(ctx, d, sid); err != nil || !active {
 			t.Fatalf("subject %q must be active after planning: %v %v", sid, active, err)
 		}
+	}
+	if active, _ := runtime.IsGovSubjectActive(ctx, d, "fb-bank"); active {
+		t.Fatalf("future subject fb-bank must stay inactive in V2 (no filler)")
 	}
 	// Failure rolls back activation: sabotage activation insert.
 	d2 := openEngineDB(t)

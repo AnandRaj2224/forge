@@ -400,7 +400,7 @@ func Test17_OneReviewPerWeek(t *testing.T) {
 	ctx := context.Background()
 	now := testNow()
 	r := db.WeeklyReview{ID: "2026-W38", WeekStart: "2026-09-14", WeekEnd: "2026-09-20", GeneratedAt: now, UpdatedAt: now, PlannedSeconds: 100, ElapsedSeconds: 90, OverrunSeconds: -10, ReportJSON: `{}`, ReflectionWorked: "x", ReflectionChange: "y"}
-	if err := runtime.UpsertWeeklyReview(ctx, database, r); err != nil {
+	if err := runtime.InsertWeeklyReviewOnce(ctx, database, r); err != nil {
 		t.Fatal(err)
 	}
 	// Raw duplicate primary key must fail.
@@ -408,10 +408,11 @@ func Test17_OneReviewPerWeek(t *testing.T) {
 		"2026-W38", "2026-09-14", "2026-09-20", now.Unix(), now.Unix(), 1, 1, 0, "{}"); err == nil {
 		t.Fatal("expected duplicate week PK rejection")
 	}
-	// Upsert same week keeps exactly one row.
-	r.ElapsedSeconds = 95
-	if err := runtime.UpsertWeeklyReview(ctx, database, r); err != nil {
-		t.Fatal(err)
+	// Frozen metrics win: a second snapshot insert must fail, never overwrite.
+	r2 := r
+	r2.ElapsedSeconds = 95
+	if err := runtime.InsertWeeklyReviewOnce(ctx, database, r2); err == nil {
+		t.Fatal("second snapshot insert must fail (frozen metrics)")
 	}
 	got, err := runtime.ListWeeklyReviews(ctx, database)
 	if err != nil {
@@ -419,6 +420,20 @@ func Test17_OneReviewPerWeek(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("expected 1 review row, got %d", len(got))
+	}
+	if got[0].ElapsedSeconds != 90 {
+		t.Fatalf("frozen metrics must stay 90, got %d", got[0].ElapsedSeconds)
+	}
+	// Reflections remain editable without touching frozen metrics.
+	if err := runtime.UpdateWeeklyReflections(ctx, database, "2026-W38", "new-worked", "new-change", now); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := runtime.GetWeeklyReview(ctx, database, "2026-W38")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.ReflectionWorked != "new-worked" || got2.ElapsedSeconds != 90 {
+		t.Fatalf("reflections-only edit violated freeze: %+v", got2)
 	}
 }
 
@@ -583,7 +598,7 @@ func TestSmoke_RepresentativeData(t *testing.T) {
 	if err := runtime.UpsertDSARepeatState(ctx, database, db.DSARepeatState{ProblemID: "two-sum", RepeatStage: 0, CurrentIntervalDays: 1, NextReviewDate: "2026-09-21", UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.UpsertWeeklyReview(ctx, database, db.WeeklyReview{ID: "2026-W38", WeekStart: "2026-09-14", WeekEnd: "2026-09-20", GeneratedAt: now, UpdatedAt: now, PlannedSeconds: 100, ElapsedSeconds: 90, OverrunSeconds: -10, ReportJSON: `{"weeks":1}`}); err != nil {
+	if err := runtime.InsertWeeklyReviewOnce(ctx, database, db.WeeklyReview{ID: "2026-W38", WeekStart: "2026-09-14", WeekEnd: "2026-09-20", GeneratedAt: now, UpdatedAt: now, PlannedSeconds: 100, ElapsedSeconds: 90, OverrunSeconds: -10, ReportJSON: `{"weeks":1}`}); err != nil {
 		t.Fatal(err)
 	}
 	// Query everything back.

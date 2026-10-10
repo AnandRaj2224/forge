@@ -1,0 +1,17 @@
+# Local generated artifacts (source SQL/schemas/tests stay committable).
+forge
+*.test
+*.out
+coverage*.txt
+*.coverprofile
+
+# SQLite databases and sidecars (dev, smoke-test, and stress fixtures).
+*.db
+*.db-wal
+*.db-shm
+*-shm
+*-wal
+
+# Build outputs.
+/bin/
+/dist/

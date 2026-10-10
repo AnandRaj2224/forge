@@ -13,10 +13,22 @@ import (
 //go:embed schema/*.sql
 var schemaFS embed.FS
 
-// runMigrations applies embedded SQL migrations deterministically.
+// runMigrations initializes the V2 schema and applies pending migrations.
+// The V2 schema is one consolidated migration (schema/001_initial.sql);
+// future V2 changes add incremental files picked up here in filename order.
 // Each migration runs in its own transaction and is recorded in
 // schema_migrations. Errors fail loudly.
+//
+// Safety: an explicitly supplied database with an incompatible (V1) schema
+// is never auto-migrated. It fails closed with an actionable error so old
+// data stays untouched.
 func runMigrations(ctx context.Context, sqlDB *sql.DB) error {
+	// Verify before modifying: an incompatible database fails closed here,
+	// before any table is created, so old files stay untouched.
+	if err := rejectIncompatibleV1(ctx, sqlDB); err != nil {
+		return err
+	}
+
 	if _, err := sqlDB.ExecContext(ctx, `
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -55,6 +67,40 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 			return fmt.Errorf("db: apply migration %s: %w", name, err)
 		}
 	}
+	// Post-apply verification: the database must carry the V2 marker and
+	// every core table. Later launches re-verify without recreating or
+	// reseeding anything (migrations above are skipped when recorded).
+	return verifyV2Schema(ctx, sqlDB)
+}
+
+// verifyV2Schema checks the schema marker plus all core V2 tables.
+// It never writes; reseeds live inside migrations (OR IGNORE) and run once.
+func verifyV2Schema(ctx context.Context, sqlDB *sql.DB) error {
+	var marker string
+	if err := sqlDB.QueryRowContext(ctx, `SELECT value FROM forge_meta WHERE key='schema_version'`).Scan(&marker); err != nil || marker != "v2" {
+		return fmt.Errorf("db: V2 schema marker missing (forge_meta.schema_version=v2)")
+	}
+	for _, tbl := range []string{
+		"forge_settings", "gov_subjects", "gov_topics", "gov_lectures",
+		"gov_exams", "gov_exam_subjects", "gov_exam_syllabus",
+		"gov_exam_profiles", "gov_focus_state",
+		"gov_lecture_routine", "gov_practice_routine",
+		"dsa_problems", "dsa_routine", "swe_areas", "swe_routine_slots",
+		"today_snapshots", "today_tasks", "today_snapshot_tasks",
+		"sessions", "gov_subject_activation", "gov_lecture_completions",
+		"gov_practice_records", "gov_practice_rotation",
+		"dsa_attempts", "dsa_repeat_state", "swe_task_completions",
+		"mocks", "mock_sections", "mock_weak_topics",
+		"weekly_reviews", "quotes", "daily_quote_state",
+	} {
+		var n int
+		if err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&n); err != nil {
+			return fmt.Errorf("db: verify table %s: %w", tbl, err)
+		}
+		if n != 1 {
+			return fmt.Errorf("db: required V2 table %s missing", tbl)
+		}
+	}
 	return nil
 }
 
@@ -63,6 +109,36 @@ func migrationVersion(name string) int {
 	var v int
 	_, _ = fmt.Sscanf(name, "%d_", &v)
 	return v
+}
+
+// rejectIncompatibleV1 fails closed when the selected database carries a
+// non-V2 schema (V1 tables without the forge_meta v2 marker and the V2
+// focus table). Fresh/empty databases and genuine V2 databases pass.
+// Memory/file: URIs used by tests start empty and pass through.
+func rejectIncompatibleV1(ctx context.Context, sqlDB *sql.DB) error {
+	hasTable := func(name string) bool {
+		var n int
+		if err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n); err != nil {
+			return false
+		}
+		return n > 0
+	}
+	hasGovExams := hasTable("gov_exams")
+	hasFocus := hasTable("gov_focus_state")
+	hasMeta := hasTable("forge_meta")
+	if !hasGovExams {
+		return nil
+	}
+	if hasFocus && hasMeta {
+		return nil
+	}
+	var metaVal string
+	if hasMeta {
+		if err := sqlDB.QueryRowContext(ctx, `SELECT value FROM forge_meta WHERE key='schema_version'`).Scan(&metaVal); err == nil && metaVal == "v2" {
+			return nil
+		}
+	}
+	return fmt.Errorf("db: incompatible V1 database: this Forge V2 build uses a separate database (default ~/.local/share/forge/forge-v2.db). The V1 file is preserved untouched; choose an empty -db path or set FORGE_DB to a new V2 path")
 }
 
 // applyMigration executes one migration file transactionally.
