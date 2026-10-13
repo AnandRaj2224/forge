@@ -1,0 +1,110 @@
+Computer Organization & Architecture:
+  Lectures:
+    - Computer Organization and Architecture
+    - Computer Organization and Architecture (Mains)
+
+Operating Systems:
+  Lectures:
+    - Introduction to Operating Systems
+    - Introduction to Operating Systems (Mains)
+    - Process Concept, Threads, Scheduling
+    - CPU Scheduling, Process Synchronization
+    - Page Replacement Policies
+    - Linux/Unix Command
+
+Computer Networks & Data Communication:
+  Lectures:
+    - Introduction to Computer Networks & OSI Model
+    - Introduction to Computer Networks
+    - TCP/IP Model & Comparison with OSI
+    - OSI & TCP/IP Model
+    - IPv4 Addressing, IP header
+    - IPv Addressing (IPv4 & IPv6)
+    - Subnet Mask, Mac Address and ARP
+    - Subnet Mask
+    - RARP, DHCP, Switching, Routing
+    - Switching, Routing
+    - Common Network Protocols - Telnet, HTTP, FTP, TCP
+    - Common Network Protocols (Mains) - SNMP, PPP, UDP, ARP
+    - Network Devices (Switch, Hub, Repeater, Router, Modem)
+    - Network Devices (Switch, Hub, Repeater, Router, Modem) (Mains)
+    - LAN, MAN, WAN, Network Security
+    - Network Types, Network Security
+
+Cyber Security & Cryptography:
+  Lectures:
+    - Cyber Security Basics
+    - Cyber Security
+    - Cryptography
+
+Database Management System (DBMS):
+  Lectures:
+    - Introduction to DBMS, DBMS Schemas
+    - Introduction to DBMS, DBMS Schemas (Mains)
+    - Relational Model Concepts, DML, DDL
+    - RDBMS, DML, DDL
+    - ER Model
+    - ER Model (Mains)
+    - SQL Basics and Queries
+    - SQL-1 - Joins, Subqueries
+    - SQL-2 - Views, PL-SQL Basics
+    - Indexing, Normalization
+    - Indexing, Normalization (Mains)
+    - Transactions, Concurrency Control
+    - Transactions, Concurrency Control (Mains)
+    - Data Warehouse, Data Mining
+    - Data Warehouse, Data Mining (Mains)
+
+Programming Languages & OOPs:
+  Lectures:
+    - C/C++ Fundamentals
+    - Scope of Variables
+    - Binding Of Variables & Functions
+    - Program Control (Iteration)
+    - Program Control (Recursion, Parameter Passing)
+    - Functions, Exception Handling
+    - Java Specifics
+    - Python Specifics
+    - Python - File handling
+    - OOPs Concepts
+    - OOPs Concepts -1
+    - OOPs Concepts -2
+
+Data Structures & Algorithms:
+  Lectures:
+    - Array, Strings, Queue
+    - Array, String
+    - Queue, Stack
+    - Stack, Hashing
+    - Hashing, Linked List
+    - Heap & Priority Queue, Linked List
+    - Priority Queue
+    - Tree, Graph
+    - Tree, Graph (Mains)
+    - Algorithms-1
+    - Algorithms-2
+
+Software Engineering:
+  Lectures:
+    - Software Development Models (Waterfall, RAD, Spiral)
+    - SDLC Model
+    - Software Design, DFD, Requirement Analysis
+    - Software Design, DFD, Requirement Analysis (Mains)
+    - Software Testing, CASE Tools
+
+Web & Emerging Technologies:
+  Lectures:
+    - Web Technologies - HTML, CSS, JS Basics
+    - Web Technologies -1 - Client-Server, REST APIs
+    - Web Technologies -2 - E-commerce, Payment Gateways
+    - Cloud Computing, AI/ML
+    - Emerging Technologies
+    - Emerging Technologies (Mains)
+
+Practice Sessions:
+  Lectures:
+    - Professional Knowledge Practice Session -1
+    - Professional Knowledge Practice Session -2
+    - Professional Knowledge Practice Session -3
+    - Professional Knowledge Practice Session -4
+    - Professional Knowledge Practice Session -5

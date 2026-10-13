@@ -1,0 +1,72 @@
+Computer Fundamentals & Types:
+  Lectures:
+    - Introduction to Computer
+    - Types of Computers
+    - Operations and Tasks performed by the computer
+    - Computer Devices and Port
+    - Computer Architecture VS Computer Organization
+    - Number System and Base Conversions
+    - Logic Gates (AND, OR, NOT, NAND, NOR, XOR, XNOR)
+
+Computer Hardware, Memory & Storage:
+  Lectures:
+    - Output Devices (Monitor, Printer, Speakers, etc.)
+    - Storage Devices (Hard Disk, SSD, CD/DVD, USB Drives)
+    - Memory Types (RAM, ROM, Cache, Virtual Memory)
+
+Software & Operating Systems:
+  Lectures:
+    - System Software vs Utility Software vs Application Software
+    - Software Development Life Cycle (SDLC)
+    - Introduction to Operating Systems & OS Functions
+    - Memory Management, Multiprogramming, Spooling
+    - Process Concept, Threads & Synchronization
+    - Page Replacement Policies & OS Security - Part 1
+    - Page Replacement Policies & OS Security - Part 2
+
+MS Office & Productivity Tools:
+  Lectures:
+    - MS Word (Editing, Formatting, Shortcuts)
+    - MS Excel (Formulas, Functions, Charts)
+    - MS PowerPoint (Slides, Animations, Transitions)
+    - MS Office 365 (Cloud Features, Collaboration Tools)
+    - Keyboard shortcuts and their uses of computer-1
+    - Keyboard shortcuts and their uses of computer-2
+    - Computer File Extensions (.docx, .xlsx, .pptx, etc.)
+    - Computer Abbreviations (CPU, RAM, ROM, etc.)
+
+Internet & Web Basics:
+  Lectures:
+    - Internet and Web, Email and E-Banking Basics
+    - Search Engine Basics, Client Server Model
+    - Cookies, Web Technologies
+
+Computer Networks:
+  Lectures:
+    - Introduction to Computer Networks & OSI Model
+    - TCP/IP Model & Comparison with OSI
+    - IPv4 Addressing, IP header
+    - Subnet Mask, Mac Address and ARP
+    - RARP, DHCP, Switching, Routing
+    - Common Network Protocols (Telnet, HTTP, FTP, TCP)
+    - Common Network Protocols (SNMP, PPP, UDP, ARP)
+    - Network Devices (Switch, Hub, Repeater, Router, Modem)
+    - LAN, MAN, WAN, Network Security
+
+DBMS:
+  Lectures:
+    - Introduction to DBMS, DBMS Schemas (Hierarchical, Network, Relational)
+    - Relational Model Concepts, DML, DDL
+    - Entity-Relationship Model, Basic SQL
+    - Normalization
+    - Transactions, Concurrency Control
+
+Cyber Security:
+  Lectures:
+    - Cyber Attacks and Cyber Laws
+    - Malware Types, Firewall and Antivirus
+
+Emerging Technologies:
+  Lectures:
+    - Artificial Intelligence (AI), Blockchain Technology
+    - Cloud Computing Basics, Internet of Things (IoT)
