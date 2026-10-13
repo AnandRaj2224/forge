@@ -1,0 +1,32 @@
+routine:
+  monday:
+    - area: golang
+      duration: 120 mins
+  tuesday:
+    - area: Project — Sentinel
+      duration: 90 mins
+    - area: docker
+      duration: 30 mins
+  wednesday:
+    - area: postgres/sql
+      duration: 90 mins
+    - area: DBMS
+      duration: 30mins
+  thursday:
+    - area: Project — AgentBox
+      duration: 90mins
+    - area: grafana and prometheus
+      duration: 30mins
+  friday:
+    - area: Computer networks
+      duration: 120mins
+  saturday:
+    - area: CI/CD(github actions)
+      duration: 60 mins
+    - area: bash
+      duration: 60mins
+  sunday:
+    - area: Operating systems
+      duration: 60mins
+    - area: linux(arch) + my own setup
+      duration: 60mins
