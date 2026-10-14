@@ -641,7 +641,6 @@ AFCAT:
     - Grammar Application & Error Detection
     - Reading & Comprehension
     - Vocabulary & Mains Level Questions
-    - Analogy
 
   Quant:
     - Number System
@@ -672,6 +671,7 @@ AFCAT:
     - Coding Decoding
     - Symbolic Operations
     - Syllogism
+    - Analogy
     - Classification & Odd One Out
     - Venn Diagram
     - Dice and Cube
@@ -730,6 +730,7 @@ SSC CGL:
     - Time, Speed, Distance
     - Trains
     - Boats and Streams
+    - Number Series
     - Algebra
     - Linear Equations in One and Two Variables
     - Mensuration
@@ -742,7 +743,6 @@ SSC CGL:
     - Data Interpretation (Basic)
   Reasoning:
     - Alphanumeric Series & Alphabet
-    - Number Series
     - Ranking
     - Distance, Direction
     - Blood Relation
@@ -826,6 +826,7 @@ SSC CHSL:
     - Time, Speed, Distance
     - Trains
     - Boats and Streams
+    - Number Series
     - Algebra
     - Linear Equations in One and Two Variables
     - Mensuration
@@ -838,7 +839,6 @@ SSC CHSL:
     - Data Interpretation (Basic)
   Reasoning:
     - Alphanumeric Series & Alphabet
-    - Number Series
     - Ranking
     - Distance, Direction
     - Blood Relation
@@ -922,6 +922,7 @@ SSC Selection Posts:
     - Time, Speed, Distance
     - Trains
     - Boats and Streams
+    - Number Series
     - Algebra
     - Linear Equations in One and Two Variables
     - Mensuration
@@ -933,7 +934,6 @@ SSC Selection Posts:
     - Data Interpretation (Basic)
   Reasoning:
     - Alphanumeric Series & Alphabet
-    - Number Series
     - Ranking
     - Distance, Direction
     - Blood Relation
@@ -1009,12 +1009,12 @@ SSC MTS:
     - Time, Speed, Distance
     - Trains
     - Boats and Streams
+    - Number Series
     - Mensuration
     - Mensuration 2D
     - Mensuration 3D
   Reasoning:
     - Alphanumeric Series & Alphabet
-    - Number Series
     - Ranking
     - Distance, Direction
     - Blood Relation
@@ -1119,10 +1119,8 @@ RRB NTPC:
     - Earth's Interior, Plate Tectonics & Rocks
     - Geomorphology & Landforms
     - Climatology & Oceanography
-    - Indian Geography
-
-  Environment & Ecology:
     - Environment & Ecology
+    - Indian Geography
 
   Polity:
     - State Government & Making of the Constitution
