@@ -1,648 +1,157 @@
-SBI Clerk:
-  Quant:
+SBI CLERK,SBI PO,IBPS CLERK,IBPS PO,RRB CLERK,RRB PO,RBI ASSISTANT:
+  QUANT:
     - Number System
     - Simplification
-    - Average
+    - Number Series
     - Percentage
     - Ratio, Proportion
     - Problem on Ages
     - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
     - Mixture & Alligation
+    - Profit & Loss and Discount
+    - Quadratic Equations
+    - Simple & Compound Interest
     - Time, Work
     - Pipes & Cisterns
     - Time, Speed, Distance
     - Trains
     - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
-    - Arithmetic
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Banking and Financial Awareness:
-    - Banking Operations & Infrastructure
-    - Reserve Bank of India & Core Finance
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Insurance & Regulators - LIC, IRDAI
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-  Computer Aptitude:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Computer Networks
-    - DBMS
-    - Cyber Security
-    - Emerging Technologies
-SBI PO:
-  Quant:
-    - Number System
-    - Simplification
     - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Permutation, Combination
-    - Quantity Comparison
-    - Arithmetic
     - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
-    - Probability
-    - Data Sufficiency
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Banking and Financial Awareness:
-    - Banking Operations & Infrastructure
-    - Reserve Bank of India & Core Finance
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Insurance & Regulators - LIC, IRDAI
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-  Computer Aptitude:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Computer Networks
-    - DBMS
-    - Cyber Security
-    - Emerging Technologies
-IBPS Clerk:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
     - Arithmetic
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Banking and Financial Awareness:
-    - Banking Operations & Infrastructure
-    - Reserve Bank of India & Core Finance
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Insurance & Regulators - LIC, IRDAI
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-IBPS PO:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Permutation, Combination
-    - Quantity Comparison
-    - Arithmetic
-    - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
-    - Probability
-    - Data Sufficiency
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Banking and Financial Awareness:
-    - Banking Operations & Infrastructure
-    - Reserve Bank of India & Core Finance
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Insurance & Regulators - LIC, IRDAI
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-IBPS RRB Clerk:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
-    - Arithmetic
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Banking and Financial Awareness:
-    - Banking Operations & Infrastructure
-    - Reserve Bank of India & Core Finance
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Insurance & Regulators - LIC, IRDAI
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-  Computer Knowledge:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Computer Networks
-    - DBMS
-    - Cyber Security
-    - Emerging Technologies
-IBPS RRB PO:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Permutation, Combination
-    - Quantity Comparison
-    - Arithmetic
-    - Probability
-    - Data Sufficiency
-    - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Banking and Financial Awareness:
-    - Banking Operations & Infrastructure
-    - Reserve Bank of India & Core Finance
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Insurance & Regulators - LIC, IRDAI
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-  Computer Knowledge:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Computer Networks
-    - DBMS
-    - Cyber Security
-    - Emerging Technologies
-IBPS SO IT:
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Quantity Comparison
-    - Data Sufficiency
-    - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
-    - Arithmetic
-  Professional Knowledge:
-    - Computer Organization & Architecture
-    - Operating Systems
-    - Computer Networks & Data Communication
-    - Cyber Security & Cryptography
-    - Database Management System (DBMS)
-    - Programming Languages & OOPs
-    - Data Structures & Algorithms
-    - Software Engineering
-    - Web & Emerging Technologies
-    - Practice Sessions
-SBI SO IT:
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Inequality
-    - Syllogism
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Seating Arrangement
-    - Input Output
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Quadratic Equations
-    - Quantity Comparison
-    - Data Sufficiency
-    - Data Interpretation (Basic)
-    - Data Interpretation (Advanced)
-    - Arithmetic
-  Professional Knowledge:
-    - Computer Organization & Architecture
-    - Operating Systems
-    - Computer Networks & Data Communication
-    - Cyber Security & Cryptography
-    - Database Management System (DBMS)
-    - Programming Languages & OOPs
-    - Data Structures & Algorithms
-    - Software Engineering
-    - Web & Emerging Technologies
-    - Practice Sessions
-RBI Assistant:
-  English:
-    - Basics & Foundation
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Algebra
-    - Linear Equations in One and Two Variables
-    - Quadratic Equations
+    - New Patterns
     - Permutation, Combination
     - Probability
     - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
-    - Geometry
-    - Trigonometry
-    - Statistics
+    - Algebra
+    - Quantity Comparison
+    - Data Sufficiency
+    - Data Interpretation (Advanced)
+
+  REASONING:
+  - Syllogism
+  - Inequality
+  - Blood Relation
+  - Ranking
+  - Distance, Direction
+  - Alphanumeric Series & Alphabet
+  - Coding Decoding
+  - Input Output
+  - Data Sufficiency
+  - Puzzles
+  - Seating Arrangement
+  - Critical Reasoning
+
+  ENGLISH:
+  - Noun
+  - Pronoun
+  - Adjective
+  - Article
+  - Verb & Tense
+  - Subject Verb Agreement
+  - Adverb & Inversion
+  - Preposition
+  - Conjunction
+  - Active/Passive Voice & Direct/Indirect Speech
+  - Grammar Application & Error Detection
+  - Reading & Comprehension
+  - Vocabulary & Mains Level Questions
+
+  BANKING AND FINANCIAL AWARENESS:
+  - Banking Operations & Infrastructure
+  - Reserve Bank of India & Core Finance
+  - Sectors of Economy - Primary, Secondary, Tertiary
+  - Five Year Plans and NITI Aayog
+  - Financial Markets & Economy
+  - Taxation - Direct and Indirect Tax
+  - Insurance & Regulators - LIC, IRDAI
+  - International Organisations - IMF, World Bank, WTO, UN
+  - Government Schemes
+
+  COMPUTER AWARENESS:
+  - Computer Fundamentals & Types
+  - Computer Hardware, Memory & Storage
+  - Software & Operating Systems
+  - MS Office & Productivity Tools
+  - Internet & Web Basics
+  - Computer Networks
+  - DBMS
+  - Cyber Security
+  - Emerging Technologies
+
+SBI SO IT,IBPS SO IT:
+  QUANT:
+    - Number System
+    - Simplification
+    - Number Series
+    - Percentage
+    - Ratio, Proportion
+    - Problem on Ages
+    - Partnership
+    - Mixture & Alligation
+    - Profit & Loss and Discount
+    - Quadratic Equations
+    - Simple & Compound Interest
+    - Time, Work
+    - Pipes & Cisterns
+    - Time, Speed, Distance
+    - Trains
+    - Boats and Streams
+    - Average
     - Data Interpretation (Basic)
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Inequality
+    - Arithmetic
+    - New Patterns
+    - Permutation, Combination
+    - Probability
+    - Mensuration
+    - Algebra
+    - Quantity Comparison
+    - Data Sufficiency
+    - Data Interpretation (Advanced)
+
+  REASONING:
     - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Critical Reasoning
+    - Inequality
+    - Blood Relation
+    - Ranking
+    - Distance, Direction
+    - Alphanumeric Series & Alphabet
+    - Coding Decoding
+    - Input Output
+    - Data Sufficiency
     - Puzzles
     - Seating Arrangement
-  Computer Awareness:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Computer Networks
-    - Cyber Security
-  Banking and Financial Awareness:
-    - Banking Operations & Infrastructure
-    - Reserve Bank of India & Core Finance
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Insurance & Regulators - LIC, IRDAI
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
+    - Critical Reasoning
+
+  ENGLISH:
+    - Noun
+    - Pronoun
+    - Adjective
+    - Article
+    - Verb & Tense
+    - Subject Verb Agreement
+    - Adverb & Inversion
+    - Preposition
+    - Conjunction
+    - Active/Passive Voice & Direct/Indirect Speech
+    - Grammar Application & Error Detection
+    - Reading & Comprehension
+    - Vocabulary & Mains Level Questions
+
+  PROFESSIONAL KNOWLEDGE:
+    - Computer Organization & Architecture
+    - Operating Systems
+    - Computer Networks & Data Communication
+    - Cyber Security & Cryptography
+    - Database Management System (DBMS)
+    - Programming Languages & OOPs
+    - Data Structures & Algorithms
+    - Software Engineering
+    - Web & Emerging Technologies
+    - Practice Sessions
+
 AFCAT:
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-
-  Quant:
+  QUANT:
     - Number System
     - Simplification
     - Average
@@ -658,32 +167,44 @@ AFCAT:
     - Number Series
     - Probability
     - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
     - Trigonometry
     - Statistics
 
-  Reasoning:
+  REASONING:
     - Alphanumeric Series & Alphabet
     - Ranking
     - Distance, Direction
     - Blood Relation
     - Coding Decoding
-    - Symbolic Operations
+    - Mathematical Operations
     - Syllogism
     - Analogy
     - Classification & Odd One Out
     - Venn Diagram
     - Dice and Cube
     - Non-Verbal Reasoning
+  ENGLISH:
+    - Noun
+    - Pronoun
+    - Adjective
+    - Article
+    - Verb & Tense
+    - Subject Verb Agreement
+    - Adverb & Inversion
+    - Preposition
+    - Conjunction
+    - Active/Passive Voice & Direct/Indirect Speech
+    - Grammar Application & Error Detection
+    - Reading & Comprehension
+    - Vocabulary & Mains Level Questions
 
-  History:
+  HISTORY:
     - Ancient History
     - Medieval History
     - Modern History
     - Arts and Culture
 
-  Geography:
+  GEOGRAPHY:
     - The Universe & Solar System
     - Earth's Interior, Plate Tectonics & Rocks
     - Geomorphology & Landforms
@@ -691,19 +212,19 @@ AFCAT:
     - Environment & Ecology
     - Indian Geography
 
-  Polity:
+  POLITY:
     - State Government & Making of the Constitution
     - Territory, Citizenship & Fundamental Rights
     - DPSP, Local Govt, Emergencies & Bodies
     - Union Executive & Intro to Parliament
     - Bills, Budget, Supreme Court & CAG
 
-  General Science:
+  GENERAL SCIENCE:
     - Chemistry
     - Physics
     - Biology
 
-  Banking and Financial Awareness:
+  BANKING AND FINANCIAL AWARENESS:
     - Banking Operations & Infrastructure
     - Reserve Bank of India & Core Finance
     - Sectors of Economy - Primary, Secondary, Tertiary
@@ -713,507 +234,266 @@ AFCAT:
     - Insurance & Regulators - LIC, IRDAI
     - International Organisations - IMF, World Bank, WTO, UN
     - Government Schemes
-SSC CGL:
-  Quant:
+
+SSC CGL,SSC CHSL,SSC MTS,SSC SELECTION POSTS:
+  QUANT:
     - Number System
     - Simplification
-    - Average
+    - Number Series
     - Percentage
     - Ratio, Proportion
     - Problem on Ages
     - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
     - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Algebra
-    - Linear Equations in One and Two Variables
-    - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
-    - Geometry
-    - Trigonometry
-    - Statistics
-    - Probability
-    - Data Interpretation (Basic)
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Dice and Cube
-    - Non-Verbal Reasoning
-    - Critical Reasoning
-    - Emotional Intelligence
-    - Social Intelligence
-  English:
-    - Basics & Foundation
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  History:
-    - Ancient History
-    - Medieval History
-    - Modern History
-    - Arts and Culture
-  Geography:
-    - The Universe & Solar System
-    - Earth's Interior, Plate Tectonics & Rocks
-    - Geomorphology & Landforms
-    - Climatology & Oceanography
-    - Environment & Ecology
-    - Indian Geography
-  Polity:
-    - State Government & Making of the Constitution
-    - Territory, Citizenship & Fundamental Rights
-    - DPSP, Local Govt, Emergencies & Bodies
-    - Union Executive & Intro to Parliament
-    - Bills, Budget, Supreme Court & CAG
-  General Science:
-    - Chemistry
-    - Physics
-    - Biology
-  Banking and Financial Awareness:
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-  Computer Awareness:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Computer Networks
-    - Cyber Security
-SSC CHSL:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
     - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Algebra
-    - Linear Equations in One and Two Variables
-    - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
-    - Geometry
-    - Trigonometry
-    - Statistics
-    - Probability
-    - Data Interpretation (Basic)
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Dice and Cube
-    - Non-Verbal Reasoning
-    - Critical Reasoning
-    - Emotional Intelligence
-    - Social Intelligence
-  English:
-    - Basics & Foundation
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  History:
-    - Ancient History
-    - Medieval History
-    - Modern History
-    - Arts and Culture
-  Geography:
-    - The Universe & Solar System
-    - Earth's Interior, Plate Tectonics & Rocks
-    - Geomorphology & Landforms
-    - Climatology & Oceanography
-    - Environment & Ecology
-    - Indian Geography
-  Polity:
-    - State Government & Making of the Constitution
-    - Territory, Citizenship & Fundamental Rights
-    - DPSP, Local Govt, Emergencies & Bodies
-    - Union Executive & Intro to Parliament
-    - Bills, Budget, Supreme Court & CAG
-  General Science:
-    - Chemistry
-    - Physics
-    - Biology
-  Banking and Financial Awareness:
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-  Computer Awareness:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Computer Networks
-    - Cyber Security
-SSC Selection Posts:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Algebra
-    - Linear Equations in One and Two Variables
-    - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
-    - Geometry
-    - Trigonometry
-    - Statistics
-    - Data Interpretation (Basic)
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Dice and Cube
-    - Non-Verbal Reasoning
-    - Critical Reasoning
-    - Emotional Intelligence
-    - Social Intelligence
-  English:
-    - Basics & Foundation
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  History:
-    - Ancient History
-    - Medieval History
-    - Modern History
-    - Arts and Culture
-  Geography:
-    - The Universe & Solar System
-    - Earth's Interior, Plate Tectonics & Rocks
-    - Geomorphology & Landforms
-    - Climatology & Oceanography
-    - Environment & Ecology
-    - Indian Geography
-  Polity:
-    - State Government & Making of the Constitution
-    - Territory, Citizenship & Fundamental Rights
-    - DPSP, Local Govt, Emergencies & Bodies
-    - Union Executive & Intro to Parliament
-    - Bills, Budget, Supreme Court & CAG
-  General Science:
-    - Chemistry
-    - Physics
-    - Biology
-  Banking and Financial Awareness:
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Government Schemes
-    - International Organisations - IMF, World Bank, WTO, UN
-SSC MTS:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Problem on Ages
-    - Partnership
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Mixture & Alligation
-    - Time, Work
-    - Pipes & Cisterns
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Number Series
-    - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Ranking
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Dice and Cube
-    - Non-Verbal Reasoning
-  English:
-    - Basics & Foundation
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-  History:
-    - Ancient History
-    - Medieval History
-    - Modern History
-    - Arts and Culture
-  Geography:
-    - The Universe & Solar System
-    - Earth's Interior, Plate Tectonics & Rocks
-    - Geomorphology & Landforms
-    - Climatology & Oceanography
-    - Environment & Ecology
-    - Indian Geography
-  Polity:
-    - State Government & Making of the Constitution
-    - Territory, Citizenship & Fundamental Rights
-    - DPSP, Local Govt, Emergencies & Bodies
-    - Union Executive & Intro to Parliament
-    - Bills, Budget, Supreme Court & CAG
-  General Science:
-    - Chemistry
-    - Physics
-    - Biology
-  Banking and Financial Awareness:
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - Government Schemes
-    - International Organisations - IMF, World Bank, WTO, UN
-RRB NTPC:
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Time, Work
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Algebra
-    - Linear Equations in One and Two Variables
-    - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
-    - Geometry
-    - Trigonometry
-    - Statistics
-    - Data Interpretation (Basic)
-
-  Reasoning:
-    - Alphanumeric Series & Alphabet
-    - Distance, Direction
-    - Blood Relation
-    - Coding Decoding
-    - Symbolic Operations
-    - Syllogism
-    - Analogy
-    - Classification & Odd One Out
-    - Venn Diagram
-    - Non-Verbal Reasoning
-    - Data Sufficiency
-    - Critical Reasoning
-    - Puzzles
-    - Problem Solving
-
-  History:
-    - Ancient History
-    - Medieval History
-    - Modern History
-    - Arts and Culture
-
-  Geography:
-    - The Universe & Solar System
-    - Earth's Interior, Plate Tectonics & Rocks
-    - Geomorphology & Landforms
-    - Climatology & Oceanography
-    - Environment & Ecology
-    - Indian Geography
-
-  Polity:
-    - State Government & Making of the Constitution
-    - Territory, Citizenship & Fundamental Rights
-    - DPSP, Local Govt, Emergencies & Bodies
-    - Union Executive & Intro to Parliament
-    - Bills, Budget, Supreme Court & CAG
-
-  General Science:
-    - Chemistry
-    - Physics
-    - Biology
-
-  Computer Awareness:
-    - Computer Fundamentals & Types
-    - Computer Hardware, Memory & Storage
-    - Software & Operating Systems
-    - MS Office & Productivity Tools
-    - Internet & Web Basics
-    - Cyber Security
-    - Emerging Technologies
-  Banking and Financial Awareness:
-    - Sectors of Economy - Primary, Secondary, Tertiary
-    - Five Year Plans and NITI Aayog
-    - Financial Markets & Economy
-    - Taxation - Direct and Indirect Tax
-    - International Organisations - IMF, World Bank, WTO, UN
-    - Government Schemes
-CDS:
-  English:
-    - Noun
-    - Pronoun
-    - Adjective
-    - Article
-    - Verb & Tense
-    - Subject Verb Agreement
-    - Adverb & Inversion
-    - Preposition
-    - Conjunction
-    - Active/Passive Voice & Direct/Indirect Speech
-    - Grammar Application & Error Detection
-    - Reading & Comprehension
-    - Vocabulary & Mains Level Questions
-
-  Quant:
-    - Number System
-    - Simplification
-    - Average
-    - Percentage
-    - Ratio, Proportion
-    - Profit & Loss and Discount
-    - Simple & Compound Interest
-    - Time, Work
-    - Time, Speed, Distance
-    - Trains
-    - Boats and Streams
-    - Algebra
     - Quadratic Equations
-    - Linear Equations in One and Two Variables
+    - Simple & Compound Interest
+    - Time, Work
+    - Pipes & Cisterns
+    - Time, Speed, Distance
+    - Trains
+    - Boats and Streams
+    - Average
+    - Data Interpretation (Basic)
+    - Arithmetic
+    - New Patterns
+    - Permutation, Combination
+    - Probability
     - Mensuration
-    - Mensuration 2D
-    - Mensuration 3D
+    - Algebra
+    - Quantity Comparison
+    - Data Sufficiency
+    - Linear Equations in One and Two Variables
     - Geometry
     - Trigonometry
     - Statistics
 
-  History:
+  REASONING:
+    - Syllogism
+    - Inequality
+    - Blood Relation
+    - Ranking
+    - Distance, Direction
+    - Alphanumeric Series & Alphabet
+    - Coding Decoding
+    - Input Output
+    - Data Sufficiency
+    - Puzzles
+    - Seating Arrangement
+    - Critical Reasoning
+    - Classification & Odd One Out
+    - Mathematical Operations
+    - Non-Verbal Reasoning
+    - Dice and Cube
+    - Social and Emotional Intelligence
+    - Decision Making
+    - Venn Diagram
+    - Analogy
+  ENGLISH:
+    - Noun
+    - Pronoun
+    - Adjective
+    - Article
+    - Verb & Tense
+    - Subject Verb Agreement
+    - Adverb & Inversion
+    - Preposition
+    - Conjunction
+    - Active/Passive Voice & Direct/Indirect Speech
+    - Grammar Application & Error Detection
+    - Reading & Comprehension
+    - Vocabulary & Mains Level Questions
+  HISTORY:
     - Ancient History
     - Medieval History
     - Modern History
     - Arts and Culture
-
-  Geography:
+  GEOGRAPHY:
     - The Universe & Solar System
     - Earth's Interior, Plate Tectonics & Rocks
     - Geomorphology & Landforms
     - Climatology & Oceanography
     - Environment & Ecology
     - Indian Geography
-
-  Polity:
+  POLITY:
     - State Government & Making of the Constitution
     - Territory, Citizenship & Fundamental Rights
     - DPSP, Local Govt, Emergencies & Bodies
     - Union Executive & Intro to Parliament
     - Bills, Budget, Supreme Court & CAG
-
-  General Science:
+  GENERAL SCIENCE:
     - Chemistry
     - Physics
     - Biology
+  BANKING AND FINANCIAL AWARENESS:
+    - Sectors of Economy - Primary, Secondary, Tertiary
+    - Five Year Plans and NITI Aayog
+    - Financial Markets & Economy
+    - Taxation - Direct and Indirect Tax
+    - International Organisations - IMF, World Bank, WTO, UN
+    - Government Schemes
+  COMPUTER AWARENESS:
+    - Computer Fundamentals & Types
+    - Computer Hardware, Memory & Storage
+    - Software & Operating Systems
+    - MS Office & Productivity Tools
+    - Internet & Web Basics
+    - Computer Networks
+    - Cyber Security
 
-  Banking and Financial Awareness:
+RRB NTPC:
+  QUANT:
+    - Number System
+    - Simplification
+    - Number Series
+    - Percentage
+    - Ratio, Proportion
+    - Problem on Ages
+    - Partnership
+    - Mixture & Alligation
+    - Profit & Loss and Discount
+    - Quadratic Equations
+    - Simple & Compound Interest
+    - Time, Work
+    - Pipes & Cisterns
+    - Time, Speed, Distance
+    - Trains
+    - Boats and Streams
+    - Average
+    - Data Interpretation (Basic)
+    - Arithmetic
+    - New Patterns
+    - Permutation, Combination
+    - Probability
+    - Mensuration
+    - Algebra
+    - Quantity Comparison
+    - Data Sufficiency
+    - Linear Equations in One and Two Variables
+    - Geometry
+    - Trigonometry
+    - Statistics
+
+  REASONING:
+  - Syllogism
+  - Inequality
+  - Blood Relation
+  - Ranking
+  - Distance, Direction
+  - Alphanumeric Series & Alphabet
+  - Coding Decoding
+  - Input Output
+  - Data Sufficiency
+  - Puzzles
+  - Seating Arrangement
+  - Critical Reasoning
+  - Classification & Odd One Out
+  - Mathematical Operations
+  - Non-Verbal Reasoning
+  - Dice and Cube
+  - Social and Emotional Intelligence
+  - Decision Making
+  - Venn Diagram
+  - Analogy
+  HISTORY:
+  - Ancient History
+  - Medieval History
+  - Modern History
+  - Arts and Culture
+  GEOGRAPHY:
+  - The Universe & Solar System
+  - Earth's Interior, Plate Tectonics & Rocks
+  - Geomorphology & Landforms
+  - Climatology & Oceanography
+  - Environment & Ecology
+  - Indian Geography
+  POLITY:
+  - State Government & Making of the Constitution
+  - Territory, Citizenship & Fundamental Rights
+  - DPSP, Local Govt, Emergencies & Bodies
+  - Union Executive & Intro to Parliament
+  - Bills, Budget, Supreme Court & CAG
+  GENERAL SCIENCE:
+  - Chemistry
+  - Physics
+  - Biology
+  BANKING AND FINANCIAL AWARENESS:
+  - Sectors of Economy - Primary, Secondary, Tertiary
+  - Five Year Plans and NITI Aayog
+  - Financial Markets & Economy
+  - Taxation - Direct and Indirect Tax
+  - International Organisations - IMF, World Bank, WTO, UN
+  - Government Schemes
+
+CDS:
+  QUANT:
+    - Number System
+    - Simplification
+    - Number Series
+    - Percentage
+    - Ratio, Proportion
+    - Problem on Ages
+    - Partnership
+    - Mixture & Alligation
+    - Profit & Loss and Discount
+    - Quadratic Equations
+    - Simple & Compound Interest
+    - Time, Work
+    - Pipes & Cisterns
+    - Time, Speed, Distance
+    - Trains
+    - Boats and Streams
+    - Average
+    - Data Interpretation (Basic)
+    - Arithmetic
+    - New Patterns
+    - Permutation, Combination
+    - Probability
+    - Mensuration
+    - Algebra
+    - Quantity Comparison
+    - Data Sufficiency
+    - Linear Equations in One and Two Variables
+    - Geometry
+    - Trigonometry
+    - Statistics
+  ENGLISH:
+    - Noun
+    - Pronoun
+    - Adjective
+    - Article
+    - Verb & Tense
+    - Subject Verb Agreement
+    - Adverb & Inversion
+    - Preposition
+    - Conjunction
+    - Active/Passive Voice & Direct/Indirect Speech
+    - Grammar Application & Error Detection
+    - Reading & Comprehension
+    - Vocabulary & Mains Level Questions
+  HISTORY:
+    - Ancient History
+    - Medieval History
+    - Modern History
+    - Arts and Culture
+  GEOGRAPHY:
+    - The Universe & Solar System
+    - Earth's Interior, Plate Tectonics & Rocks
+    - Geomorphology & Landforms
+    - Climatology & Oceanography
+    - Environment & Ecology
+    - Indian Geography
+  POLITY:
+    - State Government & Making of the Constitution
+    - Territory, Citizenship & Fundamental Rights
+    - DPSP, Local Govt, Emergencies & Bodies
+    - Union Executive & Intro to Parliament
+    - Bills, Budget, Supreme Court & CAG
+  GENERAL SCIENCE:
+    - Chemistry
+    - Physics
+    - Biology
+  BANKING AND FINANCIAL AWARENESS:
     - Sectors of Economy - Primary, Secondary, Tertiary
     - Five Year Plans and NITI Aayog
     - Financial Markets & Economy

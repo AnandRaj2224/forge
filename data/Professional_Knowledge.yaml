@@ -18,7 +18,7 @@ Computer Networks & Data Communication:
     - Introduction to Computer Networks
     - TCP/IP Model & Comparison with OSI
     - OSI & TCP/IP Model
-    - IPv4 Addressing, IP header
+    - IPv4 Addressing, IP Header
     - IPv Addressing (IPv4 & IPv6)
     - Subnet Mask, Mac Address and ARP
     - Subnet Mask
@@ -59,13 +59,13 @@ Programming Languages & OOPs:
   Lectures:
     - C/C++ Fundamentals
     - Scope of Variables
-    - Binding Of Variables & Functions
+    - Binding of Variables & Functions
     - Program Control (Iteration)
     - Program Control (Recursion, Parameter Passing)
     - Functions, Exception Handling
     - Java Specifics
     - Python Specifics
-    - Python - File handling
+    - Python - File Handling
     - OOPs Concepts
     - OOPs Concepts -1
     - OOPs Concepts -2
@@ -96,7 +96,7 @@ Web & Emerging Technologies:
   Lectures:
     - Web Technologies - HTML, CSS, JS Basics
     - Web Technologies -1 - Client-Server, REST APIs
-    - Web Technologies -2 - E-commerce, Payment Gateways
+    - Web Technologies -2 - E-Commerce, Payment Gateways
     - Cloud Computing, AI/ML
     - Emerging Technologies
     - Emerging Technologies (Mains)

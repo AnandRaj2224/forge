@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 
 func main() {
 	dbPath := flag.String("db", "", "path to forge sqlite db (default ~/.local/share/forge/forge-v2.db)")
+	seedPath := flag.String("seed", "", "apply a generated seed.sql to the database before starting (see cmd/datagen)")
 	flag.Parse()
 	path, err := resolveDBPath(*dbPath, os.Getenv("FORGE_DB"))
 	if err != nil {
@@ -36,6 +38,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "migrate:", err)
 		os.Exit(1)
 	}
+	if *seedPath != "" {
+		if err := applySeed(database, *seedPath); err != nil {
+			fmt.Fprintln(os.Stderr, "seed:", err)
+			os.Exit(1)
+		}
+	}
 	app := tui.NewApp(database)
 	// Route renderer output through a filter that drops the legacy xterm
 	// modifyOtherKeys sequences. Bubble Tea v2 enables modifyOtherKeys
@@ -50,6 +58,48 @@ func main() {
 		fmt.Fprintln(os.Stderr, "tui:", err)
 		os.Exit(1)
 	}
+}
+
+// applySeed runs a generated seed.sql against the database. The seed is
+// applied inside a single transaction so a failure leaves the database
+// untouched. It is meant for populating a fresh database from the canonical
+// data files (see cmd/datagen); it does not merge into an existing database.
+func applySeed(database *db.DB, path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read seed: %w", err)
+	}
+	ctx := context.Background()
+	tx, err := database.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	// The generated seed carries its own BEGIN/COMMIT so it can be applied
+	// with the sqlite3 CLI. Nested transaction control is not allowed, so
+	// the outer transaction here replaces it.
+	if _, err := tx.ExecContext(ctx, stripTxControl(string(b))); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("exec seed: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "seed: applied %s\n", path)
+	return nil
+}
+
+// stripTxControl removes top-level BEGIN;/COMMIT; statements from a script.
+func stripTxControl(script string) string {
+	lines := strings.Split(script, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, l := range lines {
+		switch strings.ToUpper(strings.TrimSpace(l)) {
+		case "BEGIN;", "COMMIT;":
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return strings.Join(kept, "\n")
 }
 
 // defaultDBPath returns ~/.local/share/forge/forge-v2.db.
