@@ -164,8 +164,8 @@ func TestProgressCountsMatchSeed(t *testing.T) {
 			}
 		}
 	}
-	if completed != 107 {
-		t.Errorf("completed lectures = %d, want 107", completed)
+	if completed != 121 {
+		t.Errorf("completed lectures = %d, want 121", completed)
 	}
 	attempted := 0
 	for _, p := range g.dsa {
@@ -173,8 +173,8 @@ func TestProgressCountsMatchSeed(t *testing.T) {
 			attempted++
 		}
 	}
-	if attempted != 18 {
-		t.Errorf("attempted DSA problems = %d, want 18", attempted)
+	if attempted != 22 {
+		t.Errorf("attempted DSA problems = %d, want 22", attempted)
 	}
 }
 
@@ -209,5 +209,20 @@ func TestCatalogueShape(t *testing.T) {
 	}
 	if nsyl != 1200 {
 		t.Errorf("syllabus rows = %d, want 1200", nsyl)
+	}
+
+	totalSessions := 0
+	totalTests := 0
+	for _, sess := range g.practiceSessions {
+		totalSessions += len(sess)
+		for _, s := range sess {
+			totalTests += len(s.Tests)
+		}
+	}
+	if totalSessions != 391 {
+		t.Errorf("practice sessions = %d, want 391", totalSessions)
+	}
+	if totalTests != 1062 {
+		t.Errorf("practice tests = %d, want 1062", totalTests)
 	}
 }

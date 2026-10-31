@@ -7,6 +7,7 @@ import (
 	"time"
 
 	db "forge/internal/db"
+	"forge/internal/db/catalog"
 	"forge/internal/db/runtime"
 )
 
@@ -256,7 +257,14 @@ func SaveGovPracticeEvidence(ctx context.Context, database *db.DB, taskID, sessi
 	if err != nil {
 		return TaskEvaluation{}, fmt.Errorf("engine: save practice: %w", err)
 	}
-	return EvaluateTodayTask(ctx, database, taskID)
+	ev, err = EvaluateTodayTask(ctx, database, taskID)
+	if err != nil {
+		return ev, err
+	}
+	if ev.State == StateCompleted && pt.SessionOrder > 0 {
+		_ = catalog.AdvanceGovPracticeTrack(ctx, database, pt.SubjectID, pt.SessionOrder, now)
+	}
+	return ev, nil
 }
 
 // SaveDSAEvidence validates the DSA bundle target, writes all

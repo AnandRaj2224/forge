@@ -335,3 +335,159 @@ func InsertGovPracticeRoutineSlot(ctx context.Context, q db.DBTX, s db.GovPracti
 	}
 	return nil
 }
+
+// ---- Gov practice test orders and tracks ----
+
+func GetGovPracticeSessionByOrder(ctx context.Context, q db.DBTX, subjectID db.ID, order int) (db.GovPracticeSession, error) {
+	var s db.GovPracticeSession
+	var subID, sID string
+	err := q.QueryRowContext(ctx, `
+SELECT id, subject_id, session_code, session_order
+FROM gov_practice_sessions
+WHERE subject_id = ? AND session_order = ?`, string(subjectID), order).Scan(&sID, &subID, &s.SessionCode, &s.SessionOrder)
+	if err != nil {
+		return db.GovPracticeSession{}, fmt.Errorf("catalog: get practice session by order: %w", err)
+	}
+	s.ID = db.ID(sID)
+	s.SubjectID = db.ID(subID)
+	return s, nil
+}
+
+func GetGovPracticeSessionByCode(ctx context.Context, q db.DBTX, subjectID db.ID, code string) (db.GovPracticeSession, error) {
+	var s db.GovPracticeSession
+	var subID, sID string
+	err := q.QueryRowContext(ctx, `
+SELECT id, subject_id, session_code, session_order
+FROM gov_practice_sessions
+WHERE subject_id = ? AND session_code = ?`, string(subjectID), code).Scan(&sID, &subID, &s.SessionCode, &s.SessionOrder)
+	if err != nil {
+		return db.GovPracticeSession{}, fmt.Errorf("catalog: get practice session by code: %w", err)
+	}
+	s.ID = db.ID(sID)
+	s.SubjectID = db.ID(subID)
+	return s, nil
+}
+
+func GetGovPracticeSessionCount(ctx context.Context, q db.DBTX, subjectID db.ID) (int, error) {
+	var n int
+	err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_practice_sessions WHERE subject_id = ?`, string(subjectID)).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("catalog: count practice sessions: %w", err)
+	}
+	return n, nil
+}
+
+func GetGovPracticeTests(ctx context.Context, q db.DBTX, sessionID db.ID) ([]db.GovPracticeTest, error) {
+	rows, err := q.QueryContext(ctx, `
+SELECT id, session_id, subject_id, title, sort_order
+FROM gov_practice_tests
+WHERE session_id = ?
+ORDER BY sort_order`, string(sessionID))
+	if err != nil {
+		return nil, fmt.Errorf("catalog: list practice tests: %w", err)
+	}
+	defer rows.Close()
+	var out []db.GovPracticeTest
+	for rows.Next() {
+		var t db.GovPracticeTest
+		var tID, sesID, subID string
+		if err := rows.Scan(&tID, &sesID, &subID, &t.Title, &t.SortOrder); err != nil {
+			return nil, fmt.Errorf("catalog: scan practice test: %w", err)
+		}
+		t.ID = db.ID(tID)
+		t.SessionID = db.ID(sesID)
+		t.SubjectID = db.ID(subID)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func GetGovPracticeTest(ctx context.Context, q db.DBTX, testID db.ID) (db.GovPracticeTest, error) {
+	var t db.GovPracticeTest
+	var tID, sesID, subID string
+	err := q.QueryRowContext(ctx, `
+SELECT id, session_id, subject_id, title, sort_order
+FROM gov_practice_tests
+WHERE id = ?`, string(testID)).Scan(&tID, &sesID, &subID, &t.Title, &t.SortOrder)
+	if err != nil {
+		return db.GovPracticeTest{}, fmt.Errorf("catalog: get practice test: %w", err)
+	}
+	t.ID = db.ID(tID)
+	t.SessionID = db.ID(sesID)
+	t.SubjectID = db.ID(subID)
+	return t, nil
+}
+
+func GetGovPracticeTrack(ctx context.Context, q db.DBTX, subjectID db.ID) (db.GovPracticeTrack, error) {
+	var tr db.GovPracticeTrack
+	var subID string
+	var updated int64
+	err := q.QueryRowContext(ctx, `
+SELECT subject_id, current_session_order, updated_at
+FROM gov_practice_tracks
+WHERE subject_id = ?`, string(subjectID)).Scan(&subID, &tr.CurrentSessionOrder, &updated)
+	if err != nil {
+		return db.GovPracticeTrack{}, fmt.Errorf("catalog: get practice track: %w", err)
+	}
+	tr.SubjectID = db.ID(subID)
+	tr.UpdatedAt = time.Unix(updated, 0).UTC()
+	return tr, nil
+}
+
+func SetGovPracticeTrack(ctx context.Context, q db.DBTX, tr db.GovPracticeTrack) error {
+	_, err := q.ExecContext(ctx, `
+INSERT INTO gov_practice_tracks (subject_id, current_session_order, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(subject_id) DO UPDATE SET current_session_order = excluded.current_session_order, updated_at = excluded.updated_at`,
+		string(tr.SubjectID), tr.CurrentSessionOrder, tr.UpdatedAt.Unix())
+	if err != nil {
+		return fmt.Errorf("catalog: set practice track: %w", err)
+	}
+	return nil
+}
+
+func AdvanceGovPracticeTrack(ctx context.Context, q db.DBTX, subjectID db.ID, completedOrder int, now time.Time) error {
+	total, err := GetGovPracticeSessionCount(ctx, q, subjectID)
+	if err != nil {
+		return err
+	}
+	next := completedOrder + 1
+	if total > 0 && next > total {
+		next = 1
+	}
+	track, err := GetGovPracticeTrack(ctx, q, subjectID)
+	if err != nil {
+		// Insert if missing
+		return SetGovPracticeTrack(ctx, q, db.GovPracticeTrack{
+			SubjectID:           subjectID,
+			CurrentSessionOrder: next,
+			UpdatedAt:           now,
+		})
+	}
+	if track.CurrentSessionOrder <= completedOrder {
+		track.CurrentSessionOrder = next
+		track.UpdatedAt = now
+		return SetGovPracticeTrack(ctx, q, track)
+	}
+	return nil
+}
+
+func InsertGovPracticeSession(ctx context.Context, q db.DBTX, s db.GovPracticeSession) error {
+	_, err := q.ExecContext(ctx, `
+INSERT INTO gov_practice_sessions (id, subject_id, session_code, session_order)
+VALUES (?, ?, ?, ?)`, string(s.ID), string(s.SubjectID), s.SessionCode, s.SessionOrder)
+	if err != nil {
+		return fmt.Errorf("catalog: insert practice session: %w", err)
+	}
+	return nil
+}
+
+func InsertGovPracticeTest(ctx context.Context, q db.DBTX, t db.GovPracticeTest) error {
+	_, err := q.ExecContext(ctx, `
+INSERT INTO gov_practice_tests (id, session_id, subject_id, title, sort_order)
+VALUES (?, ?, ?, ?, ?)`, string(t.ID), string(t.SessionID), string(t.SubjectID), t.Title, t.SortOrder)
+	if err != nil {
+		return fmt.Errorf("catalog: insert practice test: %w", err)
+	}
+	return nil
+}

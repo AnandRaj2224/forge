@@ -23,7 +23,7 @@ func TestV2FreshInit(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT value FROM forge_meta WHERE key='schema_version'`).Scan(&v); err != nil || v != "v2" {
 		t.Fatalf("schema_version=%q err=%v", v, err)
 	}
-	for _, tbl := range []string{"gov_focus_state", "gov_exam_profiles", "gov_practice_rotation", "today_snapshot_tasks"} {
+	for _, tbl := range []string{"gov_focus_state", "gov_exam_profiles", "gov_practice_rotation", "today_snapshot_tasks", "gov_practice_sessions", "gov_practice_tests", "gov_practice_tracks"} {
 		var n int
 		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, tbl).Scan(&n); err != nil || n != 1 {
 			t.Fatalf("table %s missing: %v %d", tbl, err, n)

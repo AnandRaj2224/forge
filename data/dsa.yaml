@@ -35,7 +35,7 @@ dsa:
         difficulty: Medium
       - title: Valid Sudoku
         difficulty: Medium
-      - title: Longest Consecutive Sequence # done till here
+      - title: Longest Consecutive Sequence
         difficulty: Medium
       - title: Best Time to Buy And Sell Stock II
         difficulty: Medium
@@ -43,7 +43,7 @@ dsa:
         difficulty: Medium
       - title: Subarray Sum Equals K
         difficulty: Medium
-      - title: First Missing Positive
+      - title: First Missing Positive # done till here
         difficulty: Hard
   - pattern: Two Pointers
     problems:

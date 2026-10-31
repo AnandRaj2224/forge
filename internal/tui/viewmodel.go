@@ -166,9 +166,13 @@ func ResolveBundle(ctx context.Context, q db.DBTX, t db.TodayTask) Bundle {
 		if s, err := catalog.GetGovSubject(ctx, q, pt.SubjectID); err == nil {
 			subjName = s.Name
 		}
-		for _, tid := range pt.TopicIDs {
+		for i, tid := range pt.TopicIDs {
 			pi := PracticeItem{TopicID: tid, Subject: subjName}
-			if tp, err := catalog.GetGovTopic(ctx, q, tid); err == nil {
+			if i < len(pt.TestNames) && pt.TestNames[i] != "" {
+				pi.Topic = pt.TestNames[i]
+			} else if test, err := catalog.GetGovPracticeTest(ctx, q, tid); err == nil {
+				pi.Topic = test.Title
+			} else if tp, err := catalog.GetGovTopic(ctx, q, tid); err == nil {
 				pi.Topic = tp.Name
 			} else {
 				pi.Topic = string(tid)

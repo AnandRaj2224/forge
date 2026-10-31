@@ -126,6 +126,24 @@ type generator struct {
 	sweSlots []*sweSlot
 	// quotes in file order
 	quotes []quote
+	// practiceSessions[subjectSlug] -> ordered practice sessions
+	practiceSessions map[string][]*practiceSession
+}
+
+type practiceSession struct {
+	Subject *subjectSpec
+	Code    string
+	Order   int
+	ID      string
+	Tests   []*practiceTest
+}
+
+type practiceTest struct {
+	Session *practiceSession
+	Subject *subjectSpec
+	Title   string
+	Order   int
+	ID      string
 }
 
 type topic struct {
@@ -256,6 +274,26 @@ func load(dir string) (*generator, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	testOrderFiles := map[string]string{
+		"quant":     "quantTestOrder.yaml",
+		"english":   "englishTestOrder.yaml",
+		"reasoning": "reasoningTestOrder.yaml",
+	}
+	g.practiceSessions = map[string][]*practiceSession{}
+	for _, spec := range g.subjects {
+		if fname, ok := testOrderFiles[spec.Slug]; ok {
+			pPath := filepath.Join(dir, fname)
+			if _, err := os.Stat(pPath); err == nil {
+				sCopy := spec
+				sess, err := parsePracticeTestOrder(pPath, &sCopy)
+				if err != nil {
+					return nil, err
+				}
+				g.practiceSessions[spec.Slug] = sess
+			}
+		}
+	}
 	return g, nil
 }
 
@@ -310,6 +348,31 @@ func (g *generator) validate() error {
 		for _, t := range g.topics[spec.Slug] {
 			if !reachable[t.ID] {
 				return fmt.Errorf("topic %q (%s) is not part of any exam syllabus", t.Name, spec.Name)
+			}
+		}
+	}
+	for slug, sess := range g.practiceSessions {
+		seenOrder := map[int]bool{}
+		for i, s := range sess {
+			if s.Order != i+1 {
+				return fmt.Errorf("%s: non-sequential session order %d at index %d", slug, s.Order, i)
+			}
+			if seenOrder[s.Order] {
+				return fmt.Errorf("%s: duplicate session order %d", slug, s.Order)
+			}
+			seenOrder[s.Order] = true
+			if len(s.Tests) == 0 {
+				return fmt.Errorf("%s session %s has no tests", slug, s.Code)
+			}
+			seenTest := map[string]bool{}
+			for _, t := range s.Tests {
+				if t.Title == "" {
+					return fmt.Errorf("%s session %s has empty test title", slug, s.Code)
+				}
+				if seenTest[t.Title] {
+					return fmt.Errorf("%s session %s has duplicate test title %q", slug, s.Code, t.Title)
+				}
+				seenTest[t.Title] = true
 			}
 		}
 	}

@@ -117,6 +117,31 @@ func (g *generator) emit(path string, progressAt int64) error {
 			[]any{i + 1, 3600, "FIXED_SUBJECT", slug})
 	}
 
+	p.line("")
+	p.line("-- Practice test order sessions and tests --")
+	for _, spec := range g.subjects {
+		for _, ses := range g.practiceSessions[spec.Slug] {
+			p.insert("gov_practice_sessions",
+				[]string{"id", "subject_id", "session_code", "session_order"},
+				[]any{ses.ID, spec.ID, ses.Code, ses.Order})
+			for _, t := range ses.Tests {
+				p.insert("gov_practice_tests",
+					[]string{"id", "session_id", "subject_id", "title", "sort_order"},
+					[]any{t.ID, ses.ID, spec.ID, t.Title, t.Order})
+			}
+		}
+	}
+
+	p.line("")
+	p.line("-- Practice tracks (initial cursor at session 1) --")
+	for _, spec := range g.subjects {
+		if len(g.practiceSessions[spec.Slug]) > 0 {
+			p.insert("gov_practice_tracks",
+				[]string{"subject_id", "current_session_order", "updated_at"},
+				[]any{spec.ID, 1, progressAt})
+		}
+	}
+
 	// ---- DSA ----
 	p.line("")
 	p.line("-- DSA problems --")

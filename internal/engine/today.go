@@ -413,6 +413,45 @@ func planPracticeSlots(ctx context.Context, database *db.DB, focus *db.GovExam, 
 		if !active {
 			continue
 		}
+
+		// Test order practice: 1 session per subject daily from canonical test orders.
+		// Track cursor only advances when a session is completed.
+		track, err := catalog.GetGovPracticeTrack(ctx, database, subjectID)
+		order := 1
+		if err == nil && track.CurrentSessionOrder > 0 {
+			order = track.CurrentSessionOrder
+		}
+		ses, err := catalog.GetGovPracticeSessionByOrder(ctx, database, subjectID, order)
+		if err != nil && order > 1 {
+			// If cursor was beyond end, wrap to session 1
+			ses, err = catalog.GetGovPracticeSessionByOrder(ctx, database, subjectID, 1)
+		}
+		if err == nil {
+			tests, terr := catalog.GetGovPracticeTests(ctx, database, ses.ID)
+			if terr == nil && len(tests) > 0 {
+				testIDs := make([]db.ID, len(tests))
+				testTitles := make([]string, len(tests))
+				for i, t := range tests {
+					testIDs[i] = t.ID
+					testTitles[i] = t.Title
+				}
+				target, _ := db.MarshalTarget(db.GovPracticeTarget{
+					SubjectID:    subjectID,
+					SessionCode:  ses.SessionCode,
+					SessionOrder: ses.SessionOrder,
+					TopicIDs:     testIDs,
+					TestNames:    testTitles,
+				})
+				tj := target
+				title := fmt.Sprintf("%s practice • %s", subj.Name, joinPlus(testTitles))
+				out = append(out, db.TodayTask{
+					Domain: db.DomainGOV, Kind: db.SessionKindPractice,
+					Title: title, PlannedSeconds: durations[idx], TargetJSON: &tj,
+				})
+				continue
+			}
+		}
+
 		eligible, err := PracticeEligibleTopicsForExam(ctx, database, focus.ID, subjectID)
 		if err != nil {
 			return nil, nil, err

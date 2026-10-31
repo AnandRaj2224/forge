@@ -78,6 +78,12 @@ func ValidateGovPracticeTarget(ctx context.Context, q db.DBTX, pt db.GovPractice
 			return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("duplicate topic %q", string(tid)))
 		}
 		seen[tid] = true
+		if test, err := catalog.GetGovPracticeTest(ctx, q, tid); err == nil {
+			if test.SubjectID != pt.SubjectID {
+				return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("test %q not in subject", string(tid)))
+			}
+			continue
+		}
 		tp, err := catalog.GetGovTopic(ctx, q, tid)
 		if err != nil {
 			if isNotFoundErr(err) {
@@ -99,6 +105,20 @@ func ValidateGovPracticeTarget(ctx context.Context, q db.DBTX, pt db.GovPractice
 func ValidateGovPracticeTargetForExam(ctx context.Context, q db.DBTX, pt db.GovPracticeTarget, examID db.ID) error {
 	if err := ValidateGovPracticeTarget(ctx, q, pt); err != nil {
 		return err
+	}
+	if len(pt.TopicIDs) > 0 {
+		if _, err := catalog.GetGovPracticeTest(ctx, q, pt.TopicIDs[0]); err == nil {
+			members, err := catalog.GetGovExamSubjects(ctx, q, examID)
+			if err != nil {
+				return err
+			}
+			for _, m := range members {
+				if m.SubjectID == pt.SubjectID {
+					return nil
+				}
+			}
+			return wrapErr("practice target", ErrInvalidTarget, fmt.Sprintf("subject %q not in exam %q", string(pt.SubjectID), string(examID)))
+		}
 	}
 	syll, err := catalog.GetGovExamSyllabusForSubject(ctx, q, examID, pt.SubjectID)
 	if err != nil {

@@ -179,6 +179,7 @@ type GovPracticeRecord struct {
 	ID                      ID
 	SessionID               ID
 	TopicID                 ID
+	TestID                  *ID
 	ExamID                  *ID
 	TimeSpentSeconds        int
 	Attempted               int
@@ -211,6 +212,30 @@ type GovFocusState struct {
 	ID            int
 	FocusedExamID *ID
 	UpdatedAt     time.Time
+}
+
+// GovPracticeSession is one numbered session in a subject's test order track.
+type GovPracticeSession struct {
+	ID           ID
+	SubjectID    ID
+	SessionCode  string
+	SessionOrder int
+}
+
+// GovPracticeTest is one specific test belonging to a practice session.
+type GovPracticeTest struct {
+	ID        ID
+	SessionID ID
+	SubjectID ID
+	Title     string
+	SortOrder int
+}
+
+// GovPracticeTrack tracks the persistent session order cursor for a subject.
+type GovPracticeTrack struct {
+	SubjectID           ID
+	CurrentSessionOrder int
+	UpdatedAt           time.Time
 }
 
 // GovPracticeRotation is the deterministic per-exam+subject topic cursor.
@@ -393,8 +418,11 @@ type GovLectureTarget struct {
 }
 
 type GovPracticeTarget struct {
-	SubjectID ID   `json:"subject_id"`
-	TopicIDs  []ID `json:"topic_ids"`
+	SubjectID    ID       `json:"subject_id"`
+	TopicIDs     []ID     `json:"topic_ids"`
+	SessionCode  string   `json:"session_code,omitempty"`
+	SessionOrder int      `json:"session_order,omitempty"`
+	TestNames    []string `json:"test_names,omitempty"`
 }
 
 type DSATarget struct {

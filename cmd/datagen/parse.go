@@ -336,6 +336,49 @@ func parseQuotes(path string) ([]quote, error) {
 	return out, nil
 }
 
+// parsePracticeTestOrder reads a test order file:
+//
+//	ses_1:
+//	  - "Test Title A"
+//	  - "Test Title B"
+//
+func parsePracticeTestOrder(path string, spec *subjectSpec) ([]*practiceSession, error) {
+	lines, err := readLines(path)
+	if err != nil {
+		return nil, err
+	}
+	var sessions []*practiceSession
+	var cur *practiceSession
+	for _, l := range lines {
+		switch {
+		case !l.isItem && strings.HasPrefix(l.key, "ses_"):
+			code := l.key
+			order, err := strconv.Atoi(strings.TrimPrefix(code, "ses_"))
+			if err != nil {
+				return nil, fmt.Errorf("%s:%d: invalid session code %q", path, l.number, code)
+			}
+			cur = &practiceSession{
+				Subject: spec,
+				Code:    code,
+				Order:   order,
+				ID:      fmt.Sprintf("prac-ses-%s-%d", spec.Slug, order),
+			}
+			sessions = append(sessions, cur)
+		case l.isItem && cur != nil:
+			tOrder := len(cur.Tests) + 1
+			test := &practiceTest{
+				Session: cur,
+				Subject: spec,
+				Title:   l.item,
+				Order:   tOrder,
+				ID:      fmt.Sprintf("test-%s-%s-%d", spec.Slug, cur.Code, tOrder),
+			}
+			cur.Tests = append(cur.Tests, test)
+		}
+	}
+	return sessions, nil
+}
+
 // slug converts a display name into a stable lowercase identifier fragment.
 func slug(s string) string {
 	s = strings.ToLower(s)

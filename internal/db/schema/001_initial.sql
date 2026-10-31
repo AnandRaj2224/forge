@@ -115,6 +115,31 @@ CREATE TABLE IF NOT EXISTS gov_practice_routine (
     )
 );
 
+-- Gov practice test order tracks and sessions.
+CREATE TABLE IF NOT EXISTS gov_practice_sessions (
+    id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL REFERENCES gov_subjects(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    session_code TEXT NOT NULL,
+    session_order INTEGER NOT NULL,
+    UNIQUE (subject_id, session_order),
+    UNIQUE (subject_id, session_code)
+);
+
+CREATE TABLE IF NOT EXISTS gov_practice_tests (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES gov_practice_sessions(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    subject_id TEXT NOT NULL REFERENCES gov_subjects(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    title TEXT NOT NULL,
+    sort_order INTEGER NOT NULL,
+    UNIQUE (session_id, sort_order)
+);
+
+CREATE TABLE IF NOT EXISTS gov_practice_tracks (
+    subject_id TEXT PRIMARY KEY REFERENCES gov_subjects(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    current_session_order INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL
+);
+
 -- DSA catalogue.
 CREATE TABLE IF NOT EXISTS dsa_problems (
     id TEXT PRIMARY KEY,
@@ -239,7 +264,8 @@ CREATE INDEX IF NOT EXISTS idx_gov_lecture_completions_completed ON gov_lecture_
 CREATE TABLE IF NOT EXISTS gov_practice_records (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
-    topic_id TEXT NOT NULL REFERENCES gov_topics(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    topic_id TEXT REFERENCES gov_topics(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    test_id TEXT REFERENCES gov_practice_tests(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
     exam_id TEXT REFERENCES gov_exams(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
     time_spent_seconds INTEGER NOT NULL CHECK (time_spent_seconds >= 0),
     attempted INTEGER NOT NULL CHECK (attempted >= 0),
@@ -247,11 +273,14 @@ CREATE TABLE IF NOT EXISTS gov_practice_records (
     avg_question_speed_seconds REAL CHECK (avg_question_speed_seconds IS NULL OR avg_question_speed_seconds > 0),
     recorded_at INTEGER NOT NULL,
     CHECK (correct <= attempted),
-    UNIQUE (session_id, topic_id)
+    CHECK (topic_id IS NOT NULL OR test_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_gov_practice_records_topic_recorded ON gov_practice_records(topic_id, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_gov_practice_records_test_recorded ON gov_practice_records(test_id, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_gov_practice_records_session ON gov_practice_records(session_id);
 CREATE INDEX IF NOT EXISTS idx_gov_practice_records_exam ON gov_practice_records(exam_id, recorded_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gov_practice_records_session_topic ON gov_practice_records(session_id, topic_id) WHERE topic_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gov_practice_records_session_test ON gov_practice_records(session_id, test_id) WHERE test_id IS NOT NULL;
 
 -- V2 deterministic per-exam+subject topic cursor.
 CREATE TABLE IF NOT EXISTS gov_practice_rotation (

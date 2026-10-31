@@ -172,10 +172,19 @@ func InsertGovPracticeRecord(ctx context.Context, q db.DBTX, r db.GovPracticeRec
 	if r.ExamID != nil {
 		exam = string(*r.ExamID)
 	}
+	var topicID, testID any
+	if r.TestID != nil {
+		testID = string(*r.TestID)
+	} else if strings.HasPrefix(string(r.TopicID), "test-") {
+		testID = string(r.TopicID)
+	}
+	if testID == nil && r.TopicID != "" {
+		topicID = string(r.TopicID)
+	}
 	if _, err := q.ExecContext(ctx, `
-INSERT INTO gov_practice_records (id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.SessionID, r.TopicID, exam, r.TimeSpentSeconds, r.Attempted, r.Correct, avg, r.RecordedAt.Unix(),
+INSERT INTO gov_practice_records (id, session_id, topic_id, test_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.SessionID, topicID, testID, exam, r.TimeSpentSeconds, r.Attempted, r.Correct, avg, r.RecordedAt.Unix(),
 	); err != nil {
 		return fmt.Errorf("runtime: insert practice record: %w", err)
 	}
@@ -185,8 +194,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 // GetGovPracticeHistory returns practice rows for a topic ordered by recorded_at.
 func GetGovPracticeHistory(ctx context.Context, q db.DBTX, topicID db.ID) ([]db.GovPracticeRecord, error) {
 	rows, err := q.QueryContext(ctx, `
-SELECT id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
-FROM gov_practice_records WHERE topic_id = ? ORDER BY recorded_at`, topicID)
+SELECT id, session_id, topic_id, test_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+FROM gov_practice_records WHERE topic_id = ? OR test_id = ? ORDER BY recorded_at`, string(topicID), string(topicID))
 	if err != nil {
 		return nil, fmt.Errorf("runtime: practice history: %w", err)
 	}
@@ -197,8 +206,8 @@ FROM gov_practice_records WHERE topic_id = ? ORDER BY recorded_at`, topicID)
 // GetGovPracticeRecordsBySession returns practice rows for a session.
 func GetGovPracticeRecordsBySession(ctx context.Context, q db.DBTX, sessionID db.ID) ([]db.GovPracticeRecord, error) {
 	rows, err := q.QueryContext(ctx, `
-SELECT id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
-FROM gov_practice_records WHERE session_id = ? ORDER BY topic_id`, sessionID)
+SELECT id, session_id, topic_id, test_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+FROM gov_practice_records WHERE session_id = ? ORDER BY COALESCE(test_id, topic_id)`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: practice by session: %w", err)
 	}
@@ -210,11 +219,19 @@ func scanPracticeRecords(rows *sql.Rows) ([]db.GovPracticeRecord, error) {
 	var out []db.GovPracticeRecord
 	for rows.Next() {
 		var r db.GovPracticeRecord
+		var topicID, testID sql.NullString
 		var avg sql.NullFloat64
 		var exam sql.NullString
 		var recorded int64
-		if err := rows.Scan(&r.ID, &r.SessionID, &r.TopicID, &exam, &r.TimeSpentSeconds, &r.Attempted, &r.Correct, &avg, &recorded); err != nil {
+		if err := rows.Scan(&r.ID, &r.SessionID, &topicID, &testID, &exam, &r.TimeSpentSeconds, &r.Attempted, &r.Correct, &avg, &recorded); err != nil {
 			return nil, fmt.Errorf("runtime: scan practice record: %w", err)
+		}
+		if testID.Valid && testID.String != "" {
+			tID := db.ID(testID.String)
+			r.TestID = &tID
+			r.TopicID = tID
+		} else if topicID.Valid {
+			r.TopicID = db.ID(topicID.String)
 		}
 		if avg.Valid {
 			v := avg.Float64
@@ -245,8 +262,8 @@ func GetGovPracticeRecordsBySessions(ctx context.Context, q db.DBTX, sessionIDs 
 		args = append(args, string(id))
 	}
 	rows, err := q.QueryContext(ctx, `
-SELECT id, session_id, topic_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
-FROM gov_practice_records WHERE session_id IN (`+strings.Join(place, ",")+`) ORDER BY topic_id`, args...)
+SELECT id, session_id, topic_id, test_id, exam_id, time_spent_seconds, attempted, correct, avg_question_speed_seconds, recorded_at
+FROM gov_practice_records WHERE session_id IN (`+strings.Join(place, ",")+`) ORDER BY COALESCE(test_id, topic_id)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("runtime: practice by sessions: %w", err)
 	}

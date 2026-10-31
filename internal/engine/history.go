@@ -217,8 +217,15 @@ func taskDetail(ctx context.Context, q db.DBTX, t db.TodayTask) (string, error) 
 		if err != nil {
 			return t.Title, nil
 		}
+		if len(pt.TestNames) > 0 {
+			return joinPlus(pt.TestNames), nil
+		}
 		var names []string
 		for _, tid := range pt.TopicIDs {
+			if test, err := catalog.GetGovPracticeTest(ctx, q, tid); err == nil {
+				names = append(names, test.Title)
+				continue
+			}
 			tp, err := catalog.GetGovTopic(ctx, q, tid)
 			if err != nil {
 				return "", fmt.Errorf("engine: task detail topic: %w", err)
@@ -543,7 +550,7 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 	rows.Close()
 	// Gov practice + per-subject. NOTE: single-conn pool deadlocks if we
 	// query inside an open rows loop, so collect first, close, then map.
-	prows, err := q.QueryContext(ctx, `SELECT topic_id, attempted, correct, avg_question_speed_seconds FROM gov_practice_records WHERE recorded_at >= ? AND recorded_at < ?`, lo, hi)
+	prows, err := q.QueryContext(ctx, `SELECT COALESCE(test_id, topic_id), attempted, correct, avg_question_speed_seconds FROM gov_practice_records WHERE recorded_at >= ? AND recorded_at < ?`, lo, hi)
 	if err != nil {
 		return fmt.Errorf("engine: weekly practice: %w", err)
 	}
@@ -591,11 +598,16 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 	}
 	subjectOf := map[string]db.ID{}
 	if len(topicIDs) > 0 {
-		args := make([]any, 0, len(topicIDs))
+		args := make([]any, 0, len(topicIDs)*2)
 		for _, id := range topicIDs {
 			args = append(args, id)
 		}
-		qry := `SELECT id, subject_id FROM gov_topics WHERE id IN (` + joinInPlace(len(topicIDs)) + `)`
+		for _, id := range topicIDs {
+			args = append(args, id)
+		}
+		qry := `SELECT id, subject_id FROM gov_topics WHERE id IN (` + joinInPlace(len(topicIDs)) + `)
+UNION ALL
+SELECT id, subject_id FROM gov_practice_tests WHERE id IN (` + joinInPlace(len(topicIDs)) + `)`
 		srows, err := q.QueryContext(ctx, qry, args...)
 		if err != nil {
 			return fmt.Errorf("engine: topic subjects: %w", err)
@@ -716,10 +728,13 @@ func fillWeeklyEvidence(ctx context.Context, q db.DBTX, rep *WeeklyReport, lo, h
 
 func topicSubject(ctx context.Context, q db.DBTX, topicID string) (db.ID, error) {
 	var sid string
-	if err := q.QueryRowContext(ctx, `SELECT subject_id FROM gov_topics WHERE id = ?`, topicID).Scan(&sid); err != nil {
-		return "", err
+	if err := q.QueryRowContext(ctx, `SELECT subject_id FROM gov_topics WHERE id = ?`, topicID).Scan(&sid); err == nil {
+		return db.ID(sid), nil
 	}
-	return db.ID(sid), nil
+	if err := q.QueryRowContext(ctx, `SELECT subject_id FROM gov_practice_tests WHERE id = ?`, topicID).Scan(&sid); err == nil {
+		return db.ID(sid), nil
+	}
+	return "", fmt.Errorf("subject for topic or test %q: not found", topicID)
 }
 
 // collectWeeklyLectureSubjects maps in-week lecture completions to subject
