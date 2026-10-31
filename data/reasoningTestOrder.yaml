@@ -1,0 +1,560 @@
+ses_1:
+  - "Grid Puzzles - Beginner Level"
+  - "Inequalities - Beginner Level"
+  - "Syllogism - Beginner Level"
+ses_2:
+  - "Coding Decoding - Beginner Level"
+  - "Blood Relations 1 - Beginner Level"
+  - "Direction Sense - Beginner Level"
+ses_3:
+  - "Blood Relations Puzzles - Clerk Mains Level"
+  - "Word and Number Sequences - Beginner Level"
+  - "Ranking and Positioning Puzzles - Beginner Level"
+ses_4:
+  - "Comparison Puzzles - Beginner Level"
+  - "Data Sufficiency - Beginner Level"
+  - "Inequalities (Negatives and Blanks) - PO Prelims Level"
+ses_5:
+  - "Slots Puzzles - Clerk Mains Level"
+  - "Advanced Comparison Puzzles - Advanced PO Mains Level"
+  - "Syllogism (Do not Follow Type) - Beginner Level"
+ses_6:
+  - "Dates and Years Puzzles - Beginner Level"
+  - "Mixed Puzzles - Clerk Mains Level"
+  - "Floors and Flats Arrangements - Beginner Level"
+ses_7:
+  - "Linear Arrangements - Beginner Level"
+  - "Dates and Years Puzzles (Variables) - PO Prelims Level"
+  - "Boxes Arrangements - Beginner Level"
+ses_8:
+  - "Linear Arrangements (Parallel Rows) - Beginner Level"
+  - "Puzzles 1 - Prelims Level"
+  - "Floors and Boxes (Variables) - PO Prelims Level"
+ses_9:
+  - "Length Arrangements (Houses and Lanes) - Advanced PO Mains Level"
+  - "Stacks and Buildings Arrangements - PO Mains Level"
+  - "Puzzles 2 - Prelims Level"
+ses_10:
+  - "Linear Arrangements (Variables and Vacant Spots) - PO Prelims Level"
+  - "Designation Puzzles - Beginner Level"
+  - "Puzzles 3 - Prelims Level"
+ses_11:
+  - "Input Output (Words and Numbers) - PO Prelims Level"
+  - "Length Arrangements (Shelves and Items Lengths) - Advanced PO Mains Level"
+  - "Coded Puzzles - Clerk Mains Level"
+ses_12:
+  - "Concentric Arrangements - Clerk Mains Level"
+  - "Input Output (Mixed) - PO Prelims Level"
+  - "Puzzles 4 - Prelims Level"
+ses_13:
+  - "Circular Arrangements - Beginner Level"
+  - "Input Output 1 - Clerk Mains Level"
+  - "Alphabet Puzzles - Clerk Mains Level"
+ses_14:
+  - "Circular Arrangements (Variables and Vacant Spots) - PO Prelims Level"
+  - "Input Output 2 - Clerk Mains Level"
+  - "Puzzles 5 - Prelims Level"
+ses_15:
+  - "Unknown Number Puzzles - Beginner Level"
+  - "Circular Arrangements (Circumference) - Clerk Mains Level"
+  - "Input Output 3 - Clerk Mains Level"
+ses_16:
+  - "Square and Rectangle Arrangements - Beginner Level"
+  - "Input Output 4 - Clerk Mains Level"
+  - "Budgets Puzzles - Advanced PO Mains Level"
+ses_17:
+  - "Visual Input Output 1 - Clerk Mains Level"
+  - "Shifting Positions Puzzles - Clerk Mains Level"
+  - "Coding Decoding (Chinese) - Beginner Level"
+ses_18:
+  - "Triangular and Polygonal Arrangements - Beginner Level"
+  - "Visual Input Output 2 - Clerk Mains Level"
+  - "Coded Direction Sense - Clerk Mains Level"
+ses_19:
+  - "Polygonal Arrangements (Variables and Vacant Spots) - Beginner Level"
+  - "Resultant Number - Clerk Mains Level"
+  - "Coded Blood Relations - Clerk Mains Level"
+ses_20:
+  - "Flow Charts - Advanced PO Mains Level"
+  - "Character Strings - Beginner Level"
+  - "Coded Inequalities - Clerk Mains Level"
+ses_21:
+  - "Binary Numbers - Advanced PO Mains Level"
+  - "Data Sufficiency (Elimination) - Beginner Level"
+  - "Coded Syllogism - Advanced PO Mains Level"
+ses_22:
+  - "Cause and Effect - Clerk Mains Level"
+  - "Alphanumeric Coding - Beginner Level"
+  - "Direction Sense Puzzles - Clerk Mains Level"
+ses_23:
+  - "Inferences and Conclusions - Clerk Mains Level"
+  - "Blood Relations 2 - PO Prelims Level"
+  - "Alphabets and Numbers LR - Beginner Level"
+ses_24:
+  - "Statements and Possible Reasons - Clerk Mains Level"
+  - "Data Redundancy - Clerk Mains Level"
+  - "Reverse Syllogism - Advanced PO Mains Level"
+ses_25:
+  - "Strengthening and Weakening Arguments - Clerk Mains Level"
+  - "Advanced Coding Decoding - Clerk Mains Level"
+  - "Pairs of Letters/Digits - Beginner Level"
+ses_26:
+  - "Statement and Assumptions - Clerk Mains Level"
+  - "Meaningful Words - Beginner Level"
+  - "Grid Puzzles - Clerk Prelims Level"
+ses_27:
+  - "Course of Action - Clerk Mains Level"
+  - "Series and Odd one out - Beginner Level"
+  - "Inequalities - Clerk Prelims Level"
+ses_28:
+  - "Decision Making - Clerk Mains Level"
+  - "Syllogism - Clerk Prelims Level"
+  - "Direction Sense - Clerk Prelims Level"
+ses_29:
+  - "Advanced CR 1 - Advanced PO Mains Level"
+  - "Blood Relations 1 - Clerk Prelims Level"
+  - "Coding Decoding - Clerk Prelims Level"
+ses_30:
+  - "Advanced CR 2 - Advanced PO Mains Level"
+  - "Blood Relations Puzzles - Past Year Questions"
+  - "Ranking and Positioning Puzzles - Clerk Prelims Level"
+ses_31:
+  - "Word and Number Sequences - Clerk Prelims Level"
+  - "Comparison Puzzles - Clerk Prelims Level"
+  - "Data Sufficiency - Clerk Prelims Level"
+ses_32:
+  - "Inequalities (Negatives and Blanks) - Past Year Questions"
+  - "Slots Puzzles - PO Mains Level"
+  - "Syllogism (Do not Follow Type) - Clerk Prelims Level"
+ses_33:
+  - "Dates and Years Puzzles - Clerk Prelims Level"
+  - "Mixed Puzzles - PO Mains Level"
+  - "Floors and Flats Arrangements - Clerk Prelims Level"
+ses_34:
+  - "Linear Arrangements - Clerk Prelims Level"
+  - "Dates and Years Puzzles (Variables) - Speed Improvement"
+  - "Boxes Arrangements - Clerk Prelims Level"
+ses_35:
+  - "Linear Arrangements (Parallel Rows) - Clerk Prelims Level"
+  - "Floors and Boxes (Variables) - Speed Improvement"
+  - "Input Output (Words and Numbers) - Past Year Questions"
+ses_36:
+  - "Stacks and Buildings Arrangements - Advanced PO Mains Level"
+  - "Linear Arrangements (Variables and Vacant Spots) - Speed Improvement"
+  - "Concentric Arrangements - PO Mains Level"
+ses_37:
+  - "Designation Puzzles - Clerk Prelims Level"
+  - "Length Arrangements (Shelves and Items Lengths) - Revision"
+  - "Input Output (Mixed) - Past Year Questions"
+ses_38:
+  - "Coded Puzzles - PO Mains Level"
+  - "Circular Arrangements - Clerk Prelims Level"
+  - "Input Output 1 - Past Year Questions"
+ses_39:
+  - "Alphabet Puzzles - PO Mains Level"
+  - "Circular Arrangements (Variables and Vacant Spots) - Speed Improvement"
+  - "Input Output 2 - Past Year Questions"
+ses_40:
+  - "Unknown Number Puzzles - Clerk Prelims Level"
+  - "Circular Arrangements (Circumference) - Past Year Questions"
+  - "Input Output 3 - PO Mains Level"
+ses_41:
+  - "Square and Rectangle Arrangements - Clerk Prelims Level"
+  - "Input Output 4 - PO Mains Level"
+  - "Shifting Positions Puzzles - PO Mains Level"
+ses_42:
+  - "Visual Input Output 1 - PO Mains Level"
+  - "Coding Decoding (Chinese) - Clerk Prelims Level"
+  - "Triangular and Polygonal Arrangements - Clerk Prelims Level"
+ses_43:
+  - "Visual Input Output 2 - PO Mains Level"
+  - "Coded Direction Sense - Past Year Questions"
+  - "Polygonal Arrangements (Variables and Vacant Spots) - Clerk Prelims Level"
+ses_44:
+  - "Resultant Number - PO Mains Level"
+  - "Coded Blood Relations - Past Year Questions"
+  - "Character Strings - Clerk Prelims Level"
+ses_45:
+  - "Coded Inequalities - Past Year Questions"
+  - "Data Sufficiency (Elimination) - Clerk Prelims Level"
+  - "Cause and Effect - PO Mains Level"
+ses_46:
+  - "Alphanumeric Coding - Clerk Prelims Level"
+  - "Direction Sense Puzzles - Past Year Questions"
+  - "Inferences and Conclusions - PO Mains Level"
+ses_47:
+  - "Alphabets and Numbers LR - Clerk Prelims Level"
+  - "Statements and Possible Reasons - PO Mains Level"
+  - "Data Redundancy - PO Mains Level"
+ses_48:
+  - "Strengthening and Weakening Arguments - PO Mains Level"
+  - "Advanced Coding Decoding - Past Year Questions"
+  - "Pairs of Letters/Digits - Clerk Prelims Level"
+ses_49:
+  - "Statement and Assumptions - PO Mains Level"
+  - "Grid Puzzles - PO Prelims Level"
+  - "Meaningful Words - Clerk Prelims Level"
+ses_50:
+  - "Course of Action - PO Mains Level"
+  - "Inequalities - PO Prelims Level"
+  - "Series and Odd one out - Clerk Prelims Level"
+ses_51:
+  - "Decision Making - PO Mains Level"
+  - "Syllogism - PO Prelims Level"
+  - "Direction Sense - PO Prelims Level"
+ses_52:
+  - "Blood Relations 1 - PO Prelims Level"
+  - "Coding Decoding - PO Prelims Level"
+  - "Ranking and Positioning Puzzles - PO Prelims Level"
+ses_53:
+  - "Blood Relations Puzzles - PO Mains Level"
+  - "Comparison Puzzles - PO Prelims Level"
+  - "Data Sufficiency - PO Prelims Level"
+ses_54:
+  - "Word and Number Sequences - PO Prelims Level"
+  - "Slots Puzzles - Advanced PO Mains Level"
+  - "Inequalities (Negatives and Blanks) - Speed Improvement"
+ses_55:
+  - "Syllogism (Do not Follow Type) - PO Prelims Level"
+  - "Mixed Puzzles - Advanced PO Mains Level"
+  - "Dates and Years Puzzles - PO Prelims Level"
+ses_56:
+  - "Floors and Flats Arrangements - PO Prelims Level"
+  - "Linear Arrangements - PO Prelims Level"
+  - "Input Output (Words and Numbers) - Speed Improvement"
+ses_57:
+  - "Boxes Arrangements - PO Prelims Level"
+  - "Linear Arrangements (Parallel Rows) - PO Prelims Level"
+  - "Concentric Arrangements - Advanced PO Mains Level"
+ses_58:
+  - "Input Output (Mixed) - Speed Improvement"
+  - "Designation Puzzles - PO Prelims Level"
+  - "Circular Arrangements - PO Prelims Level"
+ses_59:
+  - "Input Output 1 - PO Mains Level"
+  - "Coded Puzzles - Advanced PO Mains Level"
+  - "Unknown Number Puzzles - PO Prelims Level"
+ses_60:
+  - "Input Output 2 - PO Mains Level"
+  - "Alphabet Puzzles - Advanced PO Mains Level"
+  - "Circular Arrangements (Circumference) - PO Mains Level"
+ses_61:
+  - "Input Output 3 - Advanced PO Mains Level"
+  - "Square and Rectangle Arrangements - PO Prelims Level"
+  - "Shifting Positions Puzzles - Advanced PO Mains Level"
+ses_62:
+  - "Input Output 4 - Advanced PO Mains Level"
+  - "Triangular and Polygonal Arrangements - PO Prelims Level"
+  - "Coding Decoding (Chinese) - PO Prelims Level"
+ses_63:
+  - "Visual Input Output 1 - Advanced PO Mains Level"
+  - "Polygonal Arrangements (Variables and Vacant Spots) - PO Prelims Level"
+  - "Coded Direction Sense - PO Mains Level"
+ses_64:
+  - "Visual Input Output 2 - Advanced PO Mains Level"
+  - "Coded Blood Relations - PO Mains Level"
+  - "Character Strings - Past Year Questions"
+ses_65:
+  - "Resultant Number - Advanced PO Mains Level"
+  - "Cause and Effect - Advanced PO Mains Level"
+  - "Data Sufficiency (Elimination) - PO Prelims Level"
+ses_66:
+  - "Coded Inequalities - PO Mains Level"
+  - "Inferences and Conclusions - Advanced PO Mains Level"
+  - "Alphanumeric Coding - PO Prelims Level"
+ses_67:
+  - "Direction Sense Puzzles - PO Mains Level"
+  - "Statements and Possible Reasons - Advanced PO Mains Level"
+  - "Alphabets and Numbers LR - PO Prelims Level"
+ses_68:
+  - "Data Redundancy - Advanced PO Mains Level"
+  - "Strengthening and Weakening Arguments - Advanced PO Mains Level"
+  - "Advanced Coding Decoding - PO Mains Level"
+ses_69:
+  - "Pairs of Letters/Digits - PO Prelims Level"
+  - "Statement and Assumptions - Advanced PO Mains Level"
+  - "Grid Puzzles - Past Year Questions"
+ses_70:
+  - "Meaningful Words - PO Prelims Level"
+  - "Course of Action - Advanced PO Mains Level"
+  - "Inequalities - Past Year Questions"
+ses_71:
+  - "Series and Odd one out - PO Prelims Level"
+  - "Decision Making - Advanced PO Mains Level"
+  - "Syllogism - Past Year Questions"
+ses_72:
+  - "Direction Sense - Past Year Questions"
+  - "Ranking and Positioning Puzzles - Past Year Questions"
+  - "Blood Relations 1 - Past Year Questions"
+ses_73:
+  - "Coding Decoding - Past Year Questions"
+  - "Comparison Puzzles - Past Year Questions"
+  - "Blood Relations Puzzles - Advanced PO Mains Level"
+ses_74:
+  - "Data Sufficiency - Past Year Questions"
+  - "Slots Puzzles - Revision"
+  - "Inequalities (Negatives and Blanks) - Revision"
+ses_75:
+  - "Word and Number Sequences - Past Year Questions"
+  - "Dates and Years Puzzles - Past Year Questions"
+  - "Mixed Puzzles - Revision"
+ses_76:
+  - "Syllogism (Do not Follow Type) - Past Year Questions"
+  - "Input Output (Words and Numbers) - Revision"
+  - "Linear Arrangements - Past Year Questions"
+ses_77:
+  - "Floors and Flats Arrangements - Past Year Questions"
+  - "Concentric Arrangements - Revision"
+  - "Linear Arrangements (Parallel Rows) - Past Year Questions"
+ses_78:
+  - "Boxes Arrangements - Past Year Questions"
+  - "Circular Arrangements - Past Year Questions"
+  - "Input Output (Mixed) - Revision"
+ses_79:
+  - "Designation Puzzles - Past Year Questions"
+  - "Unknown Number Puzzles - Past Year Questions"
+  - "Input Output 1 - Advanced PO Mains Level"
+ses_80:
+  - "Coded Puzzles - Revision"
+  - "Circular Arrangements (Circumference) - Advanced PO Mains Level"
+  - "Input Output 2 - Advanced PO Mains Level"
+ses_81:
+  - "Alphabet Puzzles - Revision"
+  - "Square and Rectangle Arrangements - Past Year Questions"
+  - "Input Output 3 - Revision"
+ses_82:
+  - "Shifting Positions Puzzles - Revision"
+  - "Triangular and Polygonal Arrangements - Past Year Questions (1/2)"
+  - "Input Output 4 - Revision"
+ses_83:
+  - "Coding Decoding (Chinese) - Past Year Questions"
+  - "Polygonal Arrangements (Variables and Vacant Spots) - Past Year Questions"
+  - "Visual Input Output 1 - Revision"
+ses_84:
+  - "Coded Direction Sense - Advanced PO Mains Level"
+  - "Visual Input Output 2 - Revision"
+  - "Coded Blood Relations - Advanced PO Mains Level"
+ses_85:
+  - "Character Strings - Speed Improvement"
+  - "Cause and Effect - Revision"
+  - "Resultant Number - Revision"
+ses_86:
+  - "Data Sufficiency (Elimination) - Revision"
+  - "Inferences and Conclusions - Revision"
+  - "Coded Inequalities - Advanced PO Mains Level"
+ses_87:
+  - "Alphanumeric Coding - Past Year Questions"
+  - "Statements and Possible Reasons - Revision"
+  - "Direction Sense Puzzles - Advanced PO Mains Level"
+ses_88:
+  - "Alphabets and Numbers LR - Past Year Questions"
+  - "Strengthening and Weakening Arguments - Revision"
+  - "Data Redundancy - Revision"
+ses_89:
+  - "Advanced Coding Decoding - Advanced PO Mains Level"
+  - "Statement and Assumptions - Revision"
+  - "Grid Puzzles - Speed Improvement"
+ses_90:
+  - "Pairs of Letters/Digits - Past Year Questions"
+  - "Course of Action - Revision"
+  - "Inequalities - Speed Improvement"
+ses_91:
+  - "Meaningful Words - Past Year Questions"
+  - "Decision Making - Revision"
+  - "Syllogism - Speed Improvement"
+ses_92:
+  - "Series and Odd one out - Past Year Questions"
+  - "Ranking and Positioning Puzzles - Speed Improvement"
+  - "Blood Relations 1 - Speed Improvement"
+ses_93:
+  - "Direction Sense - Speed Improvement"
+  - "Comparison Puzzles - Speed Improvement"
+  - "Blood Relations Puzzles - Revision"
+ses_94:
+  - "Coding Decoding - Speed Improvement"
+  - "Data Sufficiency - Speed Improvement"
+  - "Dates and Years Puzzles - Speed Improvement"
+ses_95:
+  - "Word and Number Sequences - Speed Improvement"
+  - "Linear Arrangements - Speed Improvement"
+  - "Syllogism (Do not Follow Type) - Speed Improvement"
+ses_96:
+  - "Linear Arrangements (Parallel Rows) - Speed Improvement"
+  - "Floors and Flats Arrangements - Speed Improvement"
+  - "Circular Arrangements - Speed Improvement"
+ses_97:
+  - "Boxes Arrangements - Speed Improvement"
+  - "Unknown Number Puzzles - Speed Improvement"
+  - "Input Output 1 - Revision"
+ses_98:
+  - "Designation Puzzles - Speed Improvement"
+  - "Circular Arrangements (Circumference) - Revision"
+  - "Input Output 2 - Revision"
+ses_99:
+  - "Square and Rectangle Arrangements - Speed Improvement"
+  - "Triangular and Polygonal Arrangements - Speed Improvement"
+  - "Coding Decoding (Chinese) - Speed Improvement"
+ses_100:
+  - "Polygonal Arrangements (Variables and Vacant Spots) - Speed Improvement"
+  - "Coded Direction Sense - Revision"
+  - "Coded Blood Relations - Revision"
+ses_101:
+  - "Character Strings - Clerk Mains Level"
+  - "Coded Inequalities - Revision"
+  - "Alphanumeric Coding - Speed Improvement"
+ses_102:
+  - "Direction Sense Puzzles - Revision"
+  - "Alphabets and Numbers LR - Speed Improvement"
+  - "Grid Puzzles - Clerk Mains Level"
+ses_103:
+  - "Advanced Coding Decoding - Revision"
+  - "Inequalities - Clerk Mains Level"
+  - "Pairs of Letters/Digits - Speed Improvement"
+ses_104:
+  - "Syllogism - Clerk Mains Level"
+  - "Meaningful Words - Speed Improvement"
+  - "Ranking and Positioning Puzzles - Clerk Mains Level"
+ses_105:
+  - "Blood Relations 1 - Clerk Mains Level"
+  - "Series and Odd one out - Speed Improvement"
+  - "Comparison Puzzles - Clerk Mains Level"
+ses_106:
+  - "Direction Sense - Clerk Mains Level"
+  - "Dates and Years Puzzles - Clerk Mains Level"
+  - "Data Sufficiency - Clerk Mains Level"
+ses_107:
+  - "Coding Decoding - Clerk Mains Level"
+  - "Linear Arrangements - Clerk Mains Level"
+  - "Syllogism (Do not Follow Type) - Revision"
+ses_108:
+  - "Word and Number Sequences - Revision"
+  - "Circular Arrangements - Clerk Mains Level"
+  - "Linear Arrangements (Parallel Rows) - Clerk Mains Level"
+ses_109:
+  - "Floors and Flats Arrangements - Clerk Mains Level"
+  - "Unknown Number Puzzles - Clerk Mains Level"
+  - "Triangular and Polygonal Arrangements - Revision (1/2)"
+ses_110:
+  - "Boxes Arrangements - Clerk Mains Level"
+  - "Square and Rectangle Arrangements - Clerk Mains Level"
+  - "Coding Decoding (Chinese) - Revision"
+ses_111:
+  - "Designation Puzzles - Clerk Mains Level"
+  - "Polygonal Arrangements (Variables and Vacant Spots) - Revision"
+  - "Character Strings - PO Mains Level"
+ses_112:
+  - "Alphanumeric Coding - PO Mains Level"
+  - "Grid Puzzles - PO Mains Level"
+  - "Alphabets and Numbers LR - Clerk Mains Level"
+ses_113:
+  - "Inequalities - PO Mains Level"
+  - "Pairs of Letters/Digits - Clerk Mains Level"
+  - "Syllogism - PO Mains Level"
+ses_114:
+  - "Ranking and Positioning Puzzles - PO Mains Level"
+  - "Meaningful Words - Clerk Mains Level"
+  - "Comparison Puzzles - PO Mains Level"
+ses_115:
+  - "Blood Relations 1 - PO Mains Level"
+  - "Series and Odd one out - Revision"
+  - "Dates and Years Puzzles - PO Mains Level"
+ses_116:
+  - "Direction Sense - PO Mains Level"
+  - "Data Sufficiency - PO Mains Level"
+  - "Linear Arrangements - PO Mains Level"
+ses_117:
+  - "Coding Decoding - PO Mains Level"
+  - "Circular Arrangements - PO Mains Level"
+  - "Linear Arrangements (Parallel Rows) - PO Mains Level"
+ses_118:
+  - "Triangular and Polygonal Arrangements - Clerk Mains Level"
+  - "Unknown Number Puzzles - PO Mains Level"
+  - "Floors and Flats Arrangements - PO Mains Level"
+ses_119:
+  - "Square and Rectangle Arrangements - PO Mains Level"
+  - "Boxes Arrangements - PO Mains Level"
+  - "Character Strings - Revision"
+ses_120:
+  - "Designation Puzzles - PO Mains Level"
+  - "Grid Puzzles - Advanced PO Mains Level"
+  - "Alphanumeric Coding - Advanced PO Mains Level"
+ses_121:
+  - "Alphabets and Numbers LR - PO Mains Level"
+  - "Inequalities - Revision"
+  - "Syllogism - Advanced PO Mains Level"
+ses_122:
+  - "Pairs of Letters/Digits - PO Mains Level"
+  - "Comparison Puzzles - Advanced PO Mains Level"
+  - "Ranking and Positioning Puzzles - Advanced PO Mains Level"
+ses_123:
+  - "Meaningful Words - PO Mains Level"
+  - "Dates and Years Puzzles - Advanced PO Mains Level"
+  - "Blood Relations 1 - Advanced PO Mains Level"
+ses_124:
+  - "Linear Arrangements - Advanced PO Mains Level"
+  - "Direction Sense - Advanced PO Mains Level"
+  - "Data Sufficiency - Advanced PO Mains Level"
+ses_125:
+  - "Circular Arrangements - Advanced PO Mains Level"
+  - "Linear Arrangements (Parallel Rows) - Advanced PO Mains Level"
+  - "Coding Decoding - Advanced PO Mains Level"
+ses_126:
+  - "Triangular and Polygonal Arrangements - PO Mains Level"
+  - "Unknown Number Puzzles - Advanced PO Mains Level"
+  - "Floors and Flats Arrangements - Advanced PO Mains Level"
+ses_127:
+  - "Square and Rectangle Arrangements - Advanced PO Mains Level"
+  - "Boxes Arrangements - Advanced PO Mains Level"
+  - "Grid Puzzles - Revision"
+ses_128:
+  - "Designation Puzzles - Advanced PO Mains Level"
+  - "Alphanumeric Coding - Revision"
+  - "Syllogism - Revision"
+ses_129:
+  - "Alphabets and Numbers LR - Revision"
+  - "Comparison Puzzles - Revision"
+  - "Ranking and Positioning Puzzles - Revision"
+ses_130:
+  - "Pairs of Letters/Digits - Revision"
+  - "Dates and Years Puzzles - Revision"
+  - "Blood Relations 1 - Revision"
+ses_131:
+  - "Meaningful Words - Revision"
+  - "Linear Arrangements - Revision"
+  - "Direction Sense - Revision"
+ses_132:
+  - "Data Sufficiency - Revision"
+  - "Circular Arrangements - Revision"
+  - "Linear Arrangements (Parallel Rows) - Revision"
+ses_133:
+  - "Boxes Arrangements - Revision"
+  - "Triangular and Polygonal Arrangements - Past Year Questions (2/2)"
+  - "Unknown Number Puzzles - Revision"
+ses_134:
+  - "Floors and Flats Arrangements - Revision"
+  - "Square and Rectangle Arrangements - Revision"
+  - "Triangular and Polygonal Arrangements - Advanced PO Mains Level"
+ses_135:
+  - "Coding Decoding - Revision"
+  - "Triangular and Polygonal Arrangements - Revision (2/2)"
+  - "Designation Puzzles - Revision"
+ses_136:
+  - "Sectional Test 1 - Clerk Prelims Level"
+  - "Sectional Test 1 - PO Prelims Level"
+  - "Sectional Test 1 - Clerk Mains Level"
+ses_137:
+  - "Sectional Test 1 - PO Mains Level"
+  - "Sectional Test 1 - Advanced PO Mains Level"
+  - "Sectional Test 2 - Clerk Prelims Level"
+ses_138:
+  - "Sectional Test 2 - PO Prelims Level"
+  - "Sectional Test 2 - Clerk Mains Level"
+  - "Sectional Test 2 - PO Mains Level"
+ses_139:
+  - "Sectional Test 2 - Advanced PO Mains Level"
+  - "Sectional Test 3 - Clerk Prelims Level"
+  - "Sectional Test 3 - PO Prelims Level"
+ses_140:
+  - "Sectional Test 3 - Clerk Mains Level"
+  - "Sectional Test 3 - PO Mains Level"
+  - "Sectional Test 3 - Advanced PO Mains Level"

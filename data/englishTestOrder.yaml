@@ -1,0 +1,329 @@
+ses_1:
+  - "Grammar (Parts of Speech - Adverbs) - Clerk Prelims Level"
+  - "Grammar (Parts of Speech - Nouns) - Clerk Prelims Level"
+ses_2:
+  - "Grammar (Modifiers and Parallelism) - Clerk Prelims Level"
+  - "Grammar (Parts of Speech - Pronouns) - Clerk Prelims Level"
+ses_3:
+  - "Grammar (Parts of Speech - Verbs) - Clerk Prelims Level"
+  - "Grammar (Parts of Speech - Adjectives) - Clerk Prelims Level"
+ses_4:
+  - "Grammar (Tenses) - Clerk Prelims Level"
+  - "Grammar (Articles and Modals) - Clerk Prelims Level"
+ses_5:
+  - "Grammar (Parts of Speech - Conjunctions) - Clerk Prelims Level"
+  - "Grammar (Subject, Object, Phrase and Clause) - Clerk Prelims Level"
+ses_6:
+  - "Grammar (Subject Verb Agreement) - Clerk Prelims Level"
+  - "Grammar (Infinitives, Participles, Gerunds, Comparisons) - Clerk Prelims Level"
+ses_7:
+  - "Vocabulary (Words and Roots) - Clerk Prelims Level"
+  - "Spelling and Inappropriate Usage - Beginner Level"
+ses_8:
+  - "Idioms and Phrasal Verbs - Beginner Level"
+  - "Vocabulary (Words and Roots) - Past Year Questions"
+ses_9:
+  - "Vocabulary (Idioms and Phrasal Verbs) - Beginner Level"
+  - "Spelling and Inappropriate Usage - Clerk Prelims Level"
+ses_10:
+  - "Grammar (Parts of Speech - Prepositions) - Clerk Prelims Level"
+  - "Vocabulary (Words and Roots) - Speed Improvement"
+ses_11:
+  - "Idioms and Phrasal Verbs - Clerk Prelims Level"
+  - "Spelling and Inappropriate Usage - PO Prelims Level"
+ses_12:
+  - "Vocabulary (Idioms and Phrasal Verbs) - Clerk Prelims Level"
+  - "Vocabulary (Words and Roots) - Revision"
+ses_13:
+  - "Spelling and Inappropriate Usage - Past Year Questions"
+  - "Idioms and Phrasal Verbs - PO Prelims Level"
+ses_14:
+  - "Vocabulary (Idioms and Phrasal Verbs) - Past Year Questions"
+  - "Spelling and Inappropriate Usage - Speed Improvement"
+ses_15:
+  - "Idioms and Phrasal Verbs - Past Year Questions"
+  - "Spelling and Inappropriate Usage - Revision"
+ses_16:
+  - "Error Spotting (Grammar Based) - Beginner Level"
+  - "Vocabulary (Idioms and Phrasal Verbs) - Speed Improvement"
+ses_17:
+  - "Error Spotting (Context Based) - Beginner Level"
+  - "Idioms and Phrasal Verbs - Speed Improvement"
+ses_18:
+  - "Sentence Improvement (Phrase Replacement) - Beginner Level"
+  - "Error Spotting - Clerk Mains Level"
+ses_19:
+  - "Sentence Improvement (Correct/Incorrect) - Beginner Level"
+  - "Error Spotting (Errors and Fillers) - Clerk Mains Level"
+ses_20:
+  - "Parajumbles (Sentence Jumbles) - Beginner Level"
+  - "Sentence Improvement (Words and Phrases) - Clerk Mains Level"
+ses_21:
+  - "Parajumbles (Word Jumbles) - Beginner Level"
+  - "Sentence Improvement (Long Phrases) - Clerk Mains Level"
+ses_22:
+  - "Reading Comprehension - Beginner Level"
+  - "Parajumbles (Parts of Sentence) - Beginner Level"
+ses_23:
+  - "Reading Comprehension (Indirect) - Beginner Level"
+  - "Advanced Parajumbles - PO Mains Level"
+ses_24:
+  - "Cloze Test - Beginner Level"
+  - "Reading Comprehension (Numbered Paragraph) - Clerk Mains Level"
+ses_25:
+  - "Fill in the Blanks (Words) - Beginner Level"
+  - "Cloze Test (Sentence) - Clerk Mains Level"
+ses_26:
+  - "Correct Usage of Words - Beginner Level"
+  - "Fill in the Blanks (Words and Phrases) - Beginner Level"
+ses_27:
+  - "Fill in the Blanks (Sentences) - Clerk Mains Level"
+  - "Error Spotting (Grammar Based) - Clerk Prelims Level"
+ses_28:
+  - "Sentence Joining (Match the Following) - Beginner Level"
+  - "Vocabulary (Idioms and Phrasal Verbs) - Revision"
+ses_29:
+  - "Sentence Joining and Match the Following - Clerk Mains Level"
+  - "Error Spotting (Context Based) - Clerk Prelims Level"
+ses_30:
+  - "Sentence Joining (Connector Identification) - Beginner Level"
+  - "Idioms and Phrasal Verbs - Clerk Mains Level"
+ses_31:
+  - "Similar and Opposite Meaning Sentences - PO Mains Level"
+  - "Sentence Improvement (Phrase Replacement) - Clerk Prelims Level"
+ses_32:
+  - "Error Spotting - Past Year Questions"
+  - "Sentence Improvement (Correct/Incorrect) - Clerk Prelims Level"
+ses_33:
+  - "Central Idea/Summary - Clerk Mains Level"
+  - "Error Spotting (Errors and Fillers) - Past Year Questions"
+ses_34:
+  - "Word Describing Passage - Clerk Mains Level"
+  - "Parajumbles (Sentence Jumbles) - Clerk Prelims Level"
+ses_35:
+  - "Sentence Improvement (Words and Phrases) - Past Year Questions"
+  - "Parajumbles (Word Jumbles) - Clerk Prelims Level"
+ses_36:
+  - "Sentence Improvement (Long Phrases) - Past Year Questions"
+  - "Reading Comprehension - Clerk Prelims Level"
+ses_37:
+  - "Parajumbles (Parts of Sentence) - Clerk Prelims Level"
+  - "Reading Comprehension (Indirect) - Clerk Prelims Level"
+ses_38:
+  - "Advanced Parajumbles - Past Year Questions"
+  - "Cloze Test - Clerk Prelims Level"
+ses_39:
+  - "Reading Comprehension (Numbered Paragraph) - Past Year Questions"
+  - "Fill in the Blanks (Words) - Clerk Prelims Level"
+ses_40:
+  - "Cloze Test (Sentence) - Past Year Questions"
+  - "Correct Usage of Words - Clerk Prelims Level"
+ses_41:
+  - "Fill in the Blanks (Words and Phrases) - Clerk Prelims Level"
+  - "Error Spotting (Grammar Based) - PO Prelims Level"
+ses_42:
+  - "Fill in the Blanks (Sentences) - Past Year Questions"
+  - "Sentence Joining (Match the Following) - Clerk Prelims Level"
+ses_43:
+  - "Sentence Joining and Match the Following - Past Year Questions"
+  - "Error Spotting (Context Based) - PO Prelims Level"
+ses_44:
+  - "Sentence Joining (Connector Identification) - Clerk Prelims Level"
+  - "Idioms and Phrasal Verbs - PO Mains Level"
+ses_45:
+  - "Similar and Opposite Meaning Sentences - Past Year Questions"
+  - "Sentence Improvement (Phrase Replacement) - PO Prelims Level"
+ses_46:
+  - "Sentence Improvement (Correct/Incorrect) - PO Prelims Level"
+  - "Error Spotting - PO Mains Level"
+ses_47:
+  - "Central Idea/Summary - Past Year Questions"
+  - "Error Spotting (Errors and Fillers) - PO Mains Level"
+ses_48:
+  - "Word Describing Passage - Past Year Questions"
+  - "Parajumbles (Sentence Jumbles) - PO Prelims Level"
+ses_49:
+  - "Parajumbles (Word Jumbles) - PO Prelims Level"
+  - "Sentence Improvement (Words and Phrases) - PO Mains Level"
+ses_50:
+  - "Reading Comprehension - PO Prelims Level"
+  - "Sentence Improvement (Long Phrases) - PO Mains Level"
+ses_51:
+  - "Reading Comprehension (Indirect) - PO Prelims Level"
+  - "Parajumbles (Parts of Sentence) - PO Prelims Level"
+ses_52:
+  - "Cloze Test - PO Prelims Level"
+  - "Advanced Parajumbles - Advanced PO Mains Level"
+ses_53:
+  - "Fill in the Blanks (Words) - PO Prelims Level"
+  - "Reading Comprehension (Numbered Paragraph) - PO Mains Level"
+ses_54:
+  - "Correct Usage of Words - PO Prelims Level"
+  - "Cloze Test (Sentence) - PO Mains Level"
+ses_55:
+  - "Fill in the Blanks (Words and Phrases) - PO Prelims Level"
+  - "Error Spotting (Grammar Based) - Past Year Questions"
+ses_56:
+  - "Sentence Joining (Match the Following) - PO Prelims Level"
+  - "Fill in the Blanks (Sentences) - PO Mains Level"
+ses_57:
+  - "Sentence Joining and Match the Following - PO Mains Level"
+  - "Error Spotting (Context Based) - Past Year Questions"
+ses_58:
+  - "Sentence Joining (Connector Identification) - PO Prelims Level"
+  - "Idioms and Phrasal Verbs - Advanced PO Mains Level"
+ses_59:
+  - "Similar and Opposite Meaning Sentences - Advanced PO Mains Level"
+  - "Sentence Improvement (Phrase Replacement) - Past Year Questions"
+ses_60:
+  - "Sentence Improvement (Correct/Incorrect) - Past Year Questions"
+  - "Error Spotting - Advanced PO Mains Level"
+ses_61:
+  - "Central Idea/Summary - PO Mains Level"
+  - "Error Spotting (Errors and Fillers) - Advanced PO Mains Level"
+ses_62:
+  - "Word Describing Passage - PO Mains Level"
+  - "Parajumbles (Sentence Jumbles) - Past Year Questions"
+ses_63:
+  - "Parajumbles (Word Jumbles) - Past Year Questions"
+  - "Sentence Improvement (Words and Phrases) - Advanced PO Mains Level"
+ses_64:
+  - "Reading Comprehension - Past Year Questions"
+  - "Sentence Improvement (Long Phrases) - Advanced PO Mains Level"
+ses_65:
+  - "Reading Comprehension (Indirect) - Past Year Questions"
+  - "Parajumbles (Parts of Sentence) - Past Year Questions"
+ses_66:
+  - "Cloze Test - Past Year Questions"
+  - "Advanced Parajumbles - Revision"
+ses_67:
+  - "Fill in the Blanks (Words) - Past Year Questions"
+  - "Reading Comprehension (Numbered Paragraph) - Advanced PO Mains Level"
+ses_68:
+  - "Correct Usage of Words - Past Year Questions"
+  - "Cloze Test (Sentence) - Advanced PO Mains Level"
+ses_69:
+  - "Fill in the Blanks (Words and Phrases) - Past Year Questions"
+  - "Error Spotting (Grammar Based) - Speed Improvement"
+ses_70:
+  - "Sentence Joining (Match the Following) - Past Year Questions"
+  - "Fill in the Blanks (Sentences) - Advanced PO Mains Level"
+ses_71:
+  - "Sentence Joining and Match the Following - Advanced PO Mains Level"
+  - "Error Spotting (Context Based) - Speed Improvement"
+ses_72:
+  - "Sentence Joining (Connector Identification) - Past Year Questions"
+  - "Idioms and Phrasal Verbs - Revision"
+ses_73:
+  - "Similar and Opposite Meaning Sentences - Revision"
+  - "Sentence Improvement (Phrase Replacement) - Speed Improvement"
+ses_74:
+  - "Sentence Improvement (Correct/Incorrect) - Speed Improvement"
+  - "Error Spotting - Revision"
+ses_75:
+  - "Central Idea/Summary - Advanced PO Mains Level"
+  - "Error Spotting (Errors and Fillers) - Revision"
+ses_76:
+  - "Word Describing Passage - Advanced PO Mains Level"
+  - "Parajumbles (Sentence Jumbles) - Speed Improvement"
+ses_77:
+  - "Parajumbles (Word Jumbles) - Speed Improvement"
+  - "Sentence Improvement (Words and Phrases) - Revision"
+ses_78:
+  - "Reading Comprehension - Speed Improvement"
+  - "Sentence Improvement (Long Phrases) - Revision"
+ses_79:
+  - "Reading Comprehension (Indirect) - Speed Improvement"
+  - "Parajumbles (Parts of Sentence) - Speed Improvement"
+ses_80:
+  - "Cloze Test - Speed Improvement"
+  - "Fill in the Blanks (Words) - Speed Improvement"
+ses_81:
+  - "Reading Comprehension (Numbered Paragraph) - Revision"
+  - "Correct Usage of Words - Speed Improvement"
+ses_82:
+  - "Cloze Test (Sentence) - Revision"
+  - "Fill in the Blanks (Words and Phrases) - Speed Improvement"
+ses_83:
+  - "Error Spotting (Grammar Based) - Revision"
+  - "Sentence Joining (Match the Following) - Speed Improvement"
+ses_84:
+  - "Fill in the Blanks (Sentences) - Revision"
+  - "Sentence Joining and Match the Following - Revision"
+ses_85:
+  - "Error Spotting (Context Based) - Revision"
+  - "Sentence Joining (Connector Identification) - Speed Improvement"
+ses_86:
+  - "Sentence Improvement (Phrase Replacement) - Revision"
+  - "Central Idea/Summary - Revision"
+ses_87:
+  - "Sentence Improvement (Correct/Incorrect) - Revision"
+  - "Word Describing Passage - Revision"
+ses_88:
+  - "Parajumbles (Sentence Jumbles) - Clerk Mains Level"
+  - "Reading Comprehension - Clerk Mains Level"
+ses_89:
+  - "Parajumbles (Word Jumbles) - Clerk Mains Level"
+  - "Reading Comprehension (Indirect) - Clerk Mains Level"
+ses_90:
+  - "Parajumbles (Parts of Sentence) - Revision"
+  - "Fill in the Blanks (Words) - Revision"
+ses_91:
+  - "Cloze Test - Clerk Mains Level"
+  - "Correct Usage of Words - Clerk Mains Level"
+ses_92:
+  - "Fill in the Blanks (Words and Phrases) - Clerk Mains Level"
+  - "Sentence Joining (Connector Identification) - Revision"
+ses_93:
+  - "Reading Comprehension - PO Mains Level"
+  - "Parajumbles (Sentence Jumbles) - PO Mains Level"
+ses_94:
+  - "Reading Comprehension (Indirect) - PO Mains Level"
+  - "Parajumbles (Word Jumbles) - PO Mains Level"
+ses_95:
+  - "Correct Usage of Words - PO Mains Level"
+  - "Cloze Test - PO Mains Level"
+ses_96:
+  - "Fill in the Blanks (Words and Phrases) - PO Mains Level"
+  - "Reading Comprehension - Advanced PO Mains Level"
+ses_97:
+  - "Parajumbles (Sentence Jumbles) - Advanced PO Mains Level"
+  - "Reading Comprehension (Indirect) - Revision"
+ses_98:
+  - "Parajumbles (Word Jumbles) - Advanced PO Mains Level"
+  - "Correct Usage of Words - Advanced PO Mains Level"
+ses_99:
+  - "Cloze Test - Advanced PO Mains Level"
+  - "Fill in the Blanks (Words and Phrases) - Revision"
+ses_100:
+  - "Reading Comprehension - Revision"
+  - "Parajumbles (Sentence Jumbles) - Revision"
+ses_101:
+  - "Reading Comprehension (Indirect) - Advanced PO Mains Level"
+  - "Correct Usage of Words - Revision"
+ses_102:
+  - "Parajumbles (Word Jumbles) - Revision"
+  - "Cloze Test - Revision"
+ses_103:
+  - "Sectional Test 1 - Clerk Prelims Level"
+  - "Sectional Test 1 - PO Prelims Level"
+ses_104:
+  - "Sectional Test 1 - Clerk Mains Level"
+  - "Sectional Test 1 - PO Mains Level"
+ses_105:
+  - "Sectional Test 1 - Advanced PO Mains Level"
+  - "Sectional Test 2 - Clerk Prelims Level"
+ses_106:
+  - "Sectional Test 2 - PO Prelims Level"
+  - "Sectional Test 2 - Clerk Mains Level"
+ses_107:
+  - "Sectional Test 2 - PO Mains Level"
+  - "Sectional Test 2 - Advanced PO Mains Level"
+ses_108:
+  - "Sectional Test 3 - Clerk Prelims Level"
+  - "Sectional Test 3 - PO Prelims Level"
+ses_109:
+  - "Sectional Test 3 - Clerk Mains Level"
+  - "Sectional Test 3 - PO Mains Level"
+ses_110:
+  - "Sectional Test 3 - Advanced PO Mains Level"
