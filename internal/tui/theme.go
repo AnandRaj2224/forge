@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 )
@@ -13,7 +14,6 @@ import (
 //
 //	#0B0F2B ocean night — main application background/foundation
 //	#BC6CFF neon purple — primary Forge accent (nav, focus, selection)
-//	#FF5CA8 sunset pink — secondary accent, SWE domain
 //	#00F0FF vice cyan — secondary accent, DSA domain, COMPLETE signal
 //	#FFB86B miami peach — secondary accent, GOV domain, ACTIVE signal
 //
@@ -32,7 +32,7 @@ import (
 //	text textMuted textHighlight
 //	primary secondary light
 //	oceanNight neonPurple sunsetPink viceCyan miamiPeach
-//	gov dsa swe
+//	gov dsa
 //	todo active complete
 //
 // NOTE (Charm v2): lipgloss.Color is a func returning color.Color, so palette
@@ -58,7 +58,6 @@ var (
 
 	gov = lipgloss.Color("#FFB86B")
 	dsa = lipgloss.Color("#00F0FF")
-	swe = lipgloss.Color("#FF5CA8")
 
 	todo     = lipgloss.Color("#8E8EA0")
 	active   = lipgloss.Color("#FFB86B")
@@ -102,10 +101,10 @@ var (
 	cTodo = lipgloss.Color("#8E8EA0")
 
 	// Domain accents: small TRACK identifiers only.
-	// GOV peach, DSA cyan, SWE pink.
-	cGov = lipgloss.Color("#FFB86B")
-	cDSA = lipgloss.Color("#00F0FF")
-	cSWE = lipgloss.Color("#FF5CA8")
+	// GOV peach (lecture), GOV practice pink (former SWE color #FF5CA8), DSA cyan.
+	cGov         = lipgloss.Color("#FFB86B")
+	cGovPractice = lipgloss.Color("#FF5CA8")
+	cDSA         = lipgloss.Color("#00F0FF")
 
 	// LeetCode difficulty language (DSA screen difficulty labels only):
 	// bright deep green for easy, bright deep yellow for medium,
@@ -173,16 +172,13 @@ var (
 
 // DomainBadge renders a small domain tag in its accent color.
 func DomainBadge(domain string) string {
-	switch domain {
-	case "GOV":
-		return lipgloss.NewStyle().Bold(true).Foreground(cGov).Render(domain)
-	case "DSA":
-		return lipgloss.NewStyle().Bold(true).Foreground(cDSA).Render(domain)
-	case "SWE":
-		return lipgloss.NewStyle().Bold(true).Foreground(cSWE).Render(domain)
-	default:
-		return thPrimary.Render(domain)
-	}
+	return DomainBadgeForWork(domain, "")
+}
+
+// DomainBadgeForWork renders a small domain tag in its accent color, tinted by work type.
+// GOV PRACTICE tasks carry the sunset pink accent (#FF5CA8, the former SWE color).
+func DomainBadgeForWork(domain, workType string) string {
+	return DomainStyleForWork(domain, workType).Render(domain)
 }
 
 // StatusPill renders TODO / ACTIVE / COMPLETE with semantic color.
@@ -193,22 +189,29 @@ func StatusPill(st TaskStatus) string {
 }
 
 // StatusPillForDomain renders TODO / ACTIVE / COMPLETE where COMPLETE
-// takes the track color (GOV peach, DSA cyan, SWE pink) so the detail
+// takes the track color (GOV peach, DSA cyan) so the detail
 // header matches the Today table STATUS cell. ACTIVE stays peach (global
 // active signal), TODO stays neutral. Unknown/empty domain falls back to
 // cyan to preserve legacy behavior.
 func StatusPillForDomain(st TaskStatus, domain string) string {
+	return StatusPillForWork(st, domain, "")
+}
+
+// StatusPillForWork renders TODO / ACTIVE / COMPLETE taking into account
+// the work type (e.g. GOV practice takes sunset pink).
+func StatusPillForWork(st TaskStatus, domain, workType string) string {
 	switch st {
 	case TaskActive:
 		return thRunning.Render("▶ ACTIVE")
 	case TaskCompleted:
 		switch domain {
 		case "GOV":
+			if strings.EqualFold(workType, "PRACTICE") {
+				return lipgloss.NewStyle().Bold(true).Foreground(cGovPractice).Render("✓ COMPLETE")
+			}
 			return lipgloss.NewStyle().Bold(true).Foreground(cGov).Render("✓ COMPLETE")
 		case "DSA":
 			return lipgloss.NewStyle().Bold(true).Foreground(cDSA).Render("✓ COMPLETE")
-		case "SWE":
-			return lipgloss.NewStyle().Bold(true).Foreground(cSWE).Render("✓ COMPLETE")
 		default:
 			return thSuccess.Render("✓ COMPLETE")
 		}
@@ -266,13 +269,20 @@ func SectionHeader(s string) string { return thSectionHead.Render(s) }
 // or section in that domain's workspace. Neutral base is preserved;
 // the domain accent appears only where it carries meaning.
 func DomainStyle(domain string) lipgloss.Style {
+	return DomainStyleForWork(domain, "")
+}
+
+// DomainStyleForWork returns the accent style taking workType into account.
+// GOV PRACTICE tasks carry the sunset pink accent (#FF5CA8, the former SWE color).
+func DomainStyleForWork(domain, workType string) lipgloss.Style {
 	switch domain {
 	case "GOV":
+		if strings.EqualFold(workType, "PRACTICE") {
+			return lipgloss.NewStyle().Bold(true).Foreground(cGovPractice)
+		}
 		return lipgloss.NewStyle().Bold(true).Foreground(cGov)
 	case "DSA":
 		return lipgloss.NewStyle().Bold(true).Foreground(cDSA)
-	case "SWE":
-		return lipgloss.NewStyle().Bold(true).Foreground(cSWE)
 	default:
 		return thPrimary
 	}
@@ -280,13 +290,19 @@ func DomainStyle(domain string) lipgloss.Style {
 
 // DomainFg returns the accent foreground for a domain tag or cell.
 func DomainFg(domain string) color.Color {
+	return DomainFgForWork(domain, "")
+}
+
+// DomainFgForWork returns the accent foreground taking workType into account.
+func DomainFgForWork(domain, workType string) color.Color {
 	switch domain {
 	case "GOV":
+		if strings.EqualFold(workType, "PRACTICE") {
+			return cGovPractice
+		}
 		return cGov
 	case "DSA":
 		return cDSA
-	case "SWE":
-		return cSWE
 	default:
 		return cFgPrimary
 	}

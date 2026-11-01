@@ -94,7 +94,7 @@ func minInt(a, b int) int {
 // lecture progress, practice progression, pattern/area progress.
 // Clean quiet bar: ████████░░░░░░ 60% with percentage/count. The fill stays
 // neutral by default and may carry one restrained domain accent (GOV peach,
-// DSA cyan, SWE pink) via Accent. Never a gradient.
+// DSA cyan) via Accent. Never a gradient.
 type ProgressBar struct {
 	Ratio   float64 // 0..1
 	Width   int

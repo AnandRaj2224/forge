@@ -158,7 +158,7 @@ func TestReviewsMetricsStructure(t *testing.T) {
 	// right pane scrolls independently, so the clipped app view is checked
 	// separately for the top bento.
 	full := stripANSIForTest(app.reviews.reportView(90))
-	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "SWE TIME", "What worked well", "What should change", "DOMAIN SUMMARY", "Questions attempted", "Questions correct", "Questions incorrect", "Not passed"} {
+	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "What worked well", "What should change", "DOMAIN SUMMARY", "Questions attempted", "Questions correct", "Questions incorrect", "Not passed"} {
 		found := false
 		// case-insensitive for reflections
 		if strings.Contains(strings.ToUpper(full), strings.ToUpper(want)) {

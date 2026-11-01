@@ -121,9 +121,6 @@ type generator struct {
 	syllabus map[string][]*syllabusEntry
 	// dsa problems in file order
 	dsa []*dsaProblem
-	// swe areas and routine slots
-	sweAreas []*sweArea
-	sweSlots []*sweSlot
 	// quotes in file order
 	quotes []quote
 	// practiceSessions[subjectSlug] -> ordered practice sessions
@@ -174,20 +171,6 @@ type dsaProblem struct {
 	ID         string
 	Order      int
 	attempted  bool
-}
-
-type sweArea struct {
-	ID    string
-	Name  string
-	Order int
-}
-
-type sweSlot struct {
-	ID       string
-	Weekday  int
-	Position int
-	AreaID   string
-	Seconds  int
 }
 
 type quote struct {
@@ -263,10 +246,6 @@ func load(dir string) (*generator, error) {
 	}
 
 	g.dsa, err = parseDSAFile(filepath.Join(dir, "dsa.yaml"))
-	if err != nil {
-		return nil, err
-	}
-	g.sweAreas, g.sweSlots, err = parseSWERoutine(filepath.Join(dir, "swe_routine.yaml"))
 	if err != nil {
 		return nil, err
 	}

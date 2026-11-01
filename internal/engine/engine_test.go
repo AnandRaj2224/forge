@@ -2,7 +2,6 @@ package engine_test
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -113,22 +112,6 @@ func seedDSA(t *testing.T, ctx context.Context, d *db.DB) {
 		}
 	}
 	if err := catalog.UpsertDSARoutine(ctx, d, db.DSARoutine{ID: 1, PlannedSeconds: 9000}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func seedSWE(t *testing.T, ctx context.Context, d *db.DB) {
-	t.Helper()
-	if err := catalog.InsertSWEArea(ctx, d, db.SWEArea{ID: "area-go", Name: "Go", SortOrder: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.InsertSWEArea(ctx, d, db.SWEArea{ID: "area-sql", Name: "SQL", SortOrder: 2}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.InsertSWERoutineSlot(ctx, d, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 0, AreaID: "area-go", DurationSeconds: 3600}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.InsertSWERoutineSlot(ctx, d, db.SWERoutineSlot{ID: "mon-2", Weekday: 1, Position: 1, AreaID: "area-sql", DurationSeconds: 3600}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -437,58 +420,11 @@ func TestDSABundleAndRepeat(t *testing.T) {
 	}
 }
 
-func TestSWEAreaTargetValidation(t *testing.T) {
-	d := openEngineDB(t)
-	ctx := context.Background()
-	seedSWE(t, ctx, d)
-	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
-	mkTask(t, ctx, d, "tswe", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
-	now := time.Now()
-	sess, err := engine.StartTodayTask(ctx, d, "tswe", now)
-	if err != nil {
-		t.Fatalf("SWE area block must start: %v", err)
-	}
-	closed, err := engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if closed.ElapsedSeconds() != 3600 {
-		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
-	}
-	// Explicit completion: stopping records time but stays TODO.
-	ev, err := engine.EvaluateTodayTask(ctx, d, "tswe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ev.State != engine.StateTodo {
-		t.Fatalf("SWE block must stay TODO without YES, got %s", ev.State)
-	}
-	// Restartable while TODO.
-	if _, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(2*time.Hour)); err != nil {
-		t.Fatalf("TODO SWE must stay restartable, got %v", err)
-	}
-	second, _ := engine.StopActiveSession(ctx, d, now.Add(2*time.Hour).Add(10*time.Minute))
-	// YES completes and blocks restart (read-only).
-	if _, err := engine.CompleteSWETask(ctx, d, "tswe", second.ID, now.Add(3*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	ev2, _ := engine.EvaluateTodayTask(ctx, d, "tswe")
-	if ev2.State != engine.StateCompleted {
-		t.Fatalf("YES must mark COMPLETED, got %s", ev2.State)
-	}
-	if _, err := engine.StartTodayTask(ctx, d, "tswe", now.Add(4*time.Hour)); !errors.Is(err, engine.ErrTaskCompleted) {
-		t.Fatalf("completed SWE restart must return ErrTaskCompleted, got %v", err)
-	}
-	_ = sess
-	_ = closed
-}
-
 func TestTodayGeneration(t *testing.T) {
 	d := openEngineDB(t)
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	snap, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {
@@ -498,9 +434,8 @@ func TestTodayGeneration(t *testing.T) {
 		t.Fatalf("rev=%d", snap.Revision)
 	}
 	// Count lecture slots (3), practice (Quant only: Reasoning has no
-	// eligible topic, slot-3 English has no eligible topic), dsa (1),
-	// swe (2: one block per routine slot).
-	var lec, prac, dsa, swe int
+	// eligible topic, slot-3 English has no eligible topic), dsa (1).
+	var lec, prac, dsa int
 	for _, tk := range tasks {
 		switch {
 		case tk.Domain == db.DomainGOV && tk.Kind == db.SessionKindLecture:
@@ -509,8 +444,6 @@ func TestTodayGeneration(t *testing.T) {
 			prac++
 		case tk.Domain == db.DomainDSA:
 			dsa++
-		case tk.Domain == db.DomainSWE:
-			swe++
 		}
 	}
 	if lec != 3 {
@@ -519,8 +452,8 @@ func TestTodayGeneration(t *testing.T) {
 	if prac != 1 {
 		t.Fatalf("practice=%d want 1 (only Quant has eligible topics)", prac)
 	}
-	if dsa != 1 || swe != 2 {
-		t.Fatalf("dsa=%d swe=%d want 1/2", dsa, swe)
+	if dsa != 1 {
+		t.Fatalf("dsa=%d want 1", dsa)
 	}
 	// Practice bundle holds only eligible topics: incomplete-lecture
 	// Percentage excluded, zero-lecture Ratio + Number System included.
@@ -672,7 +605,6 @@ func TestTargetValidation(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	if err := engine.ValidateGovPracticeTarget(ctx, d, db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: nil}); err == nil {
 		t.Fatal("empty bundle must fail")
 	}
@@ -681,14 +613,5 @@ func TestTargetValidation(t *testing.T) {
 	}
 	if err := engine.ValidateDSATarget(ctx, d, db.DSATarget{Problems: []db.DSAProblemTarget{{ProblemID: "nope", Mode: db.DSAModeNew}}}); err == nil {
 		t.Fatal("unknown problem must fail")
-	}
-	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{AreaID: "nope"}); err == nil {
-		t.Fatal("unknown SWE area must fail")
-	}
-	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{}); err == nil {
-		t.Fatal("empty SWE area must fail")
-	}
-	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{AreaID: "area-go"}); err != nil {
-		t.Fatalf("valid SWE area must pass: %v", err)
 	}
 }

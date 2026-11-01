@@ -38,7 +38,6 @@ type DSARow struct {
 // right-bottom panel. SAVE stays disabled until every bundled item validates.
 // Focus order, rendered position, and scroll position derive from one
 // structured field model (fieldDescriptors), never hard-coded line numbers.
-// SWE blocks use no result form: stopping the session records actual time.
 type ResultForm struct {
 	app           *App
 	sessionID     string
@@ -115,8 +114,7 @@ func resultKindForTask(t db.TodayTask) string {
 	if t.Domain == db.DomainDSA {
 		return "DSA"
 	}
-	// SWE blocks use no result form; stopping the session is sufficient.
-	return "SWE"
+	return ""
 }
 
 func (s *ResultForm) nFocus() int {

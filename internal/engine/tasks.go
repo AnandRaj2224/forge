@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	db "forge/internal/db"
 	"forge/internal/db/runtime"
@@ -78,8 +77,6 @@ func evaluateAt(ctx context.Context, q db.DBTX, taskID db.ID, cutoff int64) (Tas
 		return evalGovPractice(ctx, q, ev, task, sessions, cutoff)
 	case db.DomainDSA:
 		return evalDSA(ctx, q, ev, task, sessions, cutoff)
-	case db.DomainSWE:
-		return evalSWE(ctx, q, ev, task, sessions, cutoff)
 	default:
 		ev.ConfigError = fmt.Sprintf("unknown domain %q", string(task.Domain))
 		return ev, nil
@@ -331,111 +328,4 @@ func evalDSA(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTas
 		ev.State = StateTodo
 	}
 	return ev, nil
-}
-
-func evalSWE(ctx context.Context, q db.DBTX, ev TaskEvaluation, task db.TodayTask, sessions []db.Session, cutoff int64) (TaskEvaluation, error) {
-	if task.TargetJSON == nil || *task.TargetJSON == "" {
-		ev.ConfigError = "SWE task has no target"
-		return ev, nil
-	}
-	st, err := db.UnmarshalSWETarget(*task.TargetJSON)
-	if err != nil {
-		ev.ConfigError = "invalid SWE target: " + err.Error()
-		return ev, nil
-	}
-	if err := ValidateSWETarget(ctx, q, st); err != nil {
-		if msg, derr := configOrDataErr(err); derr != nil {
-			return TaskEvaluation{}, derr
-		} else {
-			ev.ConfigError = msg
-			return ev, nil
-		}
-	}
-	// Explicit completion semantics: planned time is NOT completion. The
-	// session continues beyond planned duration; only an explicit YES (a
-	// swe_task_completions row) marks COMPLETE. Time is tracked for
-	// metrics but never auto-completes. Historical evaluation respects the
-	// completion timestamp (strictly before cutoff).
-	ev.Total = 1
-	comp, err := runtime.GetSWECompletion(ctx, q, task.ID)
-	if err != nil {
-		if isNotFoundErr(err) {
-			ev.Missing = []string{string(st.AreaID)}
-			if ev.Active == nil {
-				ev.State = StateTodo
-			} else {
-				ev.State = StateActive
-			}
-			return ev, nil
-		}
-		return TaskEvaluation{}, fmt.Errorf("engine: swe completion lookup: %w", err)
-	}
-	if !beforeCutoff(comp.CompletedAt.Unix(), cutoff) {
-		ev.Missing = []string{string(st.AreaID)}
-		if ev.Active == nil {
-			ev.State = StateTodo
-		} else {
-			ev.State = StateActive
-		}
-		return ev, nil
-	}
-	ev.Done = 1
-	ev.Completed = []string{string(st.AreaID)}
-	if ev.Active == nil {
-		ev.State = StateCompleted
-	} else {
-		// Active session on an explicitly completed task still reports
-		// ACTIVE while running (completion wins once stopped).
-		ev.State = StateActive
-	}
-	return ev, nil
-}
-
-// sweTotalSeconds sums SWE time spent for one task as of the cutoff.
-// Live (cutoff == 0): all stopped durations plus live active elapsed
-// (wall clock, clamped >= 0). Historical (cutoff != 0): only time strictly
-// before the cutoff counts; sessions spanning the cutoff contribute
-// cutoff - started; sessions starting at/after the cutoff contribute 0.
-func sweTotalSeconds(sessions []db.Session, cutoff int64) int64 {
-	var total int64
-	if cutoff == 0 {
-		nowUnix := time.Now().Unix()
-		for _, s := range sessions {
-			if s.Status == db.SessionStatusStopped && s.StoppedAt != nil {
-				d := s.StoppedAt.Unix() - s.StartedAt.Unix()
-				if d > 0 {
-					total += d
-				}
-				continue
-			}
-			if s.Status == db.SessionStatusActive {
-				d := nowUnix - s.StartedAt.Unix()
-				if d > 0 {
-					total += d
-				}
-			}
-		}
-		return total
-	}
-	for _, s := range sessions {
-		start := s.StartedAt.Unix()
-		if start >= cutoff {
-			continue
-		}
-		var end int64
-		switch {
-		case s.Status == db.SessionStatusActive:
-			end = cutoff
-		case s.StoppedAt != nil && s.StoppedAt.Unix() > cutoff:
-			end = cutoff
-		case s.StoppedAt != nil:
-			end = s.StoppedAt.Unix()
-		default:
-			continue
-		}
-		if end > start {
-			total += end - start
-		}
-	}
-	return total
 }

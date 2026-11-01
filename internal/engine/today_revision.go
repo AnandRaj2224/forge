@@ -163,7 +163,7 @@ func SwitchFocusExam(ctx context.Context, database *db.DB, newExamID db.ID, loca
 	// at most 4 lectures, 3 practice, 1 DSA across locked + fresh work.
 	// Locked tasks are never dropped to satisfy a cap; fresh candidates
 	// beyond a kind's remaining budget are left out (never duplicated to
-	// fill). SWE capacity is the routine's own slot count for the date.
+	// fill).
 	freshByKind := map[string][]db.TodayTask{}
 	for _, t := range freshPlan.tasks {
 		k := string(t.Domain) + "/" + string(t.Kind)
@@ -178,12 +178,11 @@ func SwitchFocusExam(ctx context.Context, database *db.DB, newExamID db.ID, loca
 	lectureKey := string(db.DomainGOV) + "/" + string(db.SessionKindLecture)
 	practiceKey := string(db.DomainGOV) + "/" + string(db.SessionKindPractice)
 	dsaKey := string(db.DomainDSA) + "/" + string(db.SessionKindDSA)
-	sweKey := string(db.DomainSWE) + "/" + string(db.SessionKindSWE)
 
 	// Identities already carried by locked tasks. Fresh candidates that
 	// would reassign the same one-time work are skipped: a globally
-	// completed or in-progress lecture, an already-bundled DSA problem, or
-	// an already-covered SWE area must never appear twice in one revision.
+	// completed or in-progress lecture, or an already-bundled DSA problem
+	// must never appear twice in one revision.
 	// (Practice topics legitimately recur, so they are never deduped.)
 	//
 	// Daily GOV subject-allocation rule (V2): the unit of daily
@@ -200,7 +199,6 @@ func SwitchFocusExam(ctx context.Context, database *db.DB, newExamID db.ID, loca
 	lockedLecture := map[db.ID]bool{}
 	lockedLectureSubjects := map[db.ID]bool{}
 	lockedDSAProblems := map[db.ID]bool{}
-	lockedSWEAreas := map[db.ID]bool{}
 	lockedCount := map[string]int{}
 	for _, t := range locked {
 		lockedCount[kindOf(t)]++
@@ -222,21 +220,7 @@ func SwitchFocusExam(ctx context.Context, database *db.DB, newExamID db.ID, loca
 					lockedDSAProblems[it.ProblemID] = true
 				}
 			}
-		case t.Domain == db.DomainSWE:
-			if st, err := db.UnmarshalSWETarget(raw); err == nil {
-				lockedSWEAreas[st.AreaID] = true
-			}
 		}
-	}
-	sweAreaOf := func(t db.TodayTask) (db.ID, bool) {
-		if t.TargetJSON == nil {
-			return "", false
-		}
-		st, err := db.UnmarshalSWETarget(*t.TargetJSON)
-		if err != nil || st.AreaID == "" {
-			return "", false
-		}
-		return st.AreaID, true
 	}
 	lectureIDOf := func(t db.TodayTask) (db.ID, bool) {
 		if t.TargetJSON == nil {
@@ -295,17 +279,11 @@ func SwitchFocusExam(ctx context.Context, database *db.DB, newExamID db.ID, loca
 			}
 		}
 	}
-	swePool := freshByKind[sweKey]
 	lectBudget := max(0, maxLectureTasks-lockedCount[lectureKey])
 	pracBudget := max(0, maxPracticeTasks-lockedCount[practiceKey])
 	dsaBudget := max(0, maxDSATasks-lockedCount[dsaKey])
-	sweBudget := max(0, len(swePool)-lockedCount[sweKey])
-	li, pi, si := 0, 0, 0
-	lectUsed, pracUsed, dsaUsed, sweUsed := 0, 0, false, 0
-	takenSWEAreas := map[db.ID]bool{}
-	for id := range lockedSWEAreas {
-		takenSWEAreas[id] = true
-	}
+	li, pi := 0, 0
+	lectUsed, pracUsed, dsaUsed := 0, 0, false
 	// usedLectureSubjects starts with every locked subject so fresh picks
 	// can never create a second allocation for the same subject, and tracks
 	// fresh picks so surplus cannot duplicate a replacement subject either.
@@ -342,20 +320,6 @@ func SwitchFocusExam(ctx context.Context, database *db.DB, newExamID db.ID, loca
 				dsaUsed = true
 				return *dsaTask, true
 			}
-		case sweKey:
-			for si < len(swePool) && sweUsed < sweBudget {
-				t := swePool[si]
-				si++
-				area, ok := sweAreaOf(t)
-				if ok && takenSWEAreas[area] {
-					continue
-				}
-				if ok {
-					takenSWEAreas[area] = true
-				}
-				sweUsed++
-				return t, true
-			}
 		default:
 			// Unknown kinds have no fresh pool: slots stay empty.
 		}
@@ -381,7 +345,7 @@ func SwitchFocusExam(ctx context.Context, database *db.DB, newExamID db.ID, loca
 	}
 	// Surplus fresh work of kinds the previous revision never had still
 	// respects the same budgets (e.g. a newly configured practice subject).
-	for _, kind := range []string{lectureKey, practiceKey, dsaKey, sweKey} {
+	for _, kind := range []string{lectureKey, practiceKey, dsaKey} {
 		for {
 			nt, ok := takeFresh(kind)
 			if !ok {

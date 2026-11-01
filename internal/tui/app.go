@@ -18,7 +18,6 @@ const (
 	TabToday TopTab = iota
 	TabGOV
 	TabDSA
-	TabSWE
 	TabMocks
 	TabHistory
 	TabReviews
@@ -32,8 +31,6 @@ func (t TopTab) Title() string {
 		return "GOV"
 	case TabDSA:
 		return "DSA"
-	case TabSWE:
-		return "SWE"
 	case TabMocks:
 		return "MOCKS"
 	case TabHistory:
@@ -73,7 +70,6 @@ type App struct {
 	today   *TodayScreen
 	gov     *GovScreen
 	dsa     *DSAScreen
-	swe     *SWEScreen
 	mocks   *MocksScreen
 	history *HistoryScreen
 	reviews *ReviewsScreen
@@ -99,7 +95,6 @@ func NewApp(database *db.DB) *App {
 	a.today = NewTodayScreen(a)
 	a.gov = NewGovScreen(a)
 	a.dsa = NewDSAScreen(a)
-	a.swe = NewSWEScreen(a)
 	a.mocks = NewMocksScreen(a)
 	a.history = NewHistoryScreen(a)
 	a.reviews = NewReviewsScreen(a)
@@ -156,8 +151,6 @@ func (a *App) forwardToScreen(msg tea.Msg) tea.Cmd {
 		cmd = a.gov.Update(msg)
 	case TabDSA:
 		cmd = a.dsa.Update(msg)
-	case TabSWE:
-		cmd = a.swe.Update(msg)
 	case TabMocks:
 		cmd = a.mocks.Update(msg)
 	case TabHistory:
@@ -186,9 +179,6 @@ func (a *App) reloadCurrent() {
 	case TabDSA:
 		a.loadActiveFromDB()
 		a.dsa.Reload()
-	case TabSWE:
-		a.loadActiveFromDB()
-		a.swe.Reload()
 	case TabMocks:
 		a.loadActiveFromDB()
 		a.mocks.Reload()
@@ -301,15 +291,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.goTab(TabDSA)
 			return a, nil
 		case ks == "4":
-			a.goTab(TabSWE)
-			return a, nil
-		case ks == "5":
 			a.goTab(TabMocks)
 			return a, nil
-		case ks == "6":
+		case ks == "5":
 			a.goTab(TabHistory)
 			return a, nil
-		case ks == "7":
+		case ks == "6":
 			a.goTab(TabReviews)
 			return a, nil
 		case IsBack(ks):
@@ -326,10 +313,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case TabDSA:
 				if a.dsa.onBack() {
-					return a, nil
-				}
-			case TabSWE:
-				if a.swe.onBack() {
 					return a, nil
 				}
 			case TabMocks:
@@ -376,8 +359,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = a.gov.Update(msg)
 	case TabDSA:
 		cmd = a.dsa.Update(msg)
-	case TabSWE:
-		cmd = a.swe.Update(msg)
 	case TabMocks:
 		cmd = a.mocks.Update(msg)
 	case TabHistory:
@@ -420,8 +401,6 @@ func (a *App) View() tea.View {
 		body = a.gov.View()
 	case TabDSA:
 		body = a.dsa.View()
-	case TabSWE:
-		body = a.swe.View()
 	case TabMocks:
 		body = a.mocks.View()
 	case TabHistory:
@@ -465,8 +444,8 @@ var forgeLogoLines = []string{
 // regions (LogoRegion/RightRegion) joined via ShellHeader. NO date/time,
 // NO clock. Header height stays at the 6-line logo (no growth).
 func (a *App) headerView(w int) string {
-	names := []string{"TODAY", "GOV", "DSA", "SWE", "MOCKS", "HISTORY", "REVIEWS"}
-	// Compact pills so all 7 items fit; active keeps the purple accent fill
+	names := []string{"TODAY", "GOV", "DSA", "MOCKS", "HISTORY", "REVIEWS"}
+	// Compact pills so all 6 items fit; active keeps the purple accent fill
 	// with white text, inactive stays muted gray.
 	navActive := lipgloss.NewStyle().Bold(true).Foreground(cWhite).Background(cPrimary).Padding(0, 1)
 	navInactive := lipgloss.NewStyle().Foreground(cFgPrimary).Padding(0, 1)

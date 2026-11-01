@@ -25,7 +25,6 @@ func TestEnsureTodayOlderSnapshotGeneratesCurrent(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	old, _, err := engine.GenerateToday(ctx, d, "2026-09-20", now)
 	if err != nil {
@@ -52,7 +51,6 @@ func TestRoutineDBFailurePropagates(t *testing.T) {
 		ctx := context.Background()
 		seedGov(t, ctx, d)
 		seedDSA(t, ctx, d)
-		seedSWE(t, ctx, d)
 		return d
 	}
 	ctx := context.Background()
@@ -75,17 +73,6 @@ func TestRoutineDBFailurePropagates(t *testing.T) {
 			t.Fatal("practice routine query failure must propagate, not vanish")
 		}
 	})
-	t.Run("swe routine", func(t *testing.T) {
-		d := newSeeded(t)
-		if _, err := d.ExecContext(ctx, `DROP TABLE swe_routine_slots`); err != nil {
-			t.Fatal(err)
-		}
-		// 2026-09-21 is a Monday with routine slots: the failure is on the
-		// exercised path, not a skipped one.
-		if _, _, err := engine.GenerateToday(ctx, d, "2026-09-21", now); err == nil {
-			t.Fatal("swe routine query failure must propagate, not skip")
-		}
-	})
 	t.Run("dsa routine", func(t *testing.T) {
 		d := newSeeded(t)
 		if _, err := d.ExecContext(ctx, `DROP TABLE dsa_routine`); err != nil {
@@ -104,7 +91,6 @@ func TestTargetValidationAbsenceVsFailure(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	broken, err := openBrokenDB(t)
 	if err != nil {
 		t.Fatal(err)
@@ -128,13 +114,6 @@ func TestTargetValidationAbsenceVsFailure(t *testing.T) {
 		t.Fatalf("unknown problem must be ErrInvalidTarget, got %v", err)
 	}
 	if err := engine.ValidateDSATarget(ctx, broken, badDSA); err == nil || errors.Is(err, engine.ErrInvalidTarget) {
-		t.Fatalf("DB failure must not read as invalid target, got %v", err)
-	}
-	badSWE := db.SWETarget{AreaID: "no-area"}
-	if err := engine.ValidateSWETarget(ctx, d, badSWE); !errors.Is(err, engine.ErrInvalidTarget) {
-		t.Fatalf("unknown area must be ErrInvalidTarget, got %v", err)
-	}
-	if err := engine.ValidateSWETarget(ctx, broken, badSWE); err == nil || errors.Is(err, engine.ErrInvalidTarget) {
 		t.Fatalf("DB failure must not read as invalid target, got %v", err)
 	}
 	badSec := engine.MockSectionInput{Name: "QA", GovSubjectID: "no-subj"}
@@ -191,66 +170,6 @@ func TestEvaluatorAbsenceVsFailure(t *testing.T) {
 	}
 	if _, err := engine.EvaluateTodayTask(ctx, broken, "ev-bad"); err == nil {
 		t.Fatal("evaluator DB failure must propagate as error")
-	}
-}
-
-// ---- SWE routine generates area blocks directly (no task progression) ----
-
-func sweTargetAreaIDs(t *testing.T, tasks []db.TodayTask) []string {
-	t.Helper()
-	var out []string
-	for _, tk := range tasks {
-		if tk.Domain != db.DomainSWE || tk.TargetJSON == nil {
-			continue
-		}
-		st, err := db.UnmarshalSWETarget(*tk.TargetJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, string(st.AreaID))
-	}
-	return out
-}
-
-func TestSWERoutineGeneratesAreaBlocks(t *testing.T) {
-	d := openEngineDB(t)
-	ctx := context.Background()
-	seedGov(t, ctx, d)
-	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
-	now := time.Now()
-	// Monday 2026-09-21 routine covers area-go + area-sql: two blocks.
-	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now.Add(8*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := sweTargetAreaIDs(t, tasks)
-	if len(got) != 2 {
-		t.Fatalf("want 2 SWE blocks, got %v", got)
-	}
-	seen := map[string]bool{}
-	for _, id := range got {
-		seen[id] = true
-	}
-	if !seen["area-go"] || !seen["area-sql"] {
-		t.Fatalf("routine areas missing: %v", got)
-	}
-	// Duration comes from the routine slot.
-	for _, tk := range tasks {
-		if tk.Domain != db.DomainSWE {
-			continue
-		}
-		if tk.PlannedSeconds != 3600 {
-			t.Fatalf("SWE planned=%d want 3600", tk.PlannedSeconds)
-		}
-	}
-	// Sunday has no routine: no SWE blocks, never fabricated.
-	_, tasks2, err := engine.GenerateToday(ctx, d, "2026-09-27", now.Add(16*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sweTargetAreaIDs(t, tasks2)) != 0 {
-		t.Fatal("day without routine must yield no SWE blocks")
 	}
 }
 
@@ -521,7 +440,6 @@ func TestGenerationSabotageMatrix(t *testing.T) {
 		d := openEngineDB(t)
 		seedGov(t, ctx, d)
 		seedDSA(t, ctx, d)
-		seedSWE(t, ctx, d)
 		sabotageSetup(t, ctx, d, now)
 		var actBefore int
 		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation`).Scan(&actBefore); err != nil {
@@ -543,7 +461,6 @@ func TestGenerationSabotageMatrix(t *testing.T) {
 		d := openEngineDB(t)
 		seedGov(t, ctx, d)
 		seedDSA(t, ctx, d)
-		seedSWE(t, ctx, d)
 		sabotageSetup(t, ctx, d, now)
 		var actBefore int
 		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation`).Scan(&actBefore); err != nil {
@@ -567,7 +484,6 @@ func TestGenerationSabotageMatrix(t *testing.T) {
 		d := openEngineDB(t)
 		seedGov(t, ctx, d)
 		seedDSA(t, ctx, d)
-		seedSWE(t, ctx, d)
 		sabotageSetup(t, ctx, d, now)
 		var actBefore int
 		if err := d.QueryRowContext(ctx, `SELECT COUNT(*) FROM gov_subject_activation`).Scan(&actBefore); err != nil {
@@ -594,7 +510,6 @@ func TestRevisionCollisionNoPartial(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	// Poison the deterministic next ID: a foreign row owns the PK that the
 	// next 2026-09-22 generation would use, forcing UNIQUE collisions on

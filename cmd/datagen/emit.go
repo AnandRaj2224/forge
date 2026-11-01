@@ -152,19 +152,6 @@ func (g *generator) emit(path string, progressAt int64) error {
 	p.insert("dsa_routine", []string{"id", "planned_seconds"},
 		[]any{1, 9000})
 
-	// ---- SWE ----
-	p.line("")
-	p.line("-- SWE areas and weekly routine --")
-	for _, a := range g.sweAreas {
-		p.insert("swe_areas", []string{"id", "name", "sort_order"},
-			[]any{a.ID, a.Name, a.Order})
-	}
-	for _, s := range g.sweSlots {
-		p.insert("swe_routine_slots",
-			[]string{"id", "weekday", "position", "area_id", "duration_seconds"},
-			[]any{s.ID, s.Weekday, s.Position, s.AreaID, s.Seconds})
-	}
-
 	// ---- quotes ----
 	p.line("")
 	p.line("-- Quotes --")

@@ -8,7 +8,6 @@ import (
 
 // Section 31: bundle-capable targets. Legacy singular payloads must keep
 // parsing exactly as before; bundle payloads must normalize to item lists.
-// SWE is a time-allocation target: exactly one area_id, no tasks.
 
 func TestDSATargetLegacySingular(t *testing.T) {
 	got, err := db.UnmarshalDSATarget(`{"problem_id":"dsa-001","mode":"NEW"}`)
@@ -36,25 +35,6 @@ func TestDSATargetBundle(t *testing.T) {
 	}
 }
 
-func TestSWETargetAreaOnly(t *testing.T) {
-	got, err := db.UnmarshalSWETarget(`{"area_id":"area-go"}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.AreaID != "area-go" {
-		t.Fatalf("area not preserved: %+v", got)
-	}
-}
-
-func TestSWETargetRejectsUnknownFields(t *testing.T) {
-	if _, err := db.UnmarshalSWETarget(`{"area_id":"area-go","task_id":"go-1"}`); err == nil {
-		t.Fatal("task_id must be rejected in time-allocation model")
-	}
-	if _, err := db.UnmarshalSWETarget(`{"tasks":[{"area_id":"a"}]}`); err == nil {
-		t.Fatal("tasks bundle must be rejected in time-allocation model")
-	}
-}
-
 func TestTargetBundleRoundTrip(t *testing.T) {
 	raw, err := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{{ProblemID: "dsa-001", Mode: db.DSAModeNew}}})
 	if err != nil {
@@ -65,20 +45,6 @@ func TestTargetBundleRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(back.Items()) != 1 || back.Items()[0].ProblemID != "dsa-001" {
-		t.Fatalf("round trip failed: %s", raw)
-	}
-}
-
-func TestSWETargetRoundTrip(t *testing.T) {
-	raw, err := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	back, err := db.UnmarshalSWETarget(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if back.AreaID != "area-go" {
 		t.Fatalf("round trip failed: %s", raw)
 	}
 }

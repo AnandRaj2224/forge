@@ -1,6 +1,6 @@
 # Forge
 
-Single-user local study planner (Go + SQLite + Bubble Tea TUI): GOV exam prep, DSA practice, and SWE time allocation.
+Single-user local study planner (Go + SQLite + Bubble Tea TUI): GOV exam prep and DSA practice.
 
 ## Prerequisites
 

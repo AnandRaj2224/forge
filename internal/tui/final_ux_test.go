@@ -152,13 +152,13 @@ func staticFooterStates(t *testing.T) []*App {
 	base := newFlowApp(t)
 	base.width, base.height = 150, 40
 	out = append(out, base)
-	for _, tab := range []TopTab{TabGOV, TabDSA, TabSWE, TabMocks, TabHistory, TabReviews} {
+	for _, tab := range []TopTab{TabGOV, TabDSA, TabMocks, TabHistory, TabReviews} {
 		a := newFlowApp(t)
 		a.width, a.height = 150, 40
 		a.goTab(tab)
 		out = append(out, a)
 	}
-	// Nested/detail: GOV topic, DSA problem, SWE task, mock detail, history detail, review report.
+	// Nested/detail: GOV topic, DSA problem, mock detail, history detail, review report.
 	nested := newFlowApp(t)
 	nested.width, nested.height = 150, 40
 	nested.goTab(TabGOV)
@@ -455,7 +455,7 @@ func TestFinalReviewsSimplified(t *testing.T) {
 		t.Fatalf("review UI must not contain draft language:\n%s", full)
 	}
 	// Metrics automated.
-	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE", "SWE TIME"} {
+	for _, want := range []string{"PLANNED", "ACTUAL", "COMPLETION", "SESSIONS", "TASKS", "OVER/UNDER", "TIME BY DOMAIN", "GOV PERFORMANCE", "DSA PERFORMANCE"} {
 		if !strings.Contains(strings.ToUpper(full), strings.ToUpper(want)) {
 			t.Fatalf("review missing automated %q", want)
 		}

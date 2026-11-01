@@ -17,7 +17,7 @@ import (
 func TestViewRenderPureNoDB(t *testing.T) {
 	app := newFlowApp(t)
 	app.width, app.height = 150, 40
-	tabs := []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabMocks, TabHistory, TabReviews}
+	tabs := []TopTab{TabToday, TabGOV, TabDSA, TabMocks, TabHistory, TabReviews}
 	// Load every tab once with the DB open.
 	for _, tab := range tabs {
 		app.goTab(tab)
@@ -29,7 +29,6 @@ func TestViewRenderPureNoDB(t *testing.T) {
 	app.goTab(TabMocks)
 	app.goTab(TabReviews)
 	app.goTab(TabDSA)
-	app.goTab(TabSWE)
 	app.goTab(TabHistory)
 	// Capture the steady-state rendering with DB open (no Reload after this).
 	before := map[TopTab]string{}
@@ -52,8 +51,6 @@ func TestViewRenderPureNoDB(t *testing.T) {
 	reportBefore := app.reviews.reportView(60)
 	app.tab = TabDSA
 	dsaBefore := app.dsa.View()
-	app.tab = TabSWE
-	sweBefore := app.swe.View()
 
 	// Close the database: any synchronous DB access in View would now fail
 	// and change rendering (or set data-error state).
@@ -93,10 +90,6 @@ func TestViewRenderPureNoDB(t *testing.T) {
 		if app.dsa.err != errBefore {
 			t.Fatalf("DSA patternProgress mutated err during render")
 		}
-	}
-	app.tab = TabSWE
-	if got := app.swe.View(); got != sweBefore {
-		t.Fatalf("SWE View changed after DB close")
 	}
 	// Full App views per tab (re-render without Reload).
 	for _, tab := range tabs {

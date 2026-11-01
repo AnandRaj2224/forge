@@ -242,19 +242,3 @@ func requireGenuinelyNew(ctx context.Context, q db.DBTX, problemID db.ID) error 
 	}
 	return nil
 }
-
-// ValidateSWETarget validates a SWE area target: the area must exist.
-// SWE is a time-allocation system: routine slot -> area -> Today block.
-// There are no tasks, bundles, or completion states.
-func ValidateSWETarget(ctx context.Context, q db.DBTX, st db.SWETarget) error {
-	if st.AreaID == "" {
-		return wrapErr("swe target", ErrInvalidTarget, "area required")
-	}
-	if _, err := catalog.GetSWEArea(ctx, q, st.AreaID); err != nil {
-		if isNotFoundErr(err) {
-			return wrapErr("swe target", ErrInvalidTarget, fmt.Sprintf("unknown area %q", string(st.AreaID)))
-		}
-		return fmt.Errorf("engine: swe area lookup: %w", err)
-	}
-	return nil
-}

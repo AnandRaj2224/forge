@@ -21,7 +21,7 @@ import (
 
 // buildMinimalCatalogue creates the small isolated catalogue required by the
 // stress benchmarks: 3 exams sharing 4 subjects, a few topics/lectures per
-// subject, a small DSA/SWE catalogue. It replaces the former dependency on
+// subject, a small DSA catalogue. It replaces the former dependency on
 // the full production seed file.
 func buildMinimalCatalogue(t *testing.T, ctx context.Context, d *db.DB) {
 	t.Helper()
@@ -88,17 +88,6 @@ func buildMinimalCatalogue(t *testing.T, ctx context.Context, d *db.DB) {
 		}
 	}
 	if err := catalog.UpsertDSARoutine(ctx, d, db.DSARoutine{ID: 1, PlannedSeconds: 9000}); err != nil {
-		t.Fatal(err)
-	}
-	for _, a := range []db.SWEArea{{ID: "st-go", Name: "Go", SortOrder: 1}, {ID: "st-sql", Name: "SQL", SortOrder: 2}} {
-		if err := catalog.InsertSWEArea(ctx, d, a); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := catalog.InsertSWERoutineSlot(ctx, d, db.SWERoutineSlot{ID: "st-mon-1", Weekday: 1, Position: 0, AreaID: "st-go", DurationSeconds: 3600}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.InsertSWERoutineSlot(ctx, d, db.SWERoutineSlot{ID: "st-mon-2", Weekday: 1, Position: 1, AreaID: "st-sql", DurationSeconds: 3600}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -185,10 +174,6 @@ func buildStressHistory(t *testing.T, ctx context.Context, d *db.DB, nDates int,
 	if err != nil || len(probs) < 4 {
 		t.Fatal("dsa problems")
 	}
-	areas, err := catalog.GetSWEAreas(ctx, d)
-	if err != nil || len(areas) == 0 {
-		t.Fatal("swe areas")
-	}
 	// Practice target: quant first topic (FK-valid regardless of eligibility).
 	pracTopic := cands[0].topic
 	pracSubj := cands[0].subj
@@ -206,7 +191,7 @@ func buildStressHistory(t *testing.T, ctx context.Context, d *db.DB, nDates int,
 				if err := dbRuntime.CreateTodaySnapshot(ctx, q, db.TodaySnapshot{ID: snapID, LocalDate: date, Revision: 1, GeneratedAt: base}); err != nil {
 					return err
 				}
-				// 4 tasks: 2 lectures (distinct subjects), 1 practice, 1 DSA/SWE alternating.
+				// 4 tasks: 2 lectures (distinct subjects), 1 practice, 1 DSA.
 				s1 := cands[di%len(cands)]
 				s2 := cands[(di+1)%len(cands)]
 				if s2.subj == s1.subj {
@@ -214,6 +199,7 @@ func buildStressHistory(t *testing.T, ctx context.Context, d *db.DB, nDates int,
 				}
 				t1t, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: s1.subj, TopicID: s1.topic, LectureID: s1.lec})
 				t2t, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: pracSubj, TopicIDs: []db.ID{pracTopic}})
+				t2lec, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: s2.subj, TopicID: s2.topic, LectureID: s2.lec})
 				// DSA bundle: 2 REPEAT problems (no NEW-uniqueness risk).
 				p1, p2 := probs[(di*2)%len(probs)], probs[(di*2+1)%len(probs)]
 				dt, _ := db.MarshalTarget(db.DSATarget{Problems: []db.DSAProblemTarget{{ProblemID: p1.ID, Mode: db.DSAModeRepeat}, {ProblemID: p2.ID, Mode: db.DSAModeRepeat}}})
@@ -227,15 +213,7 @@ func buildStressHistory(t *testing.T, ctx context.Context, d *db.DB, nDates int,
 					{ID: tids[0], SnapshotID: snapID, Position: 1, Domain: db.DomainGOV, Kind: db.SessionKindLecture, Title: s1.name, PlannedSeconds: 3600, TargetJSON: &t1t},
 					{ID: tids[1], SnapshotID: snapID, Position: 2, Domain: db.DomainGOV, Kind: db.SessionKindPractice, Title: "Practice", PlannedSeconds: 3600, TargetJSON: &t2t},
 					{ID: tids[2], SnapshotID: snapID, Position: 3, Domain: db.DomainDSA, Kind: db.SessionKindDSA, Title: "DSA", PlannedSeconds: 9000, TargetJSON: &dt},
-				}
-				// 4th alternates SWE / second lecture to keep allocations valid (≤1/subject).
-				if di%2 == 0 {
-					area := areas[di%len(areas)]
-					swt, _ := db.MarshalTarget(db.SWETarget{AreaID: area.ID})
-					tdefs = append(tdefs, db.TodayTask{ID: tids[3], SnapshotID: snapID, Position: 4, Domain: db.DomainSWE, Kind: db.SessionKindSWE, Title: "SWE " + area.Name, PlannedSeconds: 3600, TargetJSON: &swt})
-				} else {
-					t2lec, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: s2.subj, TopicID: s2.topic, LectureID: s2.lec})
-					tdefs = append(tdefs, db.TodayTask{ID: tids[3], SnapshotID: snapID, Position: 4, Domain: db.DomainGOV, Kind: db.SessionKindLecture, Title: s2.name, PlannedSeconds: 3600, TargetJSON: &t2lec})
+					{ID: tids[3], SnapshotID: snapID, Position: 4, Domain: db.DomainGOV, Kind: db.SessionKindLecture, Title: s2.name, PlannedSeconds: 3600, TargetJSON: &t2lec},
 				}
 				for _, tk := range tdefs {
 					if err := dbRuntime.InsertTodayTask(ctx, q, tk); err != nil {

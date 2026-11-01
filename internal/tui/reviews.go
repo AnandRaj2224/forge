@@ -529,11 +529,10 @@ func (s *ReviewsScreen) reportView(inner int) string {
 	sb.WriteString(MetricGrid(cards, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("TIME BY DOMAIN · % OF TRACKED TIME") + "\n")
-	total := rep.GovSeconds + rep.DSASeconds + rep.SWESeconds
+	total := rep.GovSeconds + rep.DSASeconds
 	sb.WriteString(MetricGrid([]MetricCard{
 		{Label: "GOV", Value: engine.FormatDurationLong(rep.GovSeconds) + " · " + pctOf(rep.GovSeconds, total) + " of tracked time", Accent: cGov},
 		{Label: "DSA", Value: engine.FormatDurationLong(rep.DSASeconds) + " · " + pctOf(rep.DSASeconds, total) + " of tracked time", Accent: cDSA},
-		{Label: "SWE", Value: engine.FormatDurationLong(rep.SWESeconds) + " · " + pctOf(rep.SWESeconds, total) + " of tracked time", Accent: cSWE},
 	}, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	summaryHeader := strings.ToUpper(r.ID) + " · DOMAIN SUMMARY"
@@ -547,13 +546,7 @@ func (s *ReviewsScreen) reportView(inner int) string {
 		{"Problems passed", fmt.Sprint(rep.DSAPassed)},
 		{"Problems not passed", fmt.Sprint(rep.DSANotPassed)},
 	})
-	sweBlock := DomainDetailBlock("SWE", "SWE TIME", []StatPair{
-		{"Planned SWE time", engine.FormatDurationLong(rep.SWEPlanned)},
-		{"Actual SWE time", engine.FormatDurationLong(rep.SWESeconds)},
-		{"SWE variance", engine.FormatSigned(rep.SWESeconds - rep.SWEPlanned)},
-		{"SWE sessions", fmt.Sprint(rep.SWESessions)},
-	})
-	sb.WriteString(JoinDetailBlocks([]string{govBlock, dsaBlock, sweBlock}, inner) + "\n")
+	sb.WriteString(JoinDetailBlocks([]string{govBlock, dsaBlock}, inner) + "\n")
 	sb.WriteString(RowDivider(inner) + "\n")
 	sb.WriteString(SectionHeader("REFLECTIONS") + "\n")
 	sb.WriteString(s.reflectionsBlock(inner) + "\n")

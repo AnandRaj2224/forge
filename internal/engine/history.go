@@ -53,16 +53,6 @@ type DSADailyEvidence struct {
 	NotPassed int
 }
 
-// SWEDailyEvidence answers SWE time allocation for the day.
-type SWEDailyEvidence struct {
-	Planned  int
-	Actual   int
-	Sessions int
-}
-
-// Variance derives actual - planned.
-func (e SWEDailyEvidence) Variance() int { return e.Actual - e.Planned }
-
 // DailyReport is the structured "what actually happened on this day" DTO.
 // The engine generates it; the UI only renders it.
 type DailyReport struct {
@@ -75,13 +65,9 @@ type DailyReport struct {
 	Sessions       int
 	GovSeconds     int
 	DSASeconds     int
-	SWESeconds     int
-	SWEPlanned     int
-	SWESessions    int
 	Activities     []TaskActivity
 	Gov            GovDailyEvidence
 	DSA            DSADailyEvidence
-	SWE            SWEDailyEvidence
 	Unfinished     []TaskActivity
 }
 
@@ -112,9 +98,6 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 		}
 		for _, t := range tasks {
 			rep.Planned += t.PlannedSeconds
-			if t.Domain == db.DomainSWE {
-				rep.SWEPlanned += t.PlannedSeconds
-			}
 		}
 		rep.TasksTotal = len(tasks)
 	}
@@ -136,8 +119,6 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 				rep.GovSeconds += int(secs)
 			case db.DomainDSA:
 				rep.DSASeconds += int(secs)
-			case db.DomainSWE:
-				rep.SWESeconds += int(secs)
 			}
 			// Task-level actual respects the same split: a session
 			// spanning midnight attributes each portion to its own day.
@@ -146,15 +127,9 @@ func BuildDailyReport(ctx context.Context, q db.DBTX, localDate string) (DailyRe
 		// Count sessions touching this day (started or stopped within, or spanning).
 		if s.StartedAt.Unix() < dayEnd && s.StoppedAt.Unix() > dayStart {
 			rep.Sessions++
-			if s.Domain == db.DomainSWE {
-				rep.SWESessions++
-			}
 		}
 	}
 	rep.Variance = rep.Actual - rep.Planned
-	// SWE time evidence derives from sessions + planned slots (no task
-	// outcomes exist).
-	rep.SWE = SWEDailyEvidence{Planned: rep.SWEPlanned, Actual: rep.SWESeconds, Sessions: rep.SWESessions}
 	// Task activities from the day's snapshot evaluated as of end of day:
 	// evidence recorded later must not rewrite this day's history.
 	for i, t := range tasks {
@@ -253,16 +228,6 @@ func taskDetail(ctx context.Context, q db.DBTX, t db.TodayTask) (string, error) 
 			return t.Title, nil
 		}
 		return joinPlus(names), nil
-	case db.DomainSWE:
-		st, err := db.UnmarshalSWETarget(*t.TargetJSON)
-		if err != nil {
-			return t.Title, nil
-		}
-		area, err := catalog.GetSWEArea(ctx, q, st.AreaID)
-		if err != nil {
-			return "", fmt.Errorf("engine: task detail area: %w", err)
-		}
-		return area.Name, nil
 	}
 	return t.Title, nil
 }
@@ -407,9 +372,6 @@ type WeeklyReport struct {
 	Sessions       int
 	GovSeconds     int
 	DSASeconds     int
-	SWESeconds     int
-	SWEPlanned     int
-	SWESessions    int
 	GovSubjects    []GovSubjectWeekly
 	GovLectures    int
 	GovAttempted   int
@@ -419,9 +381,6 @@ type WeeklyReport struct {
 	DSAPassed      int
 	DSANotPassed   int
 }
-
-// SWEVariance derives SWE actual - planned for the week.
-func (r WeeklyReport) SWEVariance() int { return r.SWESeconds - r.SWEPlanned }
 
 // BuildWeeklyDraft generates a live draft for [weekStart, weekEnd] using the
 // latest snapshot per day for planned totals and actual session intervals.
@@ -464,9 +423,6 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 		}
 		for _, t := range tasks {
 			rep.Planned += t.PlannedSeconds
-			if t.Domain == db.DomainSWE {
-				rep.SWEPlanned += t.PlannedSeconds
-			}
 			rep.TasksTotal++
 		}
 		// Completion via authoritative evaluation as of the week-end
@@ -510,8 +466,6 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 				rep.GovSeconds += int(secs)
 			case db.DomainDSA:
 				rep.DSASeconds += int(secs)
-			case db.DomainSWE:
-				rep.SWESeconds += int(secs)
 			}
 		}
 		// Session counts when its time interval overlaps the week (same
@@ -519,9 +473,6 @@ func BuildWeeklyDraft(ctx context.Context, q db.DBTX, weekID, weekStart, weekEnd
 		// spanning the week boundary counts for the week it touches.
 		if s.StartedAt.Unix() < hi && s.StoppedAt.Unix() > lo {
 			rep.Sessions++
-			if s.Domain == db.DomainSWE {
-				rep.SWESessions++
-			}
 		}
 	}
 	rep.Variance = rep.Actual - rep.Planned
@@ -721,8 +672,6 @@ SELECT id, subject_id FROM gov_practice_tests WHERE id IN (` + joinInPlace(len(t
 	if rep.DSANotPassed < 0 {
 		rep.DSANotPassed = 0
 	}
-	// SWE time derives from sessions + planned slots (BuildWeeklyDraft):
-	// no execution table exists. Nothing to fill here.
 	return nil
 }
 

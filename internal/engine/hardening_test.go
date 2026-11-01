@@ -94,7 +94,6 @@ func TestPracticeSlotSkippedWhenNoEligible(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {
@@ -121,7 +120,6 @@ func TestComputerAwarenessBlockedUntilActivation(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	// Inactive Computer Awareness with a zero-lecture topic. It is a member
 	// of the current exam's subject set but must stay unselected until
 	// activation.
@@ -175,7 +173,6 @@ func TestGenerationRollback(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	// Make English eligible for slot 3 so the plan carries an activation
 	// batch and a rotation write.
@@ -238,7 +235,6 @@ func TestEnsureTodayNotFoundVsDBFailure(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	// Genuine no-row: generates.
 	snap, _, err := engine.EnsureToday(ctx, d, "2026-09-21", now)
@@ -271,7 +267,6 @@ func TestLatestSnapshotPerDaySemantics(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	if _, _, err := engine.GenerateToday(ctx, d, "2026-09-21", now); err != nil {
 		t.Fatal(err)
@@ -446,73 +441,6 @@ func TestPracticeTargetMembership(t *testing.T) {
 	}
 }
 
-func TestSWEStaysTodoWithoutEvidenceForm(t *testing.T) {
-	d := openEngineDB(t)
-	ctx := context.Background()
-	seedSWE(t, ctx, d)
-	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
-	// Partial time stays TODO: mkTask plans 3600, stop after 30m (1800).
-	mkTask(t, ctx, d, "swep", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
-	now := time.Now()
-	if _, err := engine.StartTodayTask(ctx, d, "swep", now); err != nil {
-		t.Fatal(err)
-	}
-	closed, err := engine.StopActiveSession(ctx, d, now.Add(30*time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if closed.ElapsedSeconds() != 1800 {
-		t.Fatalf("elapsed=%d want 1800", closed.ElapsedSeconds())
-	}
-	// No evidence form exists and time is partial: stays TODO by design.
-	ev, err := engine.EvaluateTodayTask(ctx, d, "swep")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ev.State != engine.StateTodo {
-		t.Fatalf("partial SWE must stay TODO, got %s", ev.State)
-	}
-	// Second session reaches the target cumulatively: 1800 + 1800 = 3600.
-	// Explicit completion: time never completes, so still TODO.
-	sess2, err := engine.StartTodayTask(ctx, d, "swep", now.Add(2*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = engine.StopActiveSession(ctx, d, now.Add(2*time.Hour).Add(30*time.Minute))
-	ev, err = engine.EvaluateTodayTask(ctx, d, "swep")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ev.State != engine.StateTodo {
-		t.Fatalf("cumulative SWE without YES must stay TODO, got %s", ev.State)
-	}
-	_ = sess2
-}
-
-func TestSWESessionTimeRecorded(t *testing.T) {
-	d := openEngineDB(t)
-	ctx := context.Background()
-	seedSWE(t, ctx, d)
-	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-sql"})
-	mkTask(t, ctx, d, "swea", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
-	now := time.Now()
-	sess, err := engine.StartTodayTask(ctx, d, "swea", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	closed, err := engine.StopActiveSession(ctx, d, now.Add(30*time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if closed.ElapsedSeconds() != 1800 {
-		t.Fatalf("elapsed=%d want 1800", closed.ElapsedSeconds())
-	}
-	if closed.PlannedSeconds != 3600 {
-		t.Fatalf("planned=%d want 3600", closed.PlannedSeconds)
-	}
-	_ = sess
-}
-
 // ---- DSA strictness ----
 
 func TestDSAExactBundleGeneration(t *testing.T) {
@@ -520,7 +448,6 @@ func TestDSAExactBundleGeneration(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	// Two due repeats + two genuinely new problems.
 	for _, pid := range []db.ID{"dsa-1", "dsa-2"} {

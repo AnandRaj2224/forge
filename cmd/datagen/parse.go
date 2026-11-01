@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -230,87 +229,6 @@ func parseDSAFile(path string) ([]*dsaProblem, error) {
 		}
 	}
 	return out, nil
-}
-
-// parseSWERoutine reads swe_routine.yaml:
-//
-//	routine:
-//	  monday:
-//	    - area: golang
-//	      duration: 120 mins
-func parseSWERoutine(path string) ([]*sweArea, []*sweSlot, error) {
-	lines, err := readLines(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	weekdays := map[string]int{
-		"monday": 1, "tuesday": 2, "wednesday": 3, "thursday": 4,
-		"friday": 5, "saturday": 6, "sunday": 7,
-	}
-	var areas []*sweArea
-	var slots []*sweSlot
-	areaByName := map[string]*sweArea{}
-	curDay := 0
-	var curArea string
-	var curDur int
-	posByDay := map[int]int{}
-
-	flush := func() {
-		if curArea == "" {
-			return
-		}
-		a, ok := areaByName[curArea]
-		if !ok {
-			a = &sweArea{ID: "swe-area-" + slug(curArea), Name: curArea, Order: len(areas) + 1}
-			areaByName[curArea] = a
-			areas = append(areas, a)
-		}
-		pos := posByDay[curDay]
-		posByDay[curDay] = pos + 1
-		slots = append(slots, &sweSlot{
-			ID:       fmt.Sprintf("swe-slot-%d-%02d", curDay, pos),
-			Weekday:  curDay,
-			Position: pos,
-			AreaID:   a.ID,
-			Seconds:  curDur,
-		})
-		curArea = ""
-		curDur = 0
-	}
-	for _, l := range lines {
-		if l.isItem && strings.HasPrefix(l.item, "area:") {
-			flush()
-			curArea = unquote(strings.TrimSpace(strings.TrimPrefix(l.item, "area:")))
-			continue
-		}
-		if !l.isItem && l.key == "duration" {
-			curDur = parseDuration(l.value)
-			continue
-		}
-		if !l.isItem && l.indent == 2 {
-			if d, ok := weekdays[strings.ToLower(l.key)]; ok {
-				flush()
-				curDay = d
-			}
-		}
-	}
-	flush()
-	return areas, slots, nil
-}
-
-var durRe = regexp.MustCompile(`^(\d+)\s*min`)
-
-// parseDuration turns "120 mins" / "30mins" into seconds.
-func parseDuration(s string) int {
-	m := durRe.FindStringSubmatch(strings.TrimSpace(s))
-	if m == nil {
-		return 0
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		return 0
-	}
-	return n * 60
 }
 
 // quoteJSON is the on-disk shape of data/quotes.json.

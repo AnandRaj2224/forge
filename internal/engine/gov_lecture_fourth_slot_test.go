@@ -584,7 +584,6 @@ func TestGovLecturePracticeUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {
 		t.Fatal(err)

@@ -179,11 +179,6 @@ func planDay(ctx context.Context, database *db.DB, localDate string, now time.Ti
 		return nil, err
 	}
 	plan.tasks = append(plan.tasks, dsa...)
-	swe, err := planSWEBlock(ctx, database, localDate)
-	if err != nil {
-		return nil, err
-	}
-	plan.tasks = append(plan.tasks, swe...)
 	return plan, nil
 }
 
@@ -630,54 +625,6 @@ func dueRepeats(ctx context.Context, q db.DBTX, localDate string) ([]db.DSARepea
 		return nil, fmt.Errorf("engine: repeat due: %w", err)
 	}
 	return all, nil
-}
-
-// ---- SWE ----
-
-func planSWEBlock(ctx context.Context, q db.DBTX, localDate string) ([]db.TodayTask, error) {
-	cal := DefaultCalendar()
-	t, err := cal.StartOfDay(localDate)
-	if err != nil {
-		return nil, err
-	}
-	wd := int(t.Weekday())
-	forgeWD := wd
-	if wd == 0 {
-		forgeWD = 7
-	}
-	slots, err := catalog.GetSWERoutine(ctx, q, forgeWD)
-	if err != nil {
-		return nil, fmt.Errorf("engine: swe routine: %w", err)
-	}
-	if len(slots) == 0 {
-		return nil, nil
-	}
-	areas, err := catalog.GetSWEAreas(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("engine: swe areas: %w", err)
-	}
-	areaName := map[db.ID]string{}
-	for _, a := range areas {
-		areaName[a.ID] = a.Name
-	}
-	var out []db.TodayTask
-	for _, sl := range slots {
-		name, ok := areaName[sl.AreaID]
-		if !ok {
-			return nil, wrapErr("generate", ErrInvalidTarget, fmt.Sprintf("unknown SWE area %q", string(sl.AreaID)))
-		}
-		if sl.DurationSeconds <= 0 {
-			return nil, wrapErr("generate", ErrInvalidTarget, "SWE slot duration must be > 0")
-		}
-		target, _ := db.MarshalTarget(db.SWETarget{AreaID: sl.AreaID})
-		tj := target
-		out = append(out, db.TodayTask{
-			Domain: db.DomainSWE, Kind: db.SessionKindSWE,
-			Title:          fmt.Sprintf("SWE — %s — %s", name, FormatDurationLong(sl.DurationSeconds)),
-			PlannedSeconds: sl.DurationSeconds, TargetJSON: &tj,
-		})
-	}
-	return out, nil
 }
 
 func joinPlus(xs []string) string {

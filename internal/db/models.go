@@ -16,7 +16,6 @@ type Domain string
 const (
 	DomainGOV Domain = "GOV"
 	DomainDSA Domain = "DSA"
-	DomainSWE Domain = "SWE"
 )
 
 // SessionKind identifies the kind of Today task / session.
@@ -26,7 +25,6 @@ const (
 	SessionKindLecture  SessionKind = "LECTURE"
 	SessionKindPractice SessionKind = "PRACTICE"
 	SessionKindDSA      SessionKind = "DSA"
-	SessionKindSWE      SessionKind = "SWE"
 )
 
 // SessionStatus is ACTIVE or STOPPED.
@@ -140,22 +138,6 @@ type DSAProblem struct {
 type DSARoutine struct {
 	ID             int
 	PlannedSeconds int
-}
-
-// SWEArea is a preparation area (CN, SQL, Docker, ...).
-type SWEArea struct {
-	ID        ID
-	Name      string
-	SortOrder int
-}
-
-// SWERoutineSlot maps a weekday/position to an area (not a task).
-type SWERoutineSlot struct {
-	ID              ID
-	Weekday         int // 1 = Monday .. 7 = Sunday
-	Position        int
-	AreaID          ID
-	DurationSeconds int
 }
 
 // GovSubjectActivation marks a subject as entered preparation.
@@ -450,15 +432,6 @@ func (t DSATarget) Items() []DSAProblemTarget {
 	return nil
 }
 
-// SWETarget identifies the SWE area for one Today SWE block.
-// SWE is a time-allocation system: routine slot -> area + duration ->
-// Today block -> generic session -> elapsed time. No tasks, no bundles.
-// Completion is explicit: only a YES on STOP (swe_task_completions row)
-// marks COMPLETE; planned time is never completion.
-type SWETarget struct {
-	AreaID ID `json:"area_id"`
-}
-
 // MarshalTarget marshals a typed target payload strictly.
 func MarshalTarget(v any) (string, error) {
 	buf, err := json.Marshal(v)
@@ -491,15 +464,6 @@ func UnmarshalDSATarget(raw string) (DSATarget, error) {
 	var t DSATarget
 	if err := strictUnmarshal(raw, &t); err != nil {
 		return DSATarget{}, err
-	}
-	return t, nil
-}
-
-// UnmarshalSWETarget parses a SWE target strictly.
-func UnmarshalSWETarget(raw string) (SWETarget, error) {
-	var t SWETarget
-	if err := strictUnmarshal(raw, &t); err != nil {
-		return SWETarget{}, err
 	}
 	return t, nil
 }

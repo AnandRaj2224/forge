@@ -73,7 +73,6 @@ func TestReportAggregationFailureFails(t *testing.T) {
 		ctx := context.Background()
 		seedGov(t, ctx, d)
 		seedDSA(t, ctx, d)
-		seedSWE(t, ctx, d)
 		if _, _, err := engine.GenerateToday(ctx, d, "2026-09-21", time.Now()); err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +223,6 @@ func TestEnsureTodayConcurrentIdempotent(t *testing.T) {
 	ctx := context.Background()
 	seedGov(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	const callers = 8
 	ids := make([]db.ID, callers)
@@ -580,20 +578,10 @@ func TestHistoryEnrichmentFailureIsDataError(t *testing.T) {
 			t.Fatal("unresolvable DSA problem must fail the report, not render partial names")
 		}
 	})
-	t.Run("swe area", func(t *testing.T) {
-		d := openEngineDB(t)
-		seedSWE(t, ctx, d)
-		raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "no-area"})
-		mkTaskDate(t, ctx, d, "enr-s", "2026-09-22", db.DomainSWE, db.SessionKindSWE, raw)
-		if _, err := engine.BuildDailyReport(ctx, d, "2026-09-22"); err == nil {
-			t.Fatal("unresolvable SWE area must fail the report, not render the title as detail")
-		}
-	})
 	t.Run("healthy enrichment renders names", func(t *testing.T) {
 		d := openEngineDB(t)
 		seedGov(t, ctx, d)
 		seedDSA(t, ctx, d)
-		seedSWE(t, ctx, d)
 		// Both tasks in ONE snapshot: the report renders the latest
 		// snapshot's tasks with resolved bundle names.
 		if err := runtime.CreateTodaySnapshot(ctx, d, db.TodaySnapshot{ID: "snap-ok", LocalDate: "2026-09-22", Revision: 1, GeneratedAt: time.Now()}); err != nil {

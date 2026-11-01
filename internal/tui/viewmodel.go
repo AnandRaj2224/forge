@@ -82,11 +82,10 @@ func FormatDateRange(a, b string) string { return FormatDateISO(a) + " — " + F
 // Bundle describes the concrete work items inside a Today task,
 // resolved from target_json via the typed DB target structs.
 type Bundle struct {
-	Kind     string // LECTURE, PRACTICE, DSA, SWE
+	Kind     string // LECTURE, PRACTICE, DSA
 	Lecture  *LectureItem
 	Practice []PracticeItem
 	DSA      []DSAItem
-	SWE      []SWEItem
 	RawNote  string // non-empty when target_json missing/unparseable
 }
 
@@ -110,11 +109,6 @@ type DSAItem struct {
 	Mode      db.DSAMode
 	Title     string
 	Pattern   string
-}
-
-type SWEItem struct {
-	AreaID db.ID
-	Area   string
 }
 
 // ResolveBundle parses a Today task's target_json and resolves names via catalog.
@@ -198,22 +192,6 @@ func ResolveBundle(ctx context.Context, q db.DBTX, t db.TodayTask) Bundle {
 		if len(b.DSA) == 0 {
 			b.RawNote = "empty DSA target"
 		}
-		return b
-	case db.DomainSWE:
-		st, err := db.UnmarshalSWETarget(raw)
-		if err != nil {
-			b.RawNote = "invalid SWE target"
-			return b
-		}
-		if st.AreaID == "" {
-			b.RawNote = "empty SWE target"
-			return b
-		}
-		areaName := string(st.AreaID)
-		if a, err := catalog.GetSWEArea(ctx, q, st.AreaID); err == nil {
-			areaName = a.Name
-		}
-		b.SWE = append(b.SWE, SWEItem{AreaID: st.AreaID, Area: areaName})
 		return b
 	}
 	b.RawNote = "unknown domain"

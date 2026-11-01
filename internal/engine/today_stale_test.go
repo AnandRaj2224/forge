@@ -3,7 +3,6 @@ package engine_test
 import (
 	"context"
 	"fmt"
-	"sort"
 	"testing"
 	"time"
 
@@ -529,83 +528,6 @@ func TestV2SwitchDedupesDSABundle(t *testing.T) {
 	}
 	if dsaCount != 1 {
 		t.Fatalf("DSA tasks=%d want exactly 1 (locked only)", dsaCount)
-	}
-}
-
-// TestV2SwitchKeepsSWEWithinRoutine: one stopped SWE session locks its area;
-// the revision must keep routine-count blocks with distinct areas.
-func TestV2SwitchKeepsSWEWithinRoutine(t *testing.T) {
-	d := openEngineDB(t)
-	ctx := context.Background()
-	seedSharedExams(t, ctx, d)
-	seedSWE(t, ctx, d) // Monday slots: area-go + area-sql.
-	now := time.Now()
-	if _, err := engine.SetFocusExam(ctx, d, "exam-a", now); err != nil {
-		t.Fatal(err)
-	}
-	// 2026-09-21 is a Monday.
-	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sweGo db.ID
-	for _, tk := range tasks {
-		if tk.Domain != db.DomainSWE || tk.TargetJSON == nil {
-			continue
-		}
-		st, err := db.UnmarshalSWETarget(*tk.TargetJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.AreaID == "area-go" {
-			sweGo = tk.ID
-		}
-	}
-	if sweGo == "" {
-		t.Fatal("r1 must contain the area-go SWE block")
-	}
-	sess, err := engine.StartTodayTask(ctx, d, sweGo, now.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := engine.StopActiveSession(ctx, d, now.Add(2*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	_ = sess
-	_, wtasks, err := engine.SwitchFocusExam(ctx, d, "exam-b", "2026-09-21", now.Add(3*time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var areas []db.ID
-	sweCount := 0
-	for _, tk := range wtasks {
-		if tk.Domain != db.DomainSWE || tk.TargetJSON == nil {
-			continue
-		}
-		sweCount++
-		st, err := db.UnmarshalSWETarget(*tk.TargetJSON)
-		if err != nil {
-			t.Fatal(err)
-		}
-		areas = append(areas, st.AreaID)
-	}
-	if sweCount != 2 {
-		t.Fatalf("SWE tasks=%d want routine count 2", sweCount)
-	}
-	sort.Slice(areas, func(i, j int) bool { return areas[i] < areas[j] })
-	for i := 1; i < len(areas); i++ {
-		if areas[i] == areas[i-1] {
-			t.Fatalf("duplicate SWE area %q in revision", areas[i])
-		}
-	}
-	foundLocked := false
-	for _, tk := range wtasks {
-		if tk.ID == sweGo {
-			foundLocked = true
-		}
-	}
-	if !foundLocked {
-		t.Fatal("locked SWE task must keep its ID")
 	}
 }
 

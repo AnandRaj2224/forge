@@ -86,11 +86,11 @@ func verifyV2Schema(ctx context.Context, sqlDB *sql.DB) error {
 		"gov_exam_profiles", "gov_focus_state",
 		"gov_lecture_routine", "gov_practice_routine",
 		"gov_practice_sessions", "gov_practice_tests", "gov_practice_tracks",
-		"dsa_problems", "dsa_routine", "swe_areas", "swe_routine_slots",
+		"dsa_problems", "dsa_routine",
 		"today_snapshots", "today_tasks", "today_snapshot_tasks",
 		"sessions", "gov_subject_activation", "gov_lecture_completions",
 		"gov_practice_records", "gov_practice_rotation",
-		"dsa_attempts", "dsa_repeat_state", "swe_task_completions",
+		"dsa_attempts", "dsa_repeat_state",
 		"mocks", "mock_sections", "mock_weak_topics",
 		"weekly_reviews", "quotes", "daily_quote_state",
 	} {

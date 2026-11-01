@@ -371,7 +371,11 @@ func rowThemeFor(selected, focused bool) (rowTheme, bool) {
 // domainCell styles a padded domain cell: domain accent foreground over the
 // row background (transparent when the row has none).
 func (t rowTheme) domain(domain, text string) rowCell {
-	s := lipgloss.NewStyle().Bold(true).Foreground(DomainFg(domain))
+	return t.domainForWork(domain, "", text)
+}
+
+func (t rowTheme) domainForWork(domain, workType, text string) rowCell {
+	s := lipgloss.NewStyle().Bold(true).Foreground(DomainFgForWork(domain, workType))
 	if t.bg != nil {
 		s = s.Background(t.bg)
 	}
@@ -380,10 +384,14 @@ func (t rowTheme) domain(domain, text string) rowCell {
 
 // statusCellFor styles the STATUS cell over the row background:
 // TODO subdued neutral, ACTIVE peach, COMPLETE in the track color
-// (GOV peach, DSA cyan, SWE pink). Selection
+// (GOV lecture peach, GOV practice pink, DSA cyan). Selection
 // background is preserved; only the status text carries semantics.
 // Unknown/empty domain falls back to cyan (legacy COMPLETE).
 func statusCellFor(th rowTheme, st TaskStatus, text string, domain string) rowCell {
+	return statusCellForWork(th, st, text, domain, "")
+}
+
+func statusCellForWork(th rowTheme, st TaskStatus, text string, domain, workType string) rowCell {
 	var s lipgloss.Style
 	switch st {
 	case TaskActive:
@@ -391,11 +399,13 @@ func statusCellFor(th rowTheme, st TaskStatus, text string, domain string) rowCe
 	case TaskCompleted:
 		switch domain {
 		case "GOV":
-			s = lipgloss.NewStyle().Bold(true).Foreground(cGov)
+			if strings.EqualFold(workType, "PRACTICE") {
+				s = lipgloss.NewStyle().Bold(true).Foreground(cGovPractice)
+			} else {
+				s = lipgloss.NewStyle().Bold(true).Foreground(cGov)
+			}
 		case "DSA":
 			s = lipgloss.NewStyle().Bold(true).Foreground(cDSA)
-		case "SWE":
-			s = lipgloss.NewStyle().Bold(true).Foreground(cSWE)
 		default:
 			s = lipgloss.NewStyle().Bold(true).Foreground(cSuccess)
 		}
@@ -781,10 +791,10 @@ func (r TodayTaskRow) View() string {
 		du := at(durLines, li, durW)
 		sl := at(stLines, li, stW)
 		domCell := rowCell{dl, th.main}
-		if r.Domain == "GOV" || r.Domain == "DSA" || r.Domain == "SWE" {
-			domCell = th.domain(r.Domain, dl)
+		if r.Domain == "GOV" || r.Domain == "DSA" {
+			domCell = th.domainForWork(r.Domain, r.Typ, dl)
 		}
-		statusCell := statusCellFor(th, r.Status, sl, r.Domain)
+		statusCell := statusCellForWork(th, r.Status, sl, r.Domain, r.Typ)
 		out := paintCells(
 			rowCell{lead, th.edge},
 			rowCell{nl, th.main},
@@ -1140,7 +1150,7 @@ func joinPlus(xs []string) string { return strings.Join(xs, " + ") }
 // (TodayTask domain/kind plus domain target metadata); no storage change.
 //
 // TYPE has exactly two values: LECTURE or PRACTICE. AREA is the subject/
-// pattern/area, TASK is the description. DSA/SWE bundles map their legacy
+// pattern/area, TASK is the description. DSA bundles map their legacy
 // kinds to PRACTICE but display LECTURE when the task kind is LECTURE, so
 // all tracks support both work types.
 func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
@@ -1178,34 +1188,13 @@ func TaskColumns(task db.TodayTask, b Bundle) (area, typ, label string) {
 			area = "Mixed"
 		}
 		return area, workTypeForTask(task), joinPlus(titles)
-	case len(b.SWE) > 0:
-		area := SWEDisplayName(b.SWE[0].Area)
-		names := make([]string, 0, len(b.SWE))
-		for _, sw := range b.SWE {
-			names = append(names, SWEDisplayName(sw.Area))
-		}
-		if len(b.SWE) > 1 {
-			seen := map[string]bool{}
-			var uniq []string
-			for _, sw := range b.SWE {
-				disp := SWEDisplayName(sw.Area)
-				if !seen[disp] {
-					seen[disp] = true
-					uniq = append(uniq, disp)
-				}
-			}
-			if len(uniq) > 1 {
-				area = "Mixed"
-			}
-		}
-		return area, workTypeForTask(task), joinPlus(names)
 	default:
 		return "—", workTypeForTask(task), task.Title
 	}
 }
 
 // workTypeForTask maps a task to its LECTURE/PRACTICE work type. GOV is
-// decided by the bundle above; DSA/SWE legacy kinds (DSA/SWE) map to
+// decided by the bundle above; DSA legacy kinds (DSA) map to
 // PRACTICE while explicit LECTURE/PRACTICE kinds display as-is, so every
 // track supports both types without new TYPE values.
 func workTypeForTask(task db.TodayTask) string {
@@ -1215,7 +1204,7 @@ func workTypeForTask(task db.TodayTask) string {
 	if task.Kind == db.SessionKindPractice {
 		return "PRACTICE"
 	}
-	// Legacy DSA/SWE kinds are practice-like work.
+	// Legacy DSA kinds are practice-like work.
 	return "PRACTICE"
 }
 
@@ -1276,11 +1265,11 @@ func (t TodayTaskTable) rowBlock(i, numW, domW, areaW, typW, taskW, durW, stW, w
 	// First-line domain accent; continuation domain stays blank (aligned).
 	firstDom := at(domLines, 0, domW)
 	domCellFirst := rowCell{text: firstDom, style: th.main}
-	if string(task.Domain) == "GOV" || string(task.Domain) == "DSA" || string(task.Domain) == "SWE" {
-		domCellFirst = th.domain(string(task.Domain), firstDom)
+	if string(task.Domain) == "GOV" || string(task.Domain) == "DSA" {
+		domCellFirst = th.domainForWork(string(task.Domain), typ, firstDom)
 	}
 	firstStatus := at(stCellLines, 0, stW)
-	statusFirst := statusCellFor(th, st, firstStatus, string(task.Domain))
+	statusFirst := statusCellForWork(th, st, firstStatus, string(task.Domain), typ)
 	gap := rowCell{"  ", th.gap}
 	blank := func(n int) rowCell {
 		if n < 0 {

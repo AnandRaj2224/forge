@@ -2,7 +2,6 @@ package engine_test
 
 import (
 	"context"
-	"errors"
 	"math"
 	"testing"
 	"time"
@@ -59,38 +58,6 @@ func TestParseAvgSpeedRejectNaNInf(t *testing.T) {
 	}
 }
 
-// SWE area targets validate and start/stop as time blocks (no evidence).
-func TestSWEAreaTargetCoherent(t *testing.T) {
-	d := openEngineDB(t)
-	ctx := context.Background()
-	seedSWE(t, ctx, d)
-	now := time.Now()
-	raw, _ := db.MarshalTarget(db.SWETarget{AreaID: "area-go"})
-	st, _ := db.UnmarshalSWETarget(raw)
-	if err := engine.ValidateSWETarget(ctx, d, st); err != nil {
-		t.Fatalf("area target must validate: %v", err)
-	}
-	mkTask(t, ctx, d, "swe-area", "2026-09-20", db.DomainSWE, db.SessionKindSWE, raw)
-	sess, err := engine.StartTodayTask(ctx, d, "swe-area", now)
-	if err != nil {
-		t.Fatalf("area start failed: %v", err)
-	}
-	closed, err := engine.StopActiveSession(ctx, d, now.Add(time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if closed.ElapsedSeconds() != 3600 {
-		t.Fatalf("elapsed=%d want 3600", closed.ElapsedSeconds())
-	}
-	if sess.ID != closed.ID {
-		t.Fatal("stop must close the same session")
-	}
-	// Unknown area rejects.
-	if err := engine.ValidateSWETarget(ctx, d, db.SWETarget{AreaID: "no-area"}); !errors.Is(err, engine.ErrInvalidTarget) {
-		t.Fatalf("unknown area must be ErrInvalidTarget, got %v", err)
-	}
-}
-
 // Batch lecture completion map must match single-lecture logic.
 func TestLectureCompletionMapMatches(t *testing.T) {
 	d := openEngineDB(t)
@@ -127,12 +94,6 @@ func TestLectureCompletionMapMatches(t *testing.T) {
 	// Empty input stays empty without a query error.
 	if got, err := runtime.GetLectureCompletionMap(ctx, d, nil); err != nil || len(got) != 0 {
 		t.Fatalf("empty map=%v err=%v", got, err)
-	}
-	// No SWE task tables exist in the time-allocation model.
-	var name string
-	err = d.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name IN ('swe_tasks','swe_executions')`).Scan(&name)
-	if err == nil {
-		t.Fatalf("task-dependent SWE table %q must not exist", name)
 	}
 	_ = catalog.GetGovSubjects
 }

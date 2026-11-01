@@ -398,7 +398,6 @@ func TestExamWisePracticeRespectsMembership(t *testing.T) {
 		t.Fatalf("current=%q want IBPS SO IT", got)
 	}
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {
 		t.Fatal(err)
@@ -423,7 +422,6 @@ func TestExamWisePracticeRespectsMembership(t *testing.T) {
 	d2 := openEngineDB(t)
 	seedExamWise(t, ctx, d2)
 	seedDSA(t, ctx, d2)
-	seedSWE(t, ctx, d2)
 	_, tasks2, err := engine.GenerateToday(ctx, d2, "2026-09-21", now)
 	if err != nil {
 		t.Fatal(err)
@@ -465,7 +463,6 @@ func TestExamWiseFixedSlotSkipsNonMembers(t *testing.T) {
 		completeExamLecture(t, ctx, d, l, now)
 	}
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {
 		t.Fatal(err)
@@ -506,7 +503,6 @@ func TestExamWiseAllCompleteNoWork(t *testing.T) {
 		t.Fatalf("subjects=%v want none", subs)
 	}
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {
 		t.Fatal(err)
@@ -517,7 +513,7 @@ func TestExamWiseAllCompleteNoWork(t *testing.T) {
 		}
 	}
 	if len(tasks) == 0 {
-		t.Fatal("DSA/SWE blocks must still generate")
+		t.Fatal("DSA blocks must still generate")
 	}
 }
 
@@ -528,7 +524,6 @@ func TestExamWiseTodayServesCurrentExam(t *testing.T) {
 	ctx := context.Background()
 	seedExamWise(t, ctx, d)
 	seedDSA(t, ctx, d)
-	seedSWE(t, ctx, d)
 	now := time.Now()
 	_, tasks, err := engine.GenerateToday(ctx, d, "2026-09-21", now)
 	if err != nil {

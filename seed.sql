@@ -3665,32 +3665,6 @@ INSERT INTO dsa_problems (id, title, pattern, difficulty, sort_order) VALUES ('d
 INSERT INTO dsa_problems (id, title, pattern, difficulty, sort_order) VALUES ('dsa-250', 'Minimum Array End', 'Bit Manipulation', 'Medium', 250);
 INSERT INTO dsa_routine (id, planned_seconds) VALUES (1, 9000);
 
--- SWE areas and weekly routine --
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-golang', 'golang', 1);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-project-sentinel', 'Project — Sentinel', 2);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-docker', 'docker', 3);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-postgres-sql', 'postgres/sql', 4);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-dbms', 'DBMS', 5);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-project-agentbox', 'Project — AgentBox', 6);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-grafana-and-prometheus', 'grafana and prometheus', 7);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-computer-networks', 'Computer networks', 8);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-ci-cd-github-actions', 'CI/CD(github actions)', 9);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-bash', 'bash', 10);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-operating-systems', 'Operating systems', 11);
-INSERT INTO swe_areas (id, name, sort_order) VALUES ('swe-area-linux-arch-my-own-setup', 'linux(arch) + my own setup', 12);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-1-00', 1, 0, 'swe-area-golang', 7200);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-2-00', 2, 0, 'swe-area-project-sentinel', 5400);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-2-01', 2, 1, 'swe-area-docker', 1800);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-3-00', 3, 0, 'swe-area-postgres-sql', 5400);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-3-01', 3, 1, 'swe-area-dbms', 1800);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-4-00', 4, 0, 'swe-area-project-agentbox', 5400);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-4-01', 4, 1, 'swe-area-grafana-and-prometheus', 1800);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-5-00', 5, 0, 'swe-area-computer-networks', 7200);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-6-00', 6, 0, 'swe-area-ci-cd-github-actions', 3600);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-6-01', 6, 1, 'swe-area-bash', 3600);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-7-00', 7, 0, 'swe-area-operating-systems', 3600);
-INSERT INTO swe_routine_slots (id, weekday, position, area_id, duration_seconds) VALUES ('swe-slot-7-01', 7, 1, 'swe-area-linux-arch-my-own-setup', 3600);
-
 -- Quotes --
 INSERT INTO quotes (id, quote, author, used) VALUES (1, 'A house divided against itself cannot stand.', 'Abraham Lincoln', 0);
 INSERT INTO quotes (id, quote, author, used) VALUES (2, 'Important principles may, and must, be inflexible.', 'Abraham Lincoln', 0);

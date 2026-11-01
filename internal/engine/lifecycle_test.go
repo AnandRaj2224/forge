@@ -1,7 +1,7 @@
 package engine_test
 
 // Full lifecycle row audit: start → stop → save → restart → complete,
-// across GOV/DSA/SWE, plus mock creation and review persistence. Asserts
+// across GOV/DSA, plus mock creation and review persistence. Asserts
 // the persisted rows (not just engine return values) and FK cleanliness.
 
 import (
@@ -74,13 +74,6 @@ func seedLifecycle(t *testing.T, ctx context.Context, d *db.DB) {
 		}
 	}
 	if err := catalog.UpsertDSARoutine(ctx, d, db.DSARoutine{ID: 1, PlannedSeconds: 9000}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.InsertSWEArea(ctx, d, db.SWEArea{ID: "area-go", Name: "Go", SortOrder: 1}); err != nil {
-		t.Fatal(err)
-	}
-	// Monday routine (2026-09-21 is a Monday).
-	if err := catalog.InsertSWERoutineSlot(ctx, d, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 0, AreaID: "area-go", DurationSeconds: 3600}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -229,38 +222,7 @@ func TestFullLifecycleRowAudit(t *testing.T) {
 		t.Fatal("repeat state must persist")
 	}
 
-	// 5. SWE blocks start/stop as normal sessions; stopping records time.
-	// No evidence form exists.
-	for _, tk := range tasks {
-		if tk.Domain != db.DomainSWE {
-			continue
-		}
-		sw, err := engine.StartTodayTask(ctx, d, tk.ID, now.Add(110*time.Minute))
-		if err != nil {
-			t.Fatal(err)
-		}
-		closed, err := engine.StopActiveSession(ctx, d, now.Add(120*time.Minute))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if closed.ID != sw.ID {
-			t.Fatal("stop must close the SWE session")
-		}
-		if closed.ElapsedSeconds() != 600 {
-			t.Fatalf("SWE elapsed=%d want 600", closed.ElapsedSeconds())
-		}
-		// SWE stays TODO by design (time allocation, not progression).
-		ev, err := engine.EvaluateTodayTask(ctx, d, tk.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if ev.State != engine.StateTodo {
-			t.Fatalf("SWE must stay TODO, got %s", ev.State)
-		}
-		break // one block suffices for the lifecycle audit
-	}
-
-	// 6. Mock creation is atomic with explicit subject mapping.
+	// 5. Mock creation is atomic with explicit subject mapping.
 	score := 72
 	total := 100
 	mk := db.Mock{ID: "mock-1", ExamID: "exam-1", Name: "M1", MockDate: "2026-09-21", CreatedAt: now, Score: &score, TotalScore: &total}

@@ -72,8 +72,6 @@ func seedFlowDB(t *testing.T) *db.DB {
 	_ = catalog.InsertGovExam(ctx, database, db.GovExam{ID: "exam-sbi", Name: "SBI Clerk", SortOrder: 1})
 	_ = catalog.InsertGovExamSyllabus(ctx, database, db.GovExamSyllabus{ExamID: "exam-sbi", TopicID: "topic-a", SortOrder: 1})
 	_ = catalog.InsertDSAProblem(ctx, database, db.DSAProblem{ID: "dsa-1", Title: "Two Sum", Pattern: "Hash Map", Difficulty: "EASY", SortOrder: 1})
-	_ = catalog.InsertSWEArea(ctx, database, db.SWEArea{ID: "area-go", Name: "Go", SortOrder: 1})
-	_ = catalog.InsertSWERoutineSlot(ctx, database, db.SWERoutineSlot{ID: "mon-1", Weekday: 1, Position: 1, AreaID: "area-go", DurationSeconds: 3600})
 	_ = runtime.CreateTodaySnapshot(ctx, database, db.TodaySnapshot{ID: "snap1", LocalDate: "2026-09-20", Revision: 1, GeneratedAt: now})
 	lec, _ := db.MarshalTarget(db.GovLectureTarget{SubjectID: "subj-quant", TopicID: "topic-a", LectureID: "lec-a"})
 	prac, _ := db.MarshalTarget(db.GovPracticeTarget{SubjectID: "subj-quant", TopicIDs: []db.ID{"topic-a", "topic-b"}})
@@ -215,7 +213,7 @@ func TestWorkspacesFitViewport(t *testing.T) {
 	fakes := []string{"[ START SESSION ]", "[ STOP SESSION ]", "[ SAVE ]", "[ YES ] [ NO ]", "1:TODAY", "EXAMS (tab:"}
 	for _, size := range [][2]int{{120, 36}, {70, 24}} {
 		app.width, app.height = size[0], size[1]
-		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {
+		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabReviews} {
 			app.goTab(tab)
 			view := app.View().Content
 			for _, line := range strings.Split(view, "\n") {
@@ -230,10 +228,10 @@ func TestWorkspacesFitViewport(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"ACTIVE SESSION", "SELECTED TASK", "SYLLABUS COVERAGE", "PATTERNS", "SWE ROUTINE", "WEEKLY REPORT"} {
+	for _, want := range []string{"ACTIVE SESSION", "SELECTED TASK", "SYLLABUS COVERAGE", "PATTERNS", "WEEKLY REPORT"} {
 		found := false
 		app.width, app.height = 140, 40
-		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabReviews} {
+		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabReviews} {
 			app.goTab(tab)
 			if strings.Contains(app.View().Content, want) {
 				found = true
@@ -255,7 +253,7 @@ func TestGlobalFooterAndColumns(t *testing.T) {
 		app := newFlowApp(t)
 		app.width, app.height = w, h
 		var ref string
-		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabSWE, TabMocks, TabHistory, TabReviews} {
+		for _, tab := range []TopTab{TabToday, TabGOV, TabDSA, TabMocks, TabHistory, TabReviews} {
 			app.goTab(tab)
 			view := app.View().Content
 			for i, ln := range strings.Split(view, "\n") {
